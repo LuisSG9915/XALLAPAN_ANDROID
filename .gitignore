@@ -152,9 +152,6 @@ jspm_packages/
 # TernJS port file
 .tern-port
 
-# Patch files
-patches/
-
 # Lock files (keep package.json and package-lock.json)
 # yarn.lock
 # pnpm-lock.yaml
