@@ -35,11 +35,6 @@ local.properties
 !debug.keystore
 
 # Ignore entire Android directory (except specific files we might need)
-android/
-!android/app/build.gradle
-!android/app/proguard-rules.pro
-!android/app/src/main/AndroidManifest.xml
-
 # Ignore vendor directory
 vendor/
 
