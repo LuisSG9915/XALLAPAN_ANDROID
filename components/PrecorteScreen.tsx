@@ -68,16 +68,41 @@ export default function PrecorteScreen() {
         return d >= startOfDay && d <= endOfDay;
       });
       consoleRealm('inventarioFiltrado', inventarioFiltrado);
-      const mapped: PrecorteItem[] = inventarioFiltrado.map(
-        (inv: any, index: number) => ({
-          id: inv.id ?? index,
-          clave_prod: String(inv.claveProd ?? ''),
-          descripcion:
-            (inv.descripcion as string | undefined) ??
-            String(inv.claveProd ?? ''),
+
+      // Agrupar por claveProd y sumar saldos
+      const groupedByClave = inventarioFiltrado.reduce((acc: any, inv: any) => {
+        const clave = String(inv.claveProd ?? '');
+        const saldo = inv.saldo ?? 0;
+
+        if (!acc[clave]) {
+          acc[clave] = {
+            clave_prod: clave,
+            descripcion: (inv.descripcion as string | undefined) ?? clave,
+            saldoTotal: 0,
+            count: 0,
+          };
+        }
+
+        acc[clave].saldoTotal += saldo;
+        acc[clave].count++;
+
+        return acc;
+      }, {});
+
+      console.log(
+        '📊 Inventario agrupado por clave:',
+        Object.keys(groupedByClave).length,
+        'productos únicos',
+      );
+
+      const mapped: PrecorteItem[] = Object.values(groupedByClave).map(
+        (item: any) => ({
+          id: parseInt(item.clave_prod), // Usar claveProd como ID
+          clave_prod: item.clave_prod,
+          descripcion: item.descripcion,
           entradas: 0,
           salidas: 0,
-          ifValue: inv.saldo ?? 0,
+          ifValue: item.saldoTotal, // Saldo sumado y ajustado
         }),
       );
 

@@ -14,7 +14,7 @@ export type SyncProgressCallback = (progress: SyncProgress) => void;
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
-  private apiBaseUrl = 'https://cbinfo.no-ip.info:9011';
+  private apiBaseUrl = 'https://cbinfo.no-ip.info:9031';
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -49,8 +49,12 @@ class FullSyncService {
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
   ): Promise<{ success: boolean; error?: string }> {
+    console.log('🚀 Iniciando sincronización completa para sucursal:', sucursal);
+    
     if (!this.isInitialized) {
+      console.log('📦 Inicializando Realm...');
       await this.initialize();
+      console.log('✅ Realm inicializado');
     }
 
     const syncTasks = [
@@ -67,8 +71,11 @@ class FullSyncService {
     let current = 0;
 
     try {
+      console.log(`📋 Iniciando ${total} tareas de sincronización`);
+      
       for (const task of syncTasks) {
         current++;
+        console.log(`🔄 [${current}/${total}] Iniciando sincronización de ${task.name}`);
 
         if (onProgress) {
           onProgress({
@@ -80,9 +87,19 @@ class FullSyncService {
           });
         }
 
+        const startTime = Date.now();
         const result = await task.fn();
+        const duration = Date.now() - startTime;
+        
+        console.log(`⏱️ ${task.name} completado en ${duration}ms`);
 
         if (!result.success) {
+          console.error(`❌ ERROR CRÍTICO en ${task.name}:`, {
+            error: result.error,
+            duration: `${duration}ms`,
+            step: `${current}/${total}`
+          });
+          
           if (onProgress) {
             onProgress({
               current,
@@ -94,6 +111,12 @@ class FullSyncService {
           }
           console.warn(`⚠️ Error al sincronizar ${task.name}:`, result.error);
         } else {
+          console.log(`✅ ${task.name} sincronizado exitosamente:`, {
+            registros: result.count || 0,
+            duration: `${duration}ms`,
+            step: `${current}/${total}`
+          });
+          
           if (onProgress) {
             onProgress({
               current,
@@ -123,7 +146,12 @@ class FullSyncService {
 
       return { success: true };
     } catch (error: any) {
-      console.error('❌ Error durante la sincronización completa:', error);
+      console.error('❌ ERROR GENERAL durante la sincronización completa:', {
+        error: error?.message,
+        stack: error?.stack,
+        currentTask: syncTasks[current - 1]?.name || 'Desconocida',
+        progress: `${current}/${total}`
+      });
 
       if (onProgress) {
         onProgress({
@@ -142,22 +170,40 @@ class FullSyncService {
   private async syncVentas(
     sucursal: number,
   ): Promise<{ success: boolean; error?: string; count?: number }> {
+    console.log('📊 Iniciando syncVentas para sucursal:', sucursal);
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/ventas-full/${sucursal}`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas-full/${sucursal}`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncVentas:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncVentas:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncVentas:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
       const localIdThreshold = Date.now();
+      console.log('🗑️ Limpiando ventas anteriores de sucursal:', sucursal);
 
       this.realm!.write(() => {
         // Limpiar ventas anteriores de esta sucursal (solo ids "normales")
@@ -166,36 +212,58 @@ class FullSyncService {
           sucursal,
           localIdThreshold,
         );
+        console.log('🗑️ Ventas a eliminar:', existingVentas.length);
         this.realm!.delete(existingVentas);
 
         // Insertar nuevas ventas
-        data.forEach((venta: any) => {
-          this.realm!.create('Venta', {
-            id: venta.id,
-            sucursal: venta.sucursal,
-            noVenta: venta.noVenta,
-            claveProd: venta.claveProd,
-            nombreProducto: venta.nombreProducto,
-            cantProducto: venta.cantProducto,
-            precio: venta.precio,
-            importe: venta.importe,
-            cveCliente: venta.cveCliente,
-            nombreCliente: venta.nombreCliente,
-            fecha: venta.fecha ? new Date(venta.fecha) : null,
-            tipoPago: venta.tipoPago,
-            descripcionMedioPago: venta.descripcionMedioPago,
-            vendedor: venta.vendedor,
-            folioFactura: venta.folioFactura ?? false,
-            facturacionMovil: venta.facturacionMovil ?? false,
-            syncedAt: new Date(),
-          });
+        console.log('💾 Insertando', data.length, 'nuevas ventas');
+        let insertCount = 0;
+        let errorCount = 0;
+        
+        data.forEach((venta: any, index: number) => {
+          try {
+            this.realm!.create('Venta', {
+              id: venta.id,
+              sucursal: venta.sucursal,
+              noVenta: venta.noVenta,
+              claveProd: venta.claveProd,
+              nombreProducto: venta.nombreProducto,
+              cantProducto: venta.cantProducto,
+              precio: venta.precio,
+              importe: venta.importe,
+              cveCliente: venta.cveCliente,
+              nombreCliente: venta.nombreCliente,
+              fecha: venta.fecha ? new Date(venta.fecha) : null,
+              tipoPago: venta.tipoPago,
+              descripcionMedioPago: venta.descripcionMedioPago,
+              vendedor: venta.vendedor,
+              folioFactura: venta.folioFactura ?? false,
+              facturacionMovil: venta.facturacionMovil ?? false,
+              syncedAt: new Date(),
+            });
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando venta', index, ':', err, venta);
+            errorCount++;
+          }
+        });
+        
+        console.log('📊 Resultado inserción ventas:', {
+          insertadas: insertCount,
+          errores: errorCount,
+          total: data.length
         });
       });
 
       console.log(`✅ Ventas sincronizadas: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar ventas:', error);
+      console.error('❌ ERROR CRÍTICO en syncVentas:', {
+        message: error?.message,
+        stack: error?.stack,
+        sucursal,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -205,46 +273,83 @@ class FullSyncService {
     error?: string;
     count?: number;
   }> {
+    console.log('👥 Iniciando syncUsuarios');
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/usuarios-full`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncUsuarios:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncUsuarios:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncUsuarios:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncUsuarios:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
+      console.log('💾 Insertando', data.length, 'usuarios en Realm');
+      let insertCount = 0;
+      let errorCount = 0;
+      
       this.realm!.write(() => {
-        data.forEach((usuario: any) => {
-          this.realm!.create(
-            'Usuario',
-            {
-              id: usuario.id,
-              nombre: usuario.nombre,
-              perfil: usuario.perfil,
-              descripcionPerfil: usuario.descripcionPerfil,
-              puesto: usuario.puesto,
-              descripcionPuesto: usuario.descripcionPuesto,
-              claveEmpleado: usuario.claveEmpleado,
-              password: usuario.password,
-              sucursalOrigen: usuario.sucursalOrigen,
-              syncedAt: new Date(),
-            },
-            UpdateMode.Modified,
-          );
+        data.forEach((usuario: any, index: number) => {
+          try {
+            this.realm!.create(
+              'Usuario',
+              {
+                id: usuario.id,
+                nombre: usuario.nombre,
+                perfil: usuario.perfil,
+                descripcionPerfil: usuario.descripcionPerfil,
+                puesto: usuario.puesto,
+                descripcionPuesto: usuario.descripcionPuesto,
+                claveEmpleado: usuario.claveEmpleado,
+                password: usuario.password,
+                sucursalOrigen: usuario.sucursalOrigen,
+                syncedAt: new Date(),
+              },
+              UpdateMode.Modified,
+            );
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando usuario', index, ':', err, usuario);
+            errorCount++;
+          }
         });
+      });
+      
+      console.log('📊 Resultado inserción usuarios:', {
+        insertados: insertCount,
+        errores: errorCount,
+        total: data.length
       });
 
       console.log(`✅ Usuarios sincronizados: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar usuarios:', error);
+      console.error('❌ ERROR CRÍTICO en syncUsuarios:', {
+        message: error?.message,
+        stack: error?.stack,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -254,42 +359,79 @@ class FullSyncService {
     error?: string;
     count?: number;
   }> {
+    console.log('📦 Iniciando syncProductos');
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/productos-full`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncProductos:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncProductos:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncProductos:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncProductos:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
+      console.log('💾 Insertando', data.length, 'productos en Realm');
+      let insertCount = 0;
+      let errorCount = 0;
+      
       this.realm!.write(() => {
-        data.forEach((producto: any) => {
-          this.realm!.create(
-            'Producto',
-            {
-              id: producto.id,
-              claveProd: producto.claveProd,
-              descripcion: producto.descripcion,
-              esKit: producto.esKit ?? false,
-              fechaAct: producto.fechaAct ? new Date(producto.fechaAct) : null,
-              syncedAt: new Date(),
-            },
-            UpdateMode.Modified,
-          );
+        data.forEach((producto: any, index: number) => {
+          try {
+            this.realm!.create(
+              'Producto',
+              {
+                id: producto.id,
+                claveProd: producto.claveProd,
+                descripcion: producto.descripcion,
+                esKit: producto.esKit ?? false,
+                fechaAct: producto.fechaAct ? new Date(producto.fechaAct) : null,
+                syncedAt: new Date(),
+              },
+              UpdateMode.Modified,
+            );
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando producto', index, ':', err, producto);
+            errorCount++;
+          }
         });
+      });
+      
+      console.log('📊 Resultado inserción productos:', {
+        insertados: insertCount,
+        errores: errorCount,
+        total: data.length
       });
 
       console.log(`✅ Productos sincronizados: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar productos:', error);
+      console.error('❌ ERROR CRÍTICO en syncProductos:', {
+        message: error?.message,
+        stack: error?.stack,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -299,43 +441,80 @@ class FullSyncService {
     error?: string;
     count?: number;
   }> {
+    console.log('💰 Iniciando syncPrecios');
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/precios-full`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/precios/full`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncPrecios:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncPrecios:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncPrecios:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncPrecios:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
+      console.log('💾 Insertando', data.length, 'precios en Realm');
+      let insertCount = 0;
+      let errorCount = 0;
+      
       this.realm!.write(() => {
-        data.forEach((precio: any) => {
-          this.realm!.create(
-            'Precio',
-            {
-              id: String(precio.id),
-              descripcion: precio.descripcion,
-              idCliente: precio.idCliente,
-              claveProd: precio.claveProd,
-              precio: precio.precio,
-              fechaAct: precio.fechaAct ? new Date(precio.fechaAct) : null,
-              syncedAt: new Date(),
-            },
-            UpdateMode.Modified,
-          );
+        data.forEach((precio: any, index: number) => {
+          try {
+            this.realm!.create(
+              'Precio',
+              {
+                id: String(precio.id),
+                descripcion: precio.descripcion,
+                idCliente: precio.idCliente,
+                claveProd: precio.claveProd,
+                precio: precio.precio,
+                fechaAct: precio.fechaAct ? new Date(precio.fechaAct) : null,
+                syncedAt: new Date(),
+              },
+              UpdateMode.Modified,
+            );
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando precio', index, ':', err, precio);
+            errorCount++;
+          }
         });
+      });
+      
+      console.log('📊 Resultado inserción precios:', {
+        insertados: insertCount,
+        errores: errorCount,
+        total: data.length
       });
 
       console.log(`✅ Precios sincronizados: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar precios:', error);
+      console.error('❌ ERROR CRÍTICO en syncPrecios:', {
+        message: error?.message,
+        stack: error?.stack,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -344,6 +523,8 @@ class FullSyncService {
     sucursal: number,
     fechaMovto?: string,
   ): Promise<{ success: boolean; error?: string; count?: number }> {
+    console.log('📋 Iniciando syncInventario para sucursal:', sucursal, 'fecha:', fechaMovto);
+    
     try {
       // Si no se proporciona fecha, usar fecha LOCAL (YYYY-MM-DD) del dispositivo
       const effectiveFechaMovto =
@@ -355,23 +536,42 @@ class FullSyncService {
           const dd = String(now.getDate()).padStart(2, '0');
           return `${yyyy}-${mm}-${dd}`;
         })();
+      
+      console.log('📅 Fecha efectiva para inventario:', effectiveFechaMovto);
 
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/inventario-erp-movil/${sucursal}?fechaMovto=${effectiveFechaMovto}`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${sucursal}&fechaMovto=${effectiveFechaMovto}`;
+      console.log(effectiveFechaMovto)
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncInventario:', response.status, response.statusText);
+      
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncInventario:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
-
-      console.log(data);
+      console.log('📋 Datos recibidos en syncInventario:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
+      
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncInventario:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
       const localIdThreshold = Date.now();
       const unsyncedSentinel = new Date(0);
+      console.log('🗑️ Limpiando inventario anterior');
 
       this.realm!.write(() => {
         // Limpiar inventario anterior de TODAS las sucursales.
@@ -386,28 +586,50 @@ class FullSyncService {
           localIdThreshold,
           unsyncedSentinel,
         );
+        console.log('🗑️ Registros de inventario a eliminar:', existingInventario.length);
         this.realm!.delete(existingInventario);
 
         // Insertar nuevo inventario
-        data.forEach((inventario: any) => {
-          this.realm!.create('Inventario', {
-            id: inventario.id,
-            sucursal: inventario.sucursal,
-            claveProd: inventario.claveProd,
-            fechaArrastre: inventario.fechaArrastre
-              ? new Date(inventario.fechaArrastre)
-              : null,
-            saldo: inventario.saldo,
-            descripcion: inventario.descripcion ?? null,
-            syncedAt: new Date(),
-          });
+        console.log('💾 Insertando', data.length, 'nuevos registros de inventario');
+        let insertCount = 0;
+        let errorCount = 0;
+        
+        data.forEach((inventario: any, index: number) => {
+          try {
+            this.realm!.create('Inventario', {
+              id: inventario.id,
+              sucursal: inventario.sucursal,
+              claveProd: inventario.claveProd,
+              fechaArrastre: inventario.fechaArrastre
+                ? new Date(inventario.fechaArrastre)
+                : null,
+              saldo: inventario.saldo,
+              descripcion: inventario.descripcion ?? null,
+              syncedAt: new Date(),
+            });
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando inventario', index, ':', err, inventario);
+            errorCount++;
+          }
+        });
+        
+        console.log('📊 Resultado inserción inventario:', {
+          insertados: insertCount,
+          errores: errorCount,
+          total: data.length
         });
       });
 
       console.log(`✅ Inventario sincronizado: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar inventario:', error);
+      console.error('❌ ERROR CRÍTICO en syncInventario:', {
+        message: error?.message,
+        stack: error?.stack,
+        sucursal,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -417,46 +639,83 @@ class FullSyncService {
     error?: string;
     count?: number;
   }> {
+    console.log('💳 Iniciando syncCartera');
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/cartera-full`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera/full`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncCartera:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncCartera:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncCartera:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncCartera:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
+      console.log('💾 Insertando', data.length, 'registros de cartera en Realm');
+      let insertCount = 0;
+      let errorCount = 0;
+      
       this.realm!.write(() => {
-        data.forEach((cartera: any) => {
-          this.realm!.create(
-            'Cartera',
-            {
-              id: cartera.id,
-              idCliente: cartera.idCliente,
-              nombreCliente: cartera.nombreCliente,
-              sucursal: cartera.sucursal,
-              sucursalSegmento: cartera.sucursalSegmento,
-              saldo: cartera.saldo,
-              fecha: cartera.fecha ? new Date(cartera.fecha) : null,
-              idSegmento: cartera.idSegmento,
-              noVenta: cartera.noVenta,
-              syncedAt: new Date(),
-            },
-            UpdateMode.Modified,
-          );
+        data.forEach((cartera: any, index: number) => {
+          try {
+            this.realm!.create(
+              'Cartera',
+              {
+                id: cartera.id,
+                idCliente: cartera.idCliente,
+                nombreCliente: cartera.nombreCliente,
+                sucursal: cartera.sucursal,
+                sucursalSegmento: cartera.sucursalSegmento,
+                saldo: cartera.saldo,
+                fecha: cartera.fecha ? new Date(cartera.fecha) : null,
+                idSegmento: cartera.idSegmento,
+                noVenta: cartera.noVenta,
+                syncedAt: new Date(),
+              },
+              UpdateMode.Modified,
+            );
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando cartera', index, ':', err, cartera);
+            errorCount++;
+          }
         });
+      });
+      
+      console.log('📊 Resultado inserción cartera:', {
+        insertados: insertCount,
+        errores: errorCount,
+        total: data.length
       });
 
       console.log(`✅ Cartera sincronizada: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar cartera:', error);
+      console.error('❌ ERROR CRÍTICO en syncCartera:', {
+        message: error?.message,
+        stack: error?.stack,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }
@@ -466,45 +725,82 @@ class FullSyncService {
     error?: string;
     count?: number;
   }> {
+    console.log('👤 Iniciando syncClientesFull');
+    
     try {
-      const response = await fetch(
-        `${this.apiBaseUrl}/api/MovilesVentas/clientes-full`,
-      );
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full`;
+      console.log('🌐 Haciendo request a:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status syncClientesFull:', response.status, response.statusText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error HTTP en syncClientesFull:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('📋 Datos recibidos en syncClientesFull:', {
+        type: typeof data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'N/A',
+        preview: Array.isArray(data) ? data.slice(0, 2) : data
+      });
 
       if (!Array.isArray(data)) {
+        console.error('❌ Formato de datos inválido en syncClientesFull:', data);
         throw new Error('Respuesta inválida del servidor');
       }
 
+      console.log('💾 Insertando', data.length, 'clientes en Realm');
+      let insertCount = 0;
+      let errorCount = 0;
+      
       this.realm!.write(() => {
-        data.forEach((cliente: any) => {
-          this.realm!.create(
-            'ClienteFull',
-            {
-              id: cliente.id,
-              nombre: cliente.nombre,
-              longitud: cliente.longitud ?? 0,
-              latitud: cliente.latitud ?? 0,
-              idGrupo: cliente.idGrupo,
-              credito: cliente.credito ?? false,
-              facturacionMovil: cliente.facturacionMovil ?? false,
-              fechaAct: cliente.fechaAct ? new Date(cliente.fechaAct) : null,
-              syncedAt: new Date(),
-            },
-            UpdateMode.Modified,
-          );
+        data.forEach((cliente: any, index: number) => {
+          try {
+            this.realm!.create(
+              'ClienteFull',
+              {
+                id: cliente.id,
+                nombre: cliente.nombre,
+                longitud: cliente.longitud ?? 0,
+                latitud: cliente.latitud ?? 0,
+                idGrupo: cliente.idGrupo,
+                credito: cliente.credito ?? false,
+                facturacionMovil: cliente.facturacionMovil ?? false,
+                fechaAct: cliente.fechaAct ? new Date(cliente.fechaAct) : null,
+                syncedAt: new Date(),
+              },
+              UpdateMode.Modified,
+            );
+            insertCount++;
+          } catch (err) {
+            console.error('❌ Error insertando cliente', index, ':', err, cliente);
+            errorCount++;
+          }
         });
+      });
+      
+      console.log('📊 Resultado inserción clientes:', {
+        insertados: insertCount,
+        errores: errorCount,
+        total: data.length
       });
 
       console.log(`✅ Clientes sincronizados: ${data.length} registros`);
       return { success: true, count: data.length };
     } catch (error: any) {
-      console.error('❌ Error al sincronizar clientes:', error);
+      console.error('❌ ERROR CRÍTICO en syncClientesFull:', {
+        message: error?.message,
+        stack: error?.stack,
+        apiBaseUrl: this.apiBaseUrl
+      });
       return { success: false, error: error?.message };
     }
   }

@@ -7,6 +7,7 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import BluetoothPrinterService, {
@@ -130,7 +131,10 @@ export default function PrinterSettingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: SPACING.l }}
+    >
       <Text style={styles.title}>Configuración de Impresora</Text>
 
       {/* Estado Actual */}
@@ -239,14 +243,7 @@ export default function PrinterSettingsScreen() {
 
       {/* Buscar Impresoras */}
       <View style={styles.card}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            marginBottom: 16,
-          }}
-        >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Icon
             name="bluetooth-searching"
             type="material"
@@ -282,6 +279,9 @@ export default function PrinterSettingsScreen() {
             <FlatList
               data={printers}
               keyExtractor={item => item.address}
+              style={{ maxHeight: 200 }}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.printerItem}
@@ -347,7 +347,7 @@ export default function PrinterSettingsScreen() {
           • Usa el botón "Probar" para verificar la conexión
         </Text>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 

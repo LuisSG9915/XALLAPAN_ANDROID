@@ -221,6 +221,7 @@ export default function SalesScreen() {
       const preciosCliente = FullSyncService.getPreciosByCliente(
         selectedClient.id,
       );
+      console.log(selectedClient);
       // Crear mapa de precios por claveProd
       const preciosMap = new Map();
       preciosCliente.forEach((p: any) => {

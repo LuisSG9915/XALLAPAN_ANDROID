@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'https://cbinfo.no-ip.info:9011';
+const API_BASE_URL = 'https://cbinfo.no-ip.info:9031';
 
 const SESSION_STORAGE_KEY = '@awesomeapp/current_user';
 

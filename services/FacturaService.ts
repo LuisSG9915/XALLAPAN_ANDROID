@@ -1,7 +1,6 @@
 import { Alert } from 'react-native';
 import BluetoothPrinterService from './BluetoothPrinterService';
 import FullSyncService from './FullSyncService';
-import { clearWarnings } from 'react-native/types_generated/Libraries/LogBox/Data/LogBoxData';
 
 export interface FacturaItem {
   id: number;
@@ -19,7 +18,7 @@ class FacturaService {
   private static instance: FacturaService | null = null;
 
   private apiBaseUrl = 'https://cbinfo.no-ip.info:9004';
-  private cppApiBaseUrl = 'https://cbinfo.no-ip.info:9011';
+  private cppApiBaseUrl = 'https://cbinfo.no-ip.info:9031';
 
   static getInstance(): FacturaService {
     if (!FacturaService.instance) {
