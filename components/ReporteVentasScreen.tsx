@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,19 +10,13 @@ import {
   ScrollView,
   Alert,
   Platform,
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import TicketPrinter from '../services/TicketPrinter';
-import FullSyncService from '../services/FullSyncService';
-import FacturaService, { FacturaItem } from '../services/FacturaService';
-import {
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+} from "react-native";
+import { Icon } from "react-native-elements";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import TicketPrinter, { SaleTicketData } from "../services/TicketPrinter";
+import FullSyncService from "../services/FullSyncService";
+import FacturaService, { FacturaItem } from "../services/FacturaService";
+import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type ReporteItem = {
   id: number;
@@ -30,9 +24,9 @@ type ReporteItem = {
   fecha: string;
   nombre: string;
   importe: number;
-  tipoPago: 'Efectivo' | 'Credito' | 'Transferencia';
+  tipoPago: "Efectivo" | "Credito" | "Transferencia";
   facturacion?: boolean;
-  timbrado?: '0' | '1';
+  timbrado?: "0" | "1";
   folioFactura?: boolean;
   facturacionMovil?: boolean;
   sucursal?: number;
@@ -47,11 +41,11 @@ type TicketLine = string;
 
 export default function ReporteVentasScreen() {
   const today = useMemo(() => new Date(), []);
-  const LOCAL_SALE_ID_THRESHOLD = 17000000000;
+  const LOCAL_SALE_ID_THRESHOLD = 1700000000;
 
   const formatDate = (date: Date): string => {
-    const dd = String(date.getDate()).padStart(2, '0');
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
     const yyyy = date.getFullYear();
     return `${dd}/${mm}/${yyyy}`;
   };
@@ -67,23 +61,14 @@ export default function ReporteVentasScreen() {
   const [ticketVisible, setTicketVisible] = useState(false);
   const [ticketContent, setTicketContent] = useState<TicketLine[]>([]);
 
-  const total = useMemo(
-    () => items.reduce((s, i) => s + i.importe, 0),
-    [items],
-  );
+  const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
   const totalEfectivo = useMemo(
-    () =>
-      items
-        .filter(i => i.tipoPago === 'Efectivo')
-        .reduce((s, i) => s + i.importe, 0),
-    [items],
+    () => items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
+    [items]
   );
   const totalCredito = useMemo(
-    () =>
-      items
-        .filter(i => i.tipoPago === 'Credito')
-        .reduce((s, i) => s + i.importe, 0),
-    [items],
+    () => items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
+    [items]
   );
 
   useEffect(() => {
@@ -96,13 +81,13 @@ export default function ReporteVentasScreen() {
       const ventas = FullSyncService.getVentas(500);
       setAllVentas(ventas);
     } catch (error) {
-      console.error('Error al cargar ventas:', error);
-      Alert.alert('Error', 'No se pudieron cargar las ventas de la base local');
+      console.error("Error al cargar ventas:", error);
+      Alert.alert("Error", "No se pudieron cargar las ventas de la base local");
     }
   };
 
   const onChangeFecha1 = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       setShowPicker1(false);
     }
     if (selectedDate) {
@@ -111,7 +96,7 @@ export default function ReporteVentasScreen() {
   };
 
   const onChangeFecha2 = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       setShowPicker2(false);
     }
     if (selectedDate) {
@@ -119,20 +104,18 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const mapTipoPago = (
-    tipo: number | undefined,
-  ): 'Efectivo' | 'Credito' | 'Transferencia' => {
-    if (tipo === 1) return 'Efectivo';
-    if (tipo === 2) return 'Credito';
-    if (tipo === 3) return 'Transferencia';
-    return 'Efectivo';
+  const mapTipoPago = (tipo: number | undefined): "Efectivo" | "Credito" | "Transferencia" => {
+    if (tipo === 1) return "Efectivo";
+    if (tipo === 2) return "Credito";
+    if (tipo === 3) return "Transferencia";
+    return "Efectivo";
   };
 
   const filtrarVentas = (soloLocales: boolean) => {
     setLoading(true);
     try {
       if (!fecha1 || !fecha2) {
-        Alert.alert('Error', 'Selecciona ambas fechas');
+        Alert.alert("Error", "Selecciona ambas fechas");
         setLoading(false);
         return;
       }
@@ -143,7 +126,7 @@ export default function ReporteVentasScreen() {
       const fecha2Parsed = new Date(fecha2);
       fecha2Parsed.setHours(23, 59, 59, 999);
 
-      const filtered = allVentas.filter(venta => {
+      const filtered = allVentas.filter((venta) => {
         if (!venta.fecha) return false;
         const ventaDate = new Date(venta.fecha);
         if (ventaDate < fecha1Parsed || ventaDate > fecha2Parsed) {
@@ -155,30 +138,97 @@ export default function ReporteVentasScreen() {
         return true;
       });
 
-      const mapped: ReporteItem[] = filtered.map(venta => ({
-        id: venta.id,
-        no_venta: venta.noVenta || 0,
-        fecha: venta.fecha
-          ? new Date(venta.fecha).toISOString()
-          : new Date().toISOString(),
-        nombre: venta.nombreCliente || 'Sin nombre',
-        importe: venta.importe || 0,
-        tipoPago: mapTipoPago(venta.tipoPago),
-        facturacion: !!venta.facturacionMovil,
-        timbrado: venta.folioFactura ? '1' : '0',
-        folioFactura: !!venta.folioFactura,
-        facturacionMovil: !!venta.facturacionMovil,
-        sucursal: venta.sucursal,
-        cve_cliente: venta.cveCliente,
-        nombreProducto: venta.nombreProducto,
-        cantProducto: venta.cantProducto,
-        precio: venta.precio,
+      const mapped: ReporteItem[] = [];
+      const localGroups = new Map<
+        number,
+        {
+          id: number;
+          noVenta: number;
+          fecha: string;
+          nombre: string;
+          importe: number;
+          tipoPago: "Efectivo" | "Credito" | "Transferencia";
+          facturacion: boolean;
+          timbrado: "0" | "1";
+          folioFactura: boolean;
+          facturacionMovil: boolean;
+          sucursal?: number;
+          cve_cliente?: number;
+        }
+      >();
+
+      filtered.forEach((venta: any) => {
+        const isLocal = !!venta.id && venta.id > LOCAL_SALE_ID_THRESHOLD;
+        const noVenta = venta.noVenta || 0;
+
+        if (isLocal && noVenta) {
+          const existente = localGroups.get(noVenta);
+          const importeLinea = Number(venta.importe) || 0;
+
+          if (existente) {
+            existente.importe += importeLinea;
+          } else {
+            localGroups.set(noVenta, {
+              id: venta.id,
+              noVenta,
+              fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
+              nombre: venta.nombreCliente || "Sin nombre",
+              importe: importeLinea,
+              tipoPago: mapTipoPago(venta.tipoPago),
+              facturacion: !!venta.facturacionMovil,
+              timbrado: venta.folioFactura ? "1" : "0",
+              folioFactura: !!venta.folioFactura,
+              facturacionMovil: !!venta.facturacionMovil,
+              sucursal: venta.sucursal,
+              cve_cliente: venta.cveCliente,
+            });
+          }
+        } else {
+          mapped.push({
+            id: venta.id,
+            no_venta: noVenta,
+            fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
+            nombre: venta.nombreCliente || "Sin nombre",
+            importe: venta.importe || 0,
+            tipoPago: mapTipoPago(venta.tipoPago),
+            facturacion: !!venta.facturacionMovil,
+            timbrado: venta.folioFactura ? "1" : "0",
+            folioFactura: !!venta.folioFactura,
+            facturacionMovil: !!venta.facturacionMovil,
+            sucursal: venta.sucursal,
+            cve_cliente: venta.cveCliente,
+            nombreProducto: venta.nombreProducto,
+            cantProducto: venta.cantProducto,
+            precio: venta.precio,
+          });
+        }
+      });
+
+      const localItems: ReporteItem[] = Array.from(localGroups.values()).map((grupo) => ({
+        id: grupo.id,
+        no_venta: grupo.noVenta,
+        fecha: grupo.fecha,
+        nombre: grupo.nombre,
+        importe: grupo.importe,
+        tipoPago: grupo.tipoPago,
+        facturacion: grupo.facturacion,
+        timbrado: grupo.timbrado,
+        folioFactura: grupo.folioFactura,
+        facturacionMovil: grupo.facturacionMovil,
+        sucursal: grupo.sucursal,
+        cve_cliente: grupo.cve_cliente,
       }));
 
-      setItems(mapped);
+      const finalItems = [...mapped, ...localItems].sort((a, b) => {
+        const da = new Date(a.fecha).getTime();
+        const db = new Date(b.fecha).getTime();
+        return db - da;
+      });
+
+      setItems(finalItems);
     } catch (error) {
-      console.error('Error al filtrar ventas:', error);
-      Alert.alert('Error', 'Ocurrió un error al consultar las ventas');
+      console.error("Error al filtrar ventas:", error);
+      Alert.alert("Error", "Ocurrió un error al consultar las ventas");
     } finally {
       setLoading(false);
     }
@@ -188,54 +238,89 @@ export default function ReporteVentasScreen() {
 
   const consultarLocal = () => filtrarVentas(true);
 
-  const generateTicket = (row: ReporteItem): TicketLine[] => {
-    const lines: string[] = [];
-    lines.push('================================');
-    lines.push('            TICKET');
-    lines.push('================================');
-    lines.push(`VENTA: ${row.no_venta}`);
-    lines.push(`FECHA: ${new Date(row.fecha).toLocaleString()}`);
-    lines.push(`CLIENTE: ${row.nombre}`);
-    if (row.nombreProducto) {
-      lines.push('--------------------------------');
-      lines.push(`PRODUCTO: ${row.nombreProducto}`);
-      if (row.cantProducto) lines.push(`CANTIDAD: ${row.cantProducto}`);
-      if (row.precio) lines.push(`PRECIO UNIT: $${row.precio.toFixed(2)}`);
-    }
-    lines.push('--------------------------------');
-    lines.push(`PAGO: ${row.tipoPago}`);
-    lines.push(`TOTAL: $${row.importe.toFixed(2)}`);
-    lines.push('================================');
-    return lines;
+  const buildSaleTicketDataFromRow = (row: ReporteItem): SaleTicketData => {
+    const relacionadas = allVentas.filter((venta: any) => {
+      if (!venta) return false;
+      if (venta.noVenta !== row.no_venta) return false;
+      if (row.sucursal != null && row.sucursal !== undefined) {
+        return venta.sucursal === row.sucursal;
+      }
+      return true;
+    });
+
+    const base = relacionadas[0] as any | undefined;
+
+    const date = base?.fecha ? (base.fecha instanceof Date ? base.fecha : new Date(base.fecha)) : new Date(row.fecha);
+
+    const clientName = base?.nombreCliente || row.nombre;
+    const paymentMethod = row.tipoPago;
+
+    const items =
+      relacionadas.length > 0
+        ? relacionadas.map((venta: any) => {
+            const quantity = venta.cantProducto ?? 1;
+            const price = venta.precio ?? 0;
+            const total = venta.importe ?? quantity * price;
+            return {
+              description: String(venta.nombreProducto ?? "Producto"),
+              quantity,
+              price,
+              total,
+            };
+          })
+        : row.nombreProducto
+        ? [
+            {
+              description: String(row.nombreProducto),
+              quantity: row.cantProducto ?? 1,
+              price: row.precio ?? row.importe,
+              total: row.importe,
+            },
+          ]
+        : [];
+
+    const total = items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : row.importe;
+
+    const saleTicketData: SaleTicketData = {
+      clientName,
+      paymentMethod,
+      items,
+      total,
+      date,
+      ticketNumber: String(row.no_venta),
+      businessName: undefined,
+      businessAddress: undefined,
+      taxId: undefined,
+      sellerName: undefined,
+      branch: row.sucursal,
+    };
+
+    return saleTicketData;
   };
 
   const visualizarTicket = (row: ReporteItem) => {
-    setTicketContent(generateTicket(row));
+    const ticketData = buildSaleTicketDataFromRow(row);
+    const lines = TicketPrinter.generateSaleTicket(ticketData);
+    setTicketContent(lines);
     setTicketVisible(true);
   };
 
   const imprimirTicket = async (row: ReporteItem) => {
-    const lines = generateTicket(row);
-    await TicketPrinter.print(lines, 'Ticket de Venta');
+    const ticketData = buildSaleTicketDataFromRow(row);
+    await TicketPrinter.printSaleTicket(ticketData);
   };
 
   const facturarVenta = async (row: ReporteItem) => {
     try {
       // Si ya tiene folio/timbrado, reimprimir CFDI
-      if (row.folioFactura || row.timbrado === '1') {
+      if (row.folioFactura || row.timbrado === "1") {
         if (!row.no_venta || !row.sucursal) {
-          Alert.alert(
-            'Factura',
-            'No hay información suficiente para reimprimir',
-          );
+          Alert.alert("Factura", "No hay información suficiente para reimprimir");
           return;
         }
 
-        await FacturaService.getInstance().imprimirFacturaExistente(
-          row.no_venta,
-          row.sucursal,
-          row.caja || 2,
-          () => loadVentas(),
+        await FacturaService.getInstance().imprimirFacturaExistente(row.no_venta, row.sucursal, row.caja || 2, () =>
+          loadVentas()
         );
         return;
       }
@@ -245,8 +330,8 @@ export default function ReporteVentasScreen() {
         // Confirmación simple (modo de prueba no aplicado aquí de momento)
         const fechaVenta = new Date(row.fecha);
         const yyyy = fechaVenta.getFullYear();
-        const mm = String(fechaVenta.getMonth() + 1).padStart(2, '0');
-        const dd = String(fechaVenta.getDate()).padStart(2, '0');
+        const mm = String(fechaVenta.getMonth() + 1).padStart(2, "0");
+        const dd = String(fechaVenta.getDate()).padStart(2, "0");
         const fechaFactura = `${yyyy}-${mm}-${dd}`;
 
         const facturaItem: FacturaItem = {
@@ -256,25 +341,18 @@ export default function ReporteVentasScreen() {
           sucursal: row.sucursal,
           caja: row.caja || 1,
           noVenta: row.no_venta,
-          formaPago: '03', // Transferencia electrónica
-          metodoPago: 'PUE', // Pago en una sola exhibición
-          usoCFDI: 'G03', // Gastos en general
+          formaPago: "03", // Transferencia electrónica
+          metodoPago: "PUE", // Pago en una sola exhibición
+          usoCFDI: "G03", // Gastos en general
         };
 
-        await FacturaService.getInstance().generarFactura(
-          [facturaItem],
-          fechaFactura,
-          () => loadVentas(),
-        );
+        await FacturaService.getInstance().generarFactura([facturaItem], fechaFactura, () => loadVentas());
         return;
       }
 
-      Alert.alert('Factura', 'Esta venta no permite factura');
+      Alert.alert("Factura", "Esta venta no permite factura");
     } catch (error: any) {
-      Alert.alert(
-        'Error',
-        error?.message || 'Ocurrió un error al manejar la factura',
-      );
+      Alert.alert("Error", error?.message || "Ocurrió un error al manejar la factura");
     }
   };
 
@@ -289,30 +367,16 @@ export default function ReporteVentasScreen() {
 
       {allVentas.length > 0 && (
         <View style={styles.infoCard}>
-          <Icon
-            name="info"
-            type="material"
-            color={COLORS.primary}
-            size={20}
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.infoText}>
-            {allVentas.length} ventas sincronizadas en la base local
-          </Text>
+          <Icon name="info" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+          <Text style={styles.infoText}>{allVentas.length} ventas sincronizadas en la base local</Text>
         </View>
       )}
 
       {allVentas.length === 0 && (
         <View style={styles.warningCard}>
-          <Icon
-            name="warning"
-            type="material"
-            color={COLORS.warning}
-            size={24}
-          />
+          <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza
-            desde el menú principal.
+            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el menú principal.
           </Text>
         </View>
       )}
@@ -321,33 +385,15 @@ export default function ReporteVentasScreen() {
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha inicial</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker1(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha final</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker2(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -355,7 +401,7 @@ export default function ReporteVentasScreen() {
 
         {showPicker1 && (
           <>
-            {Platform.OS === 'ios' && (
+            {Platform.OS === "ios" && (
               <View style={styles.iosPickerContainer}>
                 <View style={styles.iosPickerHeader}>
                   <TouchableOpacity onPress={() => setShowPicker1(false)}>
@@ -372,7 +418,7 @@ export default function ReporteVentasScreen() {
                 />
               </View>
             )}
-            {Platform.OS === 'android' && (
+            {Platform.OS === "android" && (
               <DateTimePicker
                 value={fecha1}
                 mode="date"
@@ -386,7 +432,7 @@ export default function ReporteVentasScreen() {
 
         {showPicker2 && (
           <>
-            {Platform.OS === 'ios' && (
+            {Platform.OS === "ios" && (
               <View style={styles.iosPickerContainer}>
                 <View style={styles.iosPickerHeader}>
                   <TouchableOpacity onPress={() => setShowPicker2(false)}>
@@ -403,7 +449,7 @@ export default function ReporteVentasScreen() {
                 />
               </View>
             )}
-            {Platform.OS === 'android' && (
+            {Platform.OS === "android" && (
               <DateTimePicker
                 value={fecha2}
                 mode="date"
@@ -414,23 +460,11 @@ export default function ReporteVentasScreen() {
             )}
           </>
         )}
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultar}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? 'Cargando...' : 'Consultar'}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultar} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar"}</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultarLocal}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? 'Cargando...' : 'Consultar local'}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultarLocal} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar local"}</Text>
         </TouchableOpacity>
       </View>
 
@@ -441,7 +475,7 @@ export default function ReporteVentasScreen() {
         ) : (
           <FlatList
             data={items}
-            keyExtractor={i => String(i.id)}
+            keyExtractor={(i) => String(i.id)}
             scrollEnabled={false}
             renderItem={({ item }) => (
               <View style={styles.rowItem}>
@@ -450,38 +484,19 @@ export default function ReporteVentasScreen() {
                     #{item.no_venta} • {item.nombre}
                   </Text>
                   <Text style={styles.muted}>
-                    {new Date(item.fecha).toLocaleString('es-MX')} •{' '}
-                    {item.tipoPago}
+                    {new Date(item.fecha).toLocaleString("es-MX")} • {item.tipoPago}
                   </Text>
                 </View>
-                <View style={{ alignItems: 'flex-end' }}>
+                <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.money}>${item.importe.toFixed(2)}</Text>
                   <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      onPress={() => imprimirTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="print"
-                        type="material"
-                        color={COLORS.primary}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
+                      <Icon name="print" type="material" color={COLORS.primary} size={20} />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => visualizarTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="visibility"
-                        type="material"
-                        color={COLORS.info}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
+                      <Icon name="visibility" type="material" color={COLORS.info} size={20} />
                     </TouchableOpacity>
-                    <Text onPress={() => console.log(item)}>
-                      Caja {item?.caja}
-                    </Text>
+                    <Text onPress={() => console.log(item)}>Caja {item?.caja}</Text>
                     <TouchableOpacity
                       onPress={() => facturarVenta(item)}
                       disabled={!item.folioFactura && !item.facturacionMovil}
@@ -490,11 +505,7 @@ export default function ReporteVentasScreen() {
                       <Icon
                         name="receipt"
                         type="material"
-                        color={
-                          !item.folioFactura && !item.facturacionMovil
-                            ? COLORS.muted
-                            : COLORS.success
-                        }
+                        color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
                         size={20}
                       />
                     </TouchableOpacity>
@@ -529,12 +540,7 @@ export default function ReporteVentasScreen() {
             <View style={styles.rowBetween}>
               <Text style={styles.modalTitle}>Visualización del Ticket</Text>
               <TouchableOpacity onPress={() => setTicketVisible(false)}>
-                <Icon
-                  name="close"
-                  type="material"
-                  color={COLORS.primary}
-                  size={24}
-                />
+                <Icon name="close" type="material" color={COLORS.primary} size={24} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 400 }}>
@@ -555,9 +561,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { padding: SPACING.m, paddingBottom: SPACING.xxl },
   titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: SPACING.m,
   },
   title: { ...TYPOGRAPHY.h2 },
@@ -574,23 +580,23 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.m,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   infoText: {
     color: COLORS.primaryDark,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   warningCard: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: "#FFF3E0",
     borderRadius: BORDER_RADIUS.m,
     padding: SPACING.m,
     marginBottom: SPACING.m,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.warning,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: SPACING.s,
     ...SHADOWS.small,
   },
@@ -598,7 +604,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.warning,
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   card: {
     backgroundColor: COLORS.surface,
@@ -625,37 +631,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.m,
     marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     ...SHADOWS.small,
   },
   dateText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.primary,
   },
   iosPickerContainer: {
     backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.m,
     marginTop: SPACING.s,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   iosPickerHeader: {
     backgroundColor: COLORS.background,
     padding: SPACING.m,
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   iosPickerButton: {
     color: COLORS.primary,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   iosPicker: {
-    width: '100%',
+    width: "100%",
     height: 200,
   },
   secondaryBtn: {
@@ -664,35 +670,35 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: SPACING.m,
   },
-  secondaryBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 16 },
+  secondaryBtnText: { color: COLORS.primary, fontWeight: "700", fontSize: 16 },
   cardTitle: {
     ...TYPOGRAPHY.h3,
     fontSize: 18,
     marginBottom: SPACING.m,
   },
-  muted: { color: COLORS.muted, textAlign: 'center', padding: SPACING.m },
-  row: { flexDirection: 'row', gap: SPACING.m },
+  muted: { color: COLORS.muted, textAlign: "center", padding: SPACING.m },
+  row: { flexDirection: "row", gap: SPACING.m },
   col: { flex: 1 },
   rowItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  invTitle: { fontWeight: '600', color: COLORS.textPrimary, fontSize: 14 },
+  invTitle: { fontWeight: "600", color: COLORS.textPrimary, fontSize: 14 },
   money: {
     width: 100,
-    textAlign: 'right',
-    fontWeight: 'bold',
+    textAlign: "right",
+    fontWeight: "bold",
     color: COLORS.textPrimary,
     fontSize: 16,
   },
   actionRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginTop: 4,
     gap: 8,
   },
@@ -706,17 +712,17 @@ const styles = StyleSheet.create({
     marginTop: SPACING.m,
   },
   rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 4,
   },
   totalLabel: { color: COLORS.textSecondary, fontSize: 14 },
-  moneySmall: { fontWeight: '600', color: COLORS.textPrimary, fontSize: 14 },
+  moneySmall: { fontWeight: "600", color: COLORS.textPrimary, fontSize: 14 },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
     padding: SPACING.l,
   },
   modalCard: {
@@ -727,7 +733,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: { ...TYPOGRAPHY.h3, fontSize: 18 },
   mono: {
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
     fontSize: 12,
     lineHeight: 16,
     color: COLORS.textPrimary,
