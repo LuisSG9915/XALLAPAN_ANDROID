@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,19 +10,12 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
-} from 'react-native';
-import TicketPrinter from '../services/TicketPrinter';
-import BluetoothPrinterService from '../services/BluetoothPrinterService';
-import FullSyncService from '../services/FullSyncService';
-import AuthService, { Usuario } from '../services/AuthService';
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+} from "react-native";
+import TicketPrinter from "../services/TicketPrinter";
+import BluetoothPrinterService from "../services/BluetoothPrinterService";
+import FullSyncService from "../services/FullSyncService";
+import AuthService, { Usuario } from "../services/AuthService";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type Cliente = {
   id: number;
@@ -45,8 +38,8 @@ export default function SalesScreen() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [filteredClientes, setFilteredClientes] = useState<Cliente[]>([]);
   const [filteredProductos, setFilteredProductos] = useState<Producto[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchProductoQuery, setSearchProductoQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchProductoQuery, setSearchProductoQuery] = useState("");
 
   const [clienteModalOpen, setClienteModalOpen] = useState(false);
   const [productoModalOpen, setProductoModalOpen] = useState(false);
@@ -54,11 +47,9 @@ export default function SalesScreen() {
   const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  const [metodoPago, setMetodoPago] = useState<
-    'efectivo' | 'transferencia' | 'credito' | null
-  >(null);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
-  const [printerName, setPrinterName] = useState<string>('');
+  const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
   const [initializingPrinter, setInitializingPrinter] = useState(true);
@@ -75,15 +66,13 @@ export default function SalesScreen() {
 
         status = BluetoothPrinterService.getStatus();
         setPrinterConnected(status.connected);
-        setPrinterName(status.printer?.name || '');
+        setPrinterName(status.printer?.name || "");
 
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ??
-            (user.sucursal as number | null | undefined) ??
-            1;
+            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
           setCurrentSucursal(sucursal);
         }
 
@@ -104,7 +93,7 @@ export default function SalesScreen() {
       const clientesData = FullSyncService.getClientesFull(10000);
       const clientesFormateados = clientesData.map((c: any) => ({
         id: c.id,
-        nombre: c.nombre || 'Sin nombre',
+        nombre: c.nombre || "Sin nombre",
         credito: c.credito || false,
         idGrupo: c.idGrupo,
       }));
@@ -125,18 +114,15 @@ export default function SalesScreen() {
 
       const productosFormateados = productosData.map((p: any) => ({
         id: p.id,
-        claveProd: p.claveProd || '',
-        descripcion: p.descripcion || 'Sin descripción',
+        claveProd: p.claveProd || "",
+        descripcion: p.descripcion || "Sin descripción",
         precio: preciosMap.get(parseInt(p.claveProd)) || 0,
       }));
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     } catch (error) {
-      console.error('Error al cargar datos de Realm:', error);
-      Alert.alert(
-        'Error',
-        'No se pudieron cargar los datos. Sincroniza primero.',
-      );
+      console.error("Error al cargar datos de Realm:", error);
+      Alert.alert("Error", "No se pudieron cargar los datos. Sincroniza primero.");
     }
   };
 
@@ -151,14 +137,12 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = clientes.filter(
-        c =>
-          c.nombre.toLowerCase().includes(lowerQuery) ||
-          c.id.toString().includes(query),
+        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
       );
 
       setFilteredClientes(filtered);
     },
-    [clientes],
+    [clientes]
   );
 
   const handleSearchProducto = useCallback(
@@ -172,25 +156,22 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = productos.filter(
-        p =>
+        (p) =>
           p.descripcion.toLowerCase().includes(lowerQuery) ||
-          p.claveProd.includes(query) ||
-          p.id.toString().includes(query),
+          // p.claveProd.includes(query) ||
+          p.id.toString().includes(query)
       );
 
       setFilteredProductos(filtered);
     },
-    [productos],
+    [productos]
   );
 
-  const total = useMemo(
-    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
-    [cart],
-  );
+  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
   const addToCart = (p: Producto) => {
-    setCart(prev => {
-      const idx = prev.findIndex(ci => ci.id === p.id);
+    setCart((prev) => {
+      const idx = prev.findIndex((ci) => ci.id === p.id);
       if (idx >= 0) {
         const cp = [...prev];
         cp[idx] = { ...cp[idx], cantidad: cp[idx].cantidad + 1 };
@@ -203,24 +184,22 @@ export default function SalesScreen() {
 
   const updateQuantity = (id: number, cantidad: number) => {
     if (cantidad <= 0) return;
-    setCart(prev => prev.map(ci => (ci.id === id ? { ...ci, cantidad } : ci)));
+    setCart((prev) => prev.map((ci) => (ci.id === id ? { ...ci, cantidad } : ci)));
   };
 
   const removeFromCart = (id: number) => {
-    setCart(prev => prev.filter(ci => ci.id !== id));
+    setCart((prev) => prev.filter((ci) => ci.id !== id));
   };
 
   const buildMovilSaleId = (sucursal: number): number => {
-    const suffix = sucursal.toString().padStart(3, '0');
+    const suffix = sucursal.toString().padStart(3, "0");
     const base = Date.now().toString();
     return Number(`${base}${suffix}`);
   };
 
   useEffect(() => {
     if (selectedClient) {
-      const preciosCliente = FullSyncService.getPreciosByCliente(
-        selectedClient.id,
-      );
+      const preciosCliente = FullSyncService.getPreciosByCliente(selectedClient.id);
       console.log(selectedClient);
       // Crear mapa de precios por claveProd
       const preciosMap = new Map();
@@ -232,8 +211,8 @@ export default function SalesScreen() {
 
       const productosFormateados = preciosCliente.map((p: any) => ({
         id: p.id,
-        claveProd: p.claveProd || '',
-        descripcion: p.descripcion || 'Sin descripción',
+        claveProd: p.claveProd || "",
+        descripcion: p.descripcion || "Sin descripción",
         precio: preciosMap.get(parseInt(p.claveProd)) || 0,
       }));
       setProductos(productosFormateados);
@@ -243,7 +222,7 @@ export default function SalesScreen() {
 
   const processSale = async () => {
     const client = selectedClient;
-    console.log('[Sales] processSale called', {
+    console.log("[Sales] processSale called", {
       client,
       cartLength: cart.length,
       metodoPago,
@@ -251,15 +230,15 @@ export default function SalesScreen() {
       total,
     });
     if (!client) {
-      Alert.alert('Error', 'Selecciona un cliente');
+      Alert.alert("Error", "Selecciona un cliente");
       return;
     }
     if (!cart.length) {
-      Alert.alert('Error', 'Agrega productos al carrito');
+      Alert.alert("Error", "Agrega productos al carrito");
       return;
     }
     if (!metodoPago) {
-      Alert.alert('Error', 'Selecciona un método de pago');
+      Alert.alert("Error", "Selecciona un método de pago");
       return;
     }
 
@@ -267,21 +246,14 @@ export default function SalesScreen() {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode =
-        metodoPago === 'efectivo' ? 1 : metodoPago === 'credito' ? 2 : 3; // transferencia
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
-        metodoPago === 'efectivo'
-          ? 'Efectivo'
-          : metodoPago === 'credito'
-          ? 'Credito'
-          : 'Transferencia';
+        metodoPago === "efectivo" ? "Efectivo" : metodoPago === "credito" ? "Credito" : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) ||
-        (currentUser?.nombre as string | undefined) ||
-        '';
+        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = new Date();
 
-      console.log('[Sales] Built sale metadata', {
+      console.log("[Sales] Built sale metadata", {
         sucursal,
         saleIdMovil,
         inventarioBaseId,
@@ -292,7 +264,7 @@ export default function SalesScreen() {
       });
 
       // Ticket con formato detallado
-      console.log('[Sales] About to print sale ticket', {
+      console.log("[Sales] About to print sale ticket", {
         clientName: client.nombre,
         metodoPago,
         itemsCount: cart.length,
@@ -302,7 +274,7 @@ export default function SalesScreen() {
       await TicketPrinter.printSaleTicket({
         clientName: client.nombre,
         paymentMethod: metodoPago,
-        items: cart.map(item => ({
+        items: cart.map((item) => ({
           description: item.descripcion,
           quantity: item.cantidad,
           price: item.precio,
@@ -315,10 +287,10 @@ export default function SalesScreen() {
         sellerName: vendedor,
         branch: sucursal,
       });
-      console.log('[Sales] Ticket printed OK', { saleIdMovil });
+      console.log("[Sales] Ticket printed OK", { saleIdMovil });
 
       // Registrar venta en Realm (una fila por producto)
-      console.log('[Sales] Creating local ventas in Realm', {
+      console.log("[Sales] Creating local ventas in Realm", {
         rows: cart.length,
         saleIdMovil,
       });
@@ -327,7 +299,8 @@ export default function SalesScreen() {
           id: saleIdMovil + index,
           sucursal,
           noVenta: saleIdMovil,
-          claveProd: parseInt(item.claveProd || '0', 10) || null,
+          idMovil: saleIdMovil,
+          claveProd: parseInt(item.claveProd || "0", 10) || null,
           nombreProducto: item.descripcion,
           cantProducto: item.cantidad,
           precio: item.precio,
@@ -340,12 +313,12 @@ export default function SalesScreen() {
           vendedor,
           folioFactura: false,
           facturacionMovil: false,
-        })),
+        }))
       );
-      console.log('[Sales] Local ventas created');
+      console.log("[Sales] Local ventas created");
 
       // Registrar movimiento de inventario (una fila por producto, saldo negativo)
-      console.log('[Sales] Creating local inventario movements', {
+      console.log("[Sales] Creating local inventario movements", {
         rows: cart.length,
         inventarioBaseId,
       });
@@ -353,13 +326,77 @@ export default function SalesScreen() {
         cart.map((item, index) => ({
           id: inventarioBaseId + index,
           sucursal,
-          claveProd: parseInt(item.claveProd || '0', 10) || null,
+          claveProd: parseInt(item.claveProd || "0", 10) || null,
           saldo: -Math.abs(item.cantidad),
           fechaArrastre: now,
           descripcion: item.descripcion,
-        })),
+        }))
       );
-      console.log('[Sales] Local inventario movements created');
+      console.log("[Sales] Local inventario movements created");
+
+      try {
+        const rawUserId = (currentUser as any)?.id;
+        const idUsuario = rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
+
+        const fecha = now.toISOString();
+        const fechaTransfer = new Date().toISOString();
+
+        const ventasDetalle = FullSyncService.getVentas();
+
+        const movimientos = ventasDetalle.map((venta: any) => ({
+          sucursal: venta.sucursal ?? sucursal,
+          clave_prod: venta.claveProd ?? 0,
+          Cant_producto: venta.cantProducto ?? 0,
+          precio: venta.precio ?? 0,
+          Cve_cliente: venta.cveCliente ?? client.id,
+          fecha: (venta.fecha instanceof Date ? venta.fecha : now).toISOString(),
+          tipo_pago: venta.tipoPago ?? tipoPagoCode,
+          usuario: idUsuario,
+          longitud: 0,
+          latitud: 0,
+          id_movil: venta.idMovil,
+          fechaTransfer,
+        }));
+
+        console.log("[Sales] Sending ventas arrastre to server", {
+          endpoint: "/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON",
+          sucursal,
+          idUsuario,
+          items: movimientos.length,
+        });
+
+        const apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+        const url = `${apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${encodeURIComponent(
+          String(sucursal)
+        )}&idUsuario=${encodeURIComponent(String(idUsuario))}`;
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(movimientos),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(
+            "[Sales] Error HTTP al enviar ventas arrastre",
+            response.status,
+            response.statusText,
+            errorText
+          );
+        } else {
+          let data: any = null;
+          try {
+            data = await response.json();
+          } catch (e) {}
+          console.log("[Sales] Ventas arrastre enviadas correctamente", data);
+        }
+      } catch (syncError) {
+        console.error("[Sales] Error al enviar ventas arrastre", syncError);
+      }
 
       // Actualizar estado de impresora
       const status = BluetoothPrinterService.getStatus();
@@ -367,17 +404,15 @@ export default function SalesScreen() {
 
       if (status.connected) {
         Alert.alert(
-          '🖨️ Venta Procesada',
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(
-            2,
-          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`,
+          "🖨️ Venta Procesada",
+          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
+            status.printer?.name
+          }`
         );
       } else {
         Alert.alert(
-          '✅ Venta Procesada',
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(
-            2,
-          )}\nPago: ${metodoPago}`,
+          "✅ Venta Procesada",
+          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}`
         );
       }
 
@@ -386,8 +421,8 @@ export default function SalesScreen() {
       setMetodoPago(null);
       setSelectedClient(null);
     } catch (error) {
-      console.error('[Sales] Error in processSale', error);
-      Alert.alert('Error', 'No se pudo procesar la venta');
+      console.error("[Sales] Error in processSale", error);
+      Alert.alert("Error", "No se pudo procesar la venta");
     }
   };
 
@@ -397,9 +432,7 @@ export default function SalesScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>
-              Preparando conexión con la impresora...
-            </Text>
+            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
           </View>
         </ScrollView>
       </View>
@@ -414,9 +447,7 @@ export default function SalesScreen() {
           <Text style={styles.headerTitle}>Punto de Venta</Text>
           {printerConnected && (
             <View style={styles.printerBadge}>
-              <Text style={styles.printerBadgeText}>
-                🖨️ {printerName || 'OK'}
-              </Text>
+              <Text style={styles.printerBadgeText}>🖨️ {printerName || "OK"}</Text>
             </View>
           )}
         </View>
@@ -424,10 +455,7 @@ export default function SalesScreen() {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>
-              Sin impresora. Los tickets se compartirán o deberás configurar
-              una.
-            </Text>
+            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
           </View>
         )}
 
@@ -435,16 +463,11 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity
-              style={styles.smallBtn}
-              onPress={() => setClienteModalOpen(true)}
-            >
+            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
               <Text style={styles.smallBtnText}>Seleccionar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>
-            {selectedClient ? selectedClient.nombre : 'Sin seleccionar'}
-          </Text>
+          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
         </View>
 
         {/* Productos */}
@@ -452,10 +475,7 @@ export default function SalesScreen() {
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Productos</Text>
             <TouchableOpacity
-              style={[
-                styles.smallBtn,
-                !selectedClient && styles.smallBtnDisabled,
-              ]}
+              style={[styles.smallBtn, !selectedClient && styles.smallBtnDisabled]}
               onPress={() => selectedClient && setProductoModalOpen(true)}
               disabled={!selectedClient}
             >
@@ -467,7 +487,7 @@ export default function SalesScreen() {
             <Text style={styles.muted}>No hay productos</Text>
           ) : (
             <View style={styles.cartList}>
-              {cart.map(item => (
+              {cart.map((item) => (
                 <View key={item.id} style={styles.cartRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cartTitle}>{item.descripcion}</Text>
@@ -478,20 +498,14 @@ export default function SalesScreen() {
                       style={styles.qtyInput}
                       keyboardType="number-pad"
                       value={String(item.cantidad)}
-                      onChangeText={t => {
-                        const n = parseInt(t || '0', 10);
-                        if (Number.isFinite(n) && n > 0)
-                          updateQuantity(item.id, n);
+                      onChangeText={(t) => {
+                        const n = parseInt(t || "0", 10);
+                        if (Number.isFinite(n) && n > 0) updateQuantity(item.id, n);
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>
-                    ${(item.precio * item.cantidad).toFixed(2)}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.removeBtn}
-                    onPress={() => removeFromCart(item.id)}
-                  >
+                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -504,20 +518,16 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip
-              label="Efectivo"
-              selected={metodoPago === 'efectivo'}
-              onPress={() => setMetodoPago('efectivo')}
-            />
+            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
             <PayChip
               label="Transferencia"
-              selected={metodoPago === 'transferencia'}
-              onPress={() => setMetodoPago('transferencia')}
+              selected={metodoPago === "transferencia"}
+              onPress={() => setMetodoPago("transferencia")}
             />
             <PayChip
               label="Crédito"
-              selected={metodoPago === 'credito'}
-              onPress={() => setMetodoPago('credito')}
+              selected={metodoPago === "credito"}
+              onPress={() => setMetodoPago("credito")}
               disabled={selectedClient ? !selectedClient.credito : true}
             />
           </View>
@@ -528,11 +538,7 @@ export default function SalesScreen() {
           </View>
 
           <TouchableOpacity
-            style={[
-              styles.primaryBtn,
-              (!selectedClient || !cart.length || !metodoPago) &&
-                styles.primaryBtnDisabled,
-            ]}
+            style={[styles.primaryBtn, (!selectedClient || !cart.length || !metodoPago) && styles.primaryBtnDisabled]}
             onPress={processSale}
             disabled={!selectedClient || !cart.length || !metodoPago}
           >
@@ -560,10 +566,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchCliente('')}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -572,13 +575,13 @@ export default function SalesScreen() {
               {/* Contador de resultados */}
               <Text style={styles.resultCount}>
                 {filteredClientes.length} cliente
-                {filteredClientes.length !== 1 ? 's' : ''}{' '}
-                {filteredClientes.length === 1 ? 'encontrado' : 'encontrados'}
+                {filteredClientes.length !== 1 ? "s" : ""}{" "}
+                {filteredClientes.length === 1 ? "encontrado" : "encontrados"}
               </Text>
 
               <FlatList
                 data={filteredClientes}
-                keyExtractor={i => String(i.id)}
+                keyExtractor={(i) => String(i.id)}
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     style={styles.listItem}
@@ -587,7 +590,7 @@ export default function SalesScreen() {
                       setCart([]);
                       setMetodoPago(null);
                       setClienteModalOpen(false);
-                      setSearchQuery('');
+                      setSearchQuery("");
                       setFilteredClientes(clientes);
                     }}
                   >
@@ -595,16 +598,12 @@ export default function SalesScreen() {
                       <Text style={styles.listTitle}>{item.nombre}</Text>
                       <Text style={styles.listSubtitle}>ID: {item.id}</Text>
                     </View>
-                    {item.credito ? (
-                      <Text style={styles.badge}>Crédito</Text>
-                    ) : null}
+                    {item.credito ? <Text style={styles.badge}>Crédito</Text> : null}
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>
-                      No se encontraron clientes
-                    </Text>
+                    <Text style={styles.emptySearchText}>No se encontraron clientes</Text>
                   </View>
                 }
               />
@@ -612,7 +611,7 @@ export default function SalesScreen() {
                 style={styles.secondaryBtn}
                 onPress={() => {
                   setClienteModalOpen(false);
-                  setSearchQuery('');
+                  setSearchQuery("");
                   setFilteredClientes(clientes);
                 }}
               >
@@ -642,10 +641,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchProducto('')}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -654,38 +650,32 @@ export default function SalesScreen() {
               {/* Contador de resultados */}
               <Text style={styles.resultCount}>
                 {filteredProductos.length} producto
-                {filteredProductos.length !== 1 ? 's' : ''}{' '}
-                {filteredProductos.length === 1 ? 'encontrado' : 'encontrados'}
+                {filteredProductos.length !== 1 ? "s" : ""}{" "}
+                {filteredProductos.length === 1 ? "encontrado" : "encontrados"}
               </Text>
 
               <FlatList
                 data={filteredProductos}
-                keyExtractor={i => String(i.id)}
+                keyExtractor={(i) => String(i.id)}
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     style={styles.listItem}
                     onPress={() => {
                       addToCart(item);
-                      setSearchProductoQuery('');
+                      setSearchProductoQuery("");
                       setFilteredProductos(productos);
                     }}
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
-                      <Text style={styles.listSubtitle}>
-                        Clave: {item.claveProd}
-                      </Text>
+                      <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
                     </View>
-                    <Text style={styles.productPrice}>
-                      ${item.precio.toFixed(2)}
-                    </Text>
+                    <Text style={styles.productPrice}>${item.precio.toFixed(2)}</Text>
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>
-                      No se encontraron productos
-                    </Text>
+                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
                   </View>
                 }
               />
@@ -693,7 +683,7 @@ export default function SalesScreen() {
                 style={styles.secondaryBtn}
                 onPress={() => {
                   setProductoModalOpen(false);
-                  setSearchProductoQuery('');
+                  setSearchProductoQuery("");
                   setFilteredProductos(productos);
                 }}
               >
@@ -722,15 +712,9 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.chip,
-        selected && styles.chipSelected,
-        disabled && styles.chipDisabled,
-      ]}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-        {label}
-      </Text>
+      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -740,8 +724,8 @@ const styles = StyleSheet.create({
   content: { padding: SPACING.m, paddingBottom: SPACING.xxl },
   loadingBox: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: SPACING.xl,
   },
   loadingText: {
@@ -750,9 +734,9 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: SPACING.m,
     paddingHorizontal: SPACING.xs,
   },
@@ -766,19 +750,19 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.l,
   },
   printerBadgeText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   warningCard: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: "#FFF3E0",
     borderRadius: BORDER_RADIUS.m,
     padding: SPACING.m,
     marginBottom: SPACING.m,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.warning,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: SPACING.s,
     ...SHADOWS.small,
   },
@@ -787,7 +771,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.warning,
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   card: {
     backgroundColor: COLORS.surface,
@@ -797,9 +781,9 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: SPACING.s,
   },
   cardTitle: { ...TYPOGRAPHY.h3, fontSize: 18 },
@@ -815,35 +799,35 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.m,
   },
   smallBtnDisabled: { opacity: 0.5 },
-  smallBtnText: { color: '#fff', fontWeight: '600', fontSize: 12 },
-  muted: { color: COLORS.muted, fontStyle: 'italic' },
+  smallBtnText: { color: "#fff", fontWeight: "600", fontSize: 12 },
+  muted: { color: COLORS.muted, fontStyle: "italic" },
   cartList: { marginTop: SPACING.s },
   cartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  cartTitle: { fontWeight: '600', color: COLORS.textPrimary, fontSize: 14 },
+  cartTitle: { fontWeight: "600", color: COLORS.textPrimary, fontSize: 14 },
   qtyBox: { width: 60, marginHorizontal: SPACING.s },
   qtyInput: {
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: BORDER_RADIUS.s,
     paddingVertical: 4,
-    textAlign: 'center',
+    textAlign: "center",
     color: COLORS.textPrimary,
   },
   lineTotal: {
     width: 80,
-    textAlign: 'right',
-    fontWeight: '600',
+    textAlign: "right",
+    fontWeight: "600",
     color: COLORS.textPrimary,
   },
   removeBtn: { padding: SPACING.s, marginLeft: SPACING.s },
-  removeBtnText: { color: COLORS.error, fontSize: 18, fontWeight: 'bold' },
-  payRow: { flexDirection: 'row', gap: SPACING.s, marginVertical: SPACING.m },
+  removeBtnText: { color: COLORS.error, fontSize: 18, fontWeight: "bold" },
+  payRow: { flexDirection: "row", gap: SPACING.s, marginVertical: SPACING.m },
   chip: {
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -859,56 +843,56 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   chipDisabled: { opacity: 0.4 },
-  chipText: { color: COLORS.textSecondary, fontWeight: '500' },
-  chipTextSelected: { color: '#fff', fontWeight: '700' },
+  chipText: { color: COLORS.textSecondary, fontWeight: "500" },
+  chipTextSelected: { color: "#fff", fontWeight: "700" },
   totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginTop: SPACING.s,
     paddingTop: SPACING.s,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
-  totalText: { fontSize: 18, fontWeight: '600', color: COLORS.textSecondary },
-  totalValue: { fontSize: 24, fontWeight: 'bold', color: COLORS.primary },
+  totalText: { fontSize: 18, fontWeight: "600", color: COLORS.textSecondary },
+  totalValue: { fontSize: 24, fontWeight: "bold", color: COLORS.primary },
   primaryBtn: {
     backgroundColor: COLORS.success,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: SPACING.m,
     ...SHADOWS.medium,
   },
   primaryBtnDisabled: { opacity: 0.6, backgroundColor: COLORS.muted },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 18 },
+  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 18 },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
   },
   modalCard: {
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: BORDER_RADIUS.xl,
     borderTopRightRadius: BORDER_RADIUS.xl,
-    maxHeight: '80%',
+    maxHeight: "80%",
     padding: SPACING.l,
     ...SHADOWS.large,
   },
   modalTitle: {
     ...TYPOGRAPHY.h2,
     marginBottom: SPACING.m,
-    textAlign: 'center',
+    textAlign: "center",
   },
   listItem: {
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  listTitle: { fontWeight: 'bold', color: COLORS.textPrimary, fontSize: 16 },
+  listTitle: { fontWeight: "bold", color: COLORS.textPrimary, fontSize: 16 },
   listSubtitle: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   badge: {
     backgroundColor: COLORS.primaryLight,
@@ -917,8 +901,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.s,
     fontSize: 10,
-    fontWeight: 'bold',
-    overflow: 'hidden',
+    fontWeight: "bold",
+    overflow: "hidden",
   },
   secondaryBtn: {
     backgroundColor: COLORS.background,
@@ -926,23 +910,23 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: SPACING.m,
   },
   secondaryBtnText: {
     color: COLORS.textPrimary,
-    fontWeight: '700',
+    fontWeight: "700",
     fontSize: 16,
   },
   note: {
     marginTop: SPACING.m,
     color: COLORS.muted,
-    textAlign: 'center',
+    textAlign: "center",
     fontSize: 12,
   },
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.m,
     paddingHorizontal: SPACING.m,
@@ -971,7 +955,7 @@ const styles = StyleSheet.create({
   },
   searchLabel: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textSecondary,
     marginTop: SPACING.s,
   },
@@ -979,20 +963,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.muted,
     marginBottom: SPACING.s,
-    textAlign: 'right',
+    textAlign: "right",
   },
   emptySearch: {
     paddingVertical: SPACING.xxl,
-    alignItems: 'center',
+    alignItems: "center",
   },
   emptySearchText: {
     fontSize: 16,
     color: COLORS.muted,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   productPrice: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: COLORS.primary,
   },
 });

@@ -1,131 +1,132 @@
 // Esquemas de Realm para todas las entidades
 
 export const VentaSchema = {
-  name: 'Venta',
+  name: "Venta",
   properties: {
-    id: 'int',
-    sucursal: 'int?',
-    noVenta: 'int?',
-    claveProd: 'int?',
-    nombreProducto: 'string?',
-    cantProducto: 'int?',
-    precio: 'float?',
-    importe: 'float?',
-    cveCliente: 'int?',
-    nombreCliente: 'string?',
-    fecha: 'date?',
-    tipoPago: 'int?',
-    descripcionMedioPago: 'string?',
-    vendedor: 'string?',
-    folioFactura: 'bool?',
-    facturacionMovil: 'bool?',
-    syncedAt: 'date'
+    id: "int",
+    sucursal: "int?",
+    noVenta: "int?",
+    idMovil: "int?",
+    claveProd: "int?",
+    nombreProducto: "string?",
+    cantProducto: "int?",
+    precio: "float?",
+    importe: "float?",
+    cveCliente: "int?",
+    nombreCliente: "string?",
+    fecha: "date?",
+    tipoPago: "int?",
+    descripcionMedioPago: "string?",
+    vendedor: "string?",
+    folioFactura: "bool?",
+    facturacionMovil: "bool?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const UsuarioSchema = {
-  name: 'Usuario',
+  name: "Usuario",
   properties: {
-    id: 'int',
-    nombre: 'string?',
-    perfil: 'int?',
-    descripcionPerfil: 'string?',
-    puesto: 'int?',
-    descripcionPuesto: 'string?',
-    claveEmpleado: 'string?',
-    password: 'string?',
-    sucursalOrigen: 'int?',
-    syncedAt: 'date'
+    id: "int",
+    nombre: "string?",
+    perfil: "int?",
+    descripcionPerfil: "string?",
+    puesto: "int?",
+    descripcionPuesto: "string?",
+    claveEmpleado: "string?",
+    password: "string?",
+    sucursalOrigen: "int?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const ProductoSchema = {
-  name: 'Producto',
+  name: "Producto",
   properties: {
-    id: 'int',
-    claveProd: 'string?',
-    descripcion: 'string?',
-    esKit: 'bool?',
-    fechaAct: 'date?',
-    syncedAt: 'date'
+    id: "int",
+    claveProd: "string?",
+    descripcion: "string?",
+    esKit: "bool?",
+    fechaAct: "date?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const PrecioSchema = {
-  name: 'Precio',
+  name: "Precio",
   properties: {
-    id: 'string',
-    descripcion: 'string?',
-    idCliente: 'int?',
-    claveProd: 'int?',
-    precio: 'float?',
-    fechaAct: 'date?',
-    syncedAt: 'date'
+    id: "string",
+    descripcion: "string?",
+    idCliente: "int?",
+    claveProd: "int?",
+    precio: "float?",
+    fechaAct: "date?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const InventarioSchema = {
-  name: 'Inventario',
+  name: "Inventario",
   properties: {
-    id: 'int',
-    sucursal: 'int?',
-    claveProd: 'int?',
-    fechaArrastre: 'date?',
-    saldo: 'float?',
-    descripcion: 'string?',
-    syncedAt: 'date'
+    id: "int",
+    sucursal: "int?",
+    claveProd: "int?",
+    fechaArrastre: "date?",
+    saldo: "float?",
+    descripcion: "string?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const CarteraSchema = {
-  name: 'Cartera',
+  name: "Cartera",
   properties: {
-    id: 'int',
-    idCliente: 'int?',
-    nombreCliente: 'string?',
-    sucursal: 'int?',
-    sucursalSegmento: 'int?',
-    saldo: 'float?',
-    fecha: 'date?',
-    idSegmento: 'int?',
-    noVenta: 'int?',
-    cobrado: 'bool?',
-    syncedAt: 'date'
+    id: "int",
+    idCliente: "int?",
+    nombreCliente: "string?",
+    sucursal: "int?",
+    sucursalSegmento: "int?",
+    saldo: "float?",
+    fecha: "date?",
+    idSegmento: "int?",
+    noVenta: "int?",
+    cobrado: "bool?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const ClienteFullSchema = {
-  name: 'ClienteFull',
+  name: "ClienteFull",
   properties: {
-    id: 'int',
-    nombre: 'string?',
-    longitud: 'float?',
-    latitud: 'float?',
-    idGrupo: 'int?',
-    credito: 'bool?',
-    facturacionMovil: 'bool?',
-    fechaAct: 'date?',
-    syncedAt: 'date'
+    id: "int",
+    nombre: "string?",
+    longitud: "float?",
+    latitud: "float?",
+    idGrupo: "int?",
+    credito: "bool?",
+    facturacionMovil: "bool?",
+    fechaAct: "date?",
+    syncedAt: "date",
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 // Esquema para controlar el estado de sincronización
 export const SyncStatusSchema = {
-  name: 'SyncStatus',
+  name: "SyncStatus",
   properties: {
-    id: 'string',
-    lastSyncDate: 'date?',
-    totalRecords: 'int?',
-    status: 'string?' // 'completed', 'in_progress', 'failed'
+    id: "string",
+    lastSyncDate: "date?",
+    totalRecords: "int?",
+    status: "string?", // 'completed', 'in_progress', 'failed'
   },
-  primaryKey: 'id'
+  primaryKey: "id",
 };
 
 export const ALL_SCHEMAS = [
@@ -136,5 +137,5 @@ export const ALL_SCHEMAS = [
   InventarioSchema,
   CarteraSchema,
   ClienteFullSchema,
-  SyncStatusSchema
+  SyncStatusSchema,
 ];
