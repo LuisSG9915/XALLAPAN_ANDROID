@@ -88,7 +88,7 @@ class TicketPrinter {
     const date = data.date || new Date();
     const width = this.DEFAULT_WIDTH;
 
-    const businessName = data.businessName || "FRESKY HIELO";
+    const businessName = data.businessName || "XALLAPAN";
 
     // Encabezado de empresa
     lines.push(this.separator());

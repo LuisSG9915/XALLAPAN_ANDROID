@@ -15,7 +15,14 @@ import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
+import {
+  APP_NAME,
+  COLORS,
+  SPACING,
+  SHADOWS,
+  BORDER_RADIUS,
+  TYPOGRAPHY,
+} from "../theme/theme";
 
 type Cliente = {
   id: number;
@@ -46,8 +53,11 @@ export default function SalesScreen() {
 
   const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | null>(null);
+  const [metodoPago, setMetodoPago] = useState<
+    "efectivo" | "transferencia" | "credito" | null
+  >(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -71,8 +81,14 @@ export default function SalesScreen() {
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
+          const vendedor =
+            (user.claveEmpleado as string | undefined) ||
+            (user.nombre as string | undefined) ||
+            "";
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
+            (user.sucursal_origen as number | null | undefined) ??
+            (user.sucursal as number | null | undefined) ??
+            1;
           setCurrentSucursal(sucursal);
         }
 
@@ -137,7 +153,8 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = clientes.filter(
-        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
+        (c) =>
+          c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
       );
 
       setFilteredClientes(filtered);
@@ -167,7 +184,10 @@ export default function SalesScreen() {
     [productos]
   );
 
-  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
+  const total = useMemo(
+    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
+    [cart]
+  );
 
   const addToCart = (p: Producto) => {
     setCart((prev) => {
@@ -246,11 +266,18 @@ export default function SalesScreen() {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
+      const tipoPagoCode =
+        metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
-        metodoPago === "efectivo" ? "Efectivo" : metodoPago === "credito" ? "Credito" : "Transferencia";
+        metodoPago === "efectivo"
+          ? "Efectivo"
+          : metodoPago === "credito"
+          ? "Credito"
+          : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
+        (currentUser?.claveEmpleado as string | undefined) ||
+        (currentUser?.nombre as string | undefined) ||
+        "";
       const now = new Date();
 
       console.log("[Sales] Built sale metadata", {
@@ -260,7 +287,7 @@ export default function SalesScreen() {
         tipoPagoCode,
         descripcionMedioPago,
         vendedor,
-        now,
+        now: now,
       });
 
       // Ticket con formato detallado
@@ -303,8 +330,8 @@ export default function SalesScreen() {
           claveProd: parseInt(item.claveProd || "0", 10) || null,
           nombreProducto: item.descripcion,
           cantProducto: item.cantidad,
-          precio: item.precio,
-          importe: item.precio * item.cantidad,
+          precio: parseFloat(item.precio.toString()) || 0,
+          importe: parseFloat((item.precio * item.cantidad).toString()) || 0,
           cveCliente: client.id,
           nombreCliente: client.nombre,
           fecha: now,
@@ -336,7 +363,8 @@ export default function SalesScreen() {
 
       try {
         const rawUserId = (currentUser as any)?.id;
-        const idUsuario = rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
+        const idUsuario =
+          rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
 
         const fecha = now.toISOString();
         const fechaTransfer = new Date().toISOString();
@@ -405,9 +433,9 @@ export default function SalesScreen() {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
-            status.printer?.name
-          }`
+          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(
+            2
+          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`
         );
       } else {
         Alert.alert(
@@ -432,7 +460,9 @@ export default function SalesScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
+            <Text style={styles.loadingText}>
+              Preparando conexión con la impresora...
+            </Text>
           </View>
         </ScrollView>
       </View>
@@ -455,7 +485,9 @@ export default function SalesScreen() {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
+            <Text style={styles.warningText}>
+              Sin impresora. Los tickets se compartirán o deberás configurar una.
+            </Text>
           </View>
         )}
 
@@ -463,11 +495,16 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={() => setClienteModalOpen(true)}
+            >
               <Text style={styles.smallBtnText}>Seleccionar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
+          <Text style={styles.valueText}>
+            {selectedClient ? selectedClient.nombre : "Sin seleccionar"}
+          </Text>
         </View>
 
         {/* Productos */}
@@ -497,15 +534,48 @@ export default function SalesScreen() {
                     <TextInput
                       style={styles.qtyInput}
                       keyboardType="number-pad"
-                      value={String(item.cantidad)}
+                      value={quantityInputs[item.id] ?? String(item.cantidad)}
                       onChangeText={(t) => {
-                        const n = parseInt(t || "0", 10);
-                        if (Number.isFinite(n) && n > 0) updateQuantity(item.id, n);
+                        // Permitir cualquier valor mientras escribe
+                        if (!/^\d*$/.test(t)) {
+                          return;
+                        }
+                        setQuantityInputs((prev) => ({ ...prev, [item.id]: t }));
+                        if (t === "") {
+                          // Campo vacío, no actualizar aún
+                          return;
+                        }
+                        const n = parseInt(t, 10);
+                        if (Number.isFinite(n) && n >= 0) {
+                          updateQuantity(item.id, n);
+                        }
+                      }}
+                      onBlur={() => {
+                        // Al salir del campo, si está vacío o es 0, poner 1
+                        const currentText = quantityInputs[item.id];
+                        if (!currentText || currentText === "0") {
+                          updateQuantity(item.id, 1);
+                        } else {
+                          const n = parseInt(currentText, 10);
+                          if (Number.isFinite(n) && n > 0) {
+                            updateQuantity(item.id, n);
+                          }
+                        }
+                        setQuantityInputs((prev) => {
+                          const next = { ...prev };
+                          delete next[item.id];
+                          return next;
+                        });
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
-                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
+                  <Text style={styles.lineTotal}>
+                    ${(item.precio * item.cantidad).toFixed(2)}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.removeBtn}
+                    onPress={() => removeFromCart(item.id)}
+                  >
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -518,7 +588,11 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
+            <PayChip
+              label="Efectivo"
+              selected={metodoPago === "efectivo"}
+              onPress={() => setMetodoPago("efectivo")}
+            />
             <PayChip
               label="Transferencia"
               selected={metodoPago === "transferencia"}
@@ -538,7 +612,11 @@ export default function SalesScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, (!selectedClient || !cart.length || !metodoPago) && styles.primaryBtnDisabled]}
+            style={[
+              styles.primaryBtn,
+              (!selectedClient || !cart.length || !metodoPago) &&
+                styles.primaryBtnDisabled,
+            ]}
             onPress={processSale}
             disabled={!selectedClient || !cart.length || !metodoPago}
           >
@@ -566,7 +644,10 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
+                  <TouchableOpacity
+                    onPress={() => handleSearchCliente("")}
+                    style={styles.clearButton}
+                  >
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -592,6 +673,7 @@ export default function SalesScreen() {
                       setClienteModalOpen(false);
                       setSearchQuery("");
                       setFilteredClientes(clientes);
+                      setTimeout(() => setProductoModalOpen(true), 300);
                     }}
                   >
                     <View style={{ flex: 1 }}>
@@ -641,7 +723,10 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
+                  <TouchableOpacity
+                    onPress={() => handleSearchProducto("")}
+                    style={styles.clearButton}
+                  >
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -675,7 +760,9 @@ export default function SalesScreen() {
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
+                    <Text style={styles.emptySearchText}>
+                      No se encontraron productos
+                    </Text>
                   </View>
                 }
               />
@@ -712,7 +799,11 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
+      style={[
+        styles.chip,
+        selected && styles.chipSelected,
+        disabled && styles.chipDisabled,
+      ]}
     >
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>

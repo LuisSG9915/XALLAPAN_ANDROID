@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -10,18 +10,14 @@ import {
   ScrollView,
   Alert,
   Platform,
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import FullSyncService from '../services/FullSyncService';
-import AuthService, { Usuario } from '../services/AuthService';
-import {
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+} from "react-native";
+import { Icon, Input } from "react-native-elements";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import FullSyncService from "../services/FullSyncService";
+import AuthService, { Usuario } from "../services/AuthService";
+import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
+
+const API_BASE_URL = "https://cbinfo.no-ip.info:9031";
 
 type Sucursal = { id_sucursal: number; nombre: string };
 
@@ -33,6 +29,7 @@ type Traspaso = {
   traspaso_responsable_nombre_unique: string;
   folio: number;
   estatus: string;
+  [key: string]: any;
 };
 
 type TraspasoDetalle = {
@@ -56,38 +53,10 @@ export default function TraspasoRecepcionScreen() {
   const [showPicker2, setShowPicker2] = useState(false);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
 
-  const [traspasos, setTraspasos] = useState<Traspaso[]>([
-    {
-      id: 1,
-      fecha: new Date().toISOString(),
-      sucursalOrigen: 'Ruta 1',
-      sucursalDestino: 1,
-      traspaso_responsable_nombre_unique: 'Juan Pérez',
-      folio: 1234,
-      estatus: 'Pendiente',
-    },
-    {
-      id: 2,
-      fecha: new Date().toISOString(),
-      sucursalOrigen: 'Ruta 2',
-      sucursalDestino: 2,
-      traspaso_responsable_nombre_unique: 'María López',
-      folio: 2345,
-      estatus: 'Pendiente',
-    },
-  ]);
-
-  const [detalles] = useState<Record<number, TraspasoDetalle[]>>({
-    1: [
-      { descripcion: 'Producto A', cantidad: 20 },
-      { descripcion: 'Producto B', cantidad: 15 },
-      { descripcion: 'Producto C', cantidad: 10 },
-    ],
-    2: [
-      { descripcion: 'Producto X', cantidad: 12 },
-      { descripcion: 'Producto Y', cantidad: 7 },
-    ],
-  });
+  const [traspasos, setTraspasos] = useState<Traspaso[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [detalles, setDetalles] = useState<TraspasoDetalle[]>([]);
+  const [loadingDetalle, setLoadingDetalle] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<Traspaso | null>(null);
@@ -102,19 +71,22 @@ export default function TraspasoRecepcionScreen() {
           (user.sucursal as number | null | undefined) ??
           1;
         setCurrentSucursal(sucursal);
+        setFormFiltro({
+          sucursal,
+        });
       }
 
       try {
         const apiSucursales = await FullSyncService.getSucursales();
         setSucursales(
-          apiSucursales.map(s => ({
+          apiSucursales.map((s) => ({
             id_sucursal: s.id,
             nombre: s.nombre,
-          })),
+          }))
         );
       } catch (error) {
-        console.error('Error al cargar sucursales:', error);
-        Alert.alert('Error', 'No se pudieron cargar las sucursales');
+        console.error("Error al cargar sucursales:", error);
+        Alert.alert("Error", "No se pudieron cargar las sucursales");
       }
     };
 
@@ -122,20 +94,27 @@ export default function TraspasoRecepcionScreen() {
   }, []);
 
   const formatDate = (date: Date): string => {
-    const dd = String(date.getDate()).padStart(2, '0');
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
     const yyyy = date.getFullYear();
     return `${dd}/${mm}/${yyyy}`;
   };
 
+  const formatDateForApi = (date: Date): string => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const buildMovilInventarioId = (sucursal: number): number => {
-    const suffix = sucursal.toString().padStart(3, '0');
+    const suffix = sucursal.toString().padStart(3, "0");
     const base = Date.now().toString();
     return Number(`${base}${suffix}`);
   };
 
   const onChangeFecha1 = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       setShowPicker1(false);
     }
     if (selectedDate) {
@@ -144,7 +123,7 @@ export default function TraspasoRecepcionScreen() {
   };
 
   const onChangeFecha2 = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       setShowPicker2(false);
     }
     if (selectedDate) {
@@ -152,65 +131,180 @@ export default function TraspasoRecepcionScreen() {
     }
   };
 
+  const loadTraspasos = async () => {
+    if (!currentUser) {
+      Alert.alert("Sesión", "No se encontró usuario en sesión.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const sucursalParam = formFiltro.sucursal;
+      const vendedorId = (currentUser as any).id ?? 0;
+      const f1 = formatDateForApi(fecha1);
+      const f2 = formatDateForApi(fecha2);
+
+      let url = `${API_BASE_URL}/api/DetalleTraspasos/sp_traspasoBusquedaRecepcion?sucursal=${sucursalParam}&vendedor=${vendedorId}`;
+      if (f1) url += `&fecha1=${encodeURIComponent(f1)}`;
+      if (f2) url += `&fecha2=${encodeURIComponent(f2)}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Respuesta inválida del servidor");
+      }
+      console.log(data);
+      setTraspasos(
+        data.map((t: any, index: number) => ({
+          ...t,
+          id: t.id ?? t.folio ?? index,
+          fecha: t.fecha || new Date().toISOString(),
+          sucursalOrigen: t.sucursalOrigen || "",
+          sucursalDestino: t.sucDestino ?? t.sucursalDestino ?? 0,
+          traspaso_responsable_nombre_unique: t.traspaso_responsable_nombre_unique || "",
+          folio: t.folio ?? 0,
+          estatus: t.estatus || "",
+        }))
+      );
+    } catch (error: any) {
+      console.error("Error al cargar traspasos:", error);
+      Alert.alert("Error", error?.message || "No se pudieron cargar los traspasos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTraspasoDetalle = async (traspaso: Traspaso) => {
+    if (!currentUser) {
+      Alert.alert("Sesión", "No se encontró usuario en sesión.");
+      return;
+    }
+
+    try {
+      setLoadingDetalle(true);
+      setDetalles([]);
+
+      const sucursalOrigen =
+        (currentUser.sucursal_origen as number | null | undefined) ?? 0;
+      const vendedorId = (currentUser as any).id ?? 0;
+      const almacenDestino = traspaso.almacenDestino ?? 0;
+      const almacenOrigen = traspaso.almacenOrigen ?? 0;
+      const sucOrigen = traspaso.sucOrigen ?? 0;
+      const sucDestino = traspaso.sucDestino ?? 0;
+
+      const url =
+        `${API_BASE_URL}/api/DetalleTraspasos/sp_traspasoBusquedaFolioRecepecion` +
+        `?folio=${traspaso.folio}` +
+        `&sucursal=${sucursalOrigen}` +
+        `&vendedor=${vendedorId}` +
+        `&almacenDestino=${almacenDestino}` +
+        `&almacenOrigen=${almacenOrigen}` +
+        `&sucOrigen=${sucOrigen}` +
+        `&sucDestino=${sucDestino}` +
+        `&cambio=false&tipoCambio=0&usuario=${vendedorId}&usuarioEjecuta=${vendedorId}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Respuesta inválida del servidor");
+      }
+
+      setDetalles(
+        data.map((d: any) => ({
+          descripcion: d.descripcion || "",
+          cantidad: d.cantidad ?? 0,
+          idProducto: d.idProducto,
+        }))
+      );
+
+      setSelected(traspaso);
+      setModalOpen(true);
+    } catch (error: any) {
+      console.error("Error al cargar detalle de traspaso:", error);
+      Alert.alert("Error", error?.message || "No se pudo cargar el detalle del traspaso");
+    } finally {
+      setLoadingDetalle(false);
+    }
+  };
+
+  const receiveTraspaso = async () => {
+    if (!selected || !currentUser) return;
+
+    try {
+      const sucursal =
+        (currentUser.sucursal_origen as number | null | undefined) ??
+        currentSucursal ??
+        0;
+      const vendedorId = (currentUser as any).id ?? 0;
+      const almacenDestino = selected.almacenDestino ?? 0;
+      const almacenOrigen = selected.almacenOrigen ?? 0;
+      const sucOrigen = selected.sucOrigen ?? 0;
+      const sucDestino = selected.sucDestino ?? 0;
+
+      const url =
+        `${API_BASE_URL}/api/DetalleTraspasos/sp_traspasoBusquedaFolioRecepecion` +
+        `?folio=${selected.folio}` +
+        `&sucursal=${sucursal}` +
+        `&vendedor=${vendedorId}` +
+        `&almacenDestino=${almacenDestino}` +
+        `&almacenOrigen=${almacenOrigen}` +
+        `&sucOrigen=${sucOrigen}` +
+        `&sucDestino=${sucDestino}` +
+        `&cambio=true&tipoCambio=1&usuario=${vendedorId}&usuarioEjecuta=${vendedorId}&ip=12&dispositivo=12`;
+
+      const response = await fetch(url);
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch (e) {}
+
+      if (!response.ok) {
+        const msg =
+          (data && (data.mensaje || data.mensaje1)) || `HTTP ${response.status}`;
+        throw new Error(msg);
+      }
+
+      // await FullSyncService.syncInventario(sucursal, selected.fecha);
+      await loadTraspasos();
+      setModalOpen(false);
+
+      const msg =
+        (data && (data.mensaje1 || data.mensaje)) ||
+        "El traspaso ha sido recibido y sincronizado.";
+      Alert.alert("Recibido", msg);
+    } catch (error: any) {
+      console.error("Error al recibir traspaso:", error);
+      Alert.alert("Error", error?.message || "No se pudo recibir el traspaso");
+    }
+  };
+
   const filteredTraspasos = useMemo(() => {
-    return traspasos.filter(t =>
-      formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true,
+    return traspasos.filter((t) =>
+      formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true
     );
   }, [traspasos, formFiltro]);
 
   const onConsultar = () => {
-    Alert.alert(
-      'Búsqueda',
-      `Del: ${formatDate(fecha1)}\nAl: ${formatDate(fecha2)}\nSucursal: ${
-        formFiltro.sucursal || '-'
-      }`,
-    );
+    loadTraspasos();
   };
 
   const onRecibir = () => {
     if (!selected) return;
-    Alert.alert('Confirmación', '¿Está seguro de recibir este traspaso?', [
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert("Confirmación", "¿Está seguro de recibir este traspaso?", [
+      { text: "Cancelar", style: "cancel" },
       {
-        text: 'Sí, recibir',
+        text: "Sí, recibir",
         onPress: () => {
-          const sucursal = currentSucursal || selected.sucursalDestino || 1;
-          const baseId = buildMovilInventarioId(sucursal);
-          const now = new Date();
-          const detallesTraspaso = selected ? detalles[selected.id] || [] : [];
-
-          FullSyncService.createLocalInventarioMovements(
-            detallesTraspaso.map((item, index) => ({
-              id: baseId + index,
-              sucursal,
-              claveProd:
-                typeof item.idProducto === 'number' ? item.idProducto : null,
-              saldo: item.cantidad,
-              fechaArrastre: now,
-            })),
-          )
-            .then(() => {
-              setTraspasos(prev =>
-                prev.map(t =>
-                  t.id === selected.id ? { ...t, estatus: 'Finalizado' } : t,
-                ),
-              );
-              setModalOpen(false);
-              Alert.alert(
-                'Recibido',
-                'El traspaso ha sido recibido y registrado en inventario.',
-              );
-            })
-            .catch(error => {
-              console.error(
-                'Error al registrar inventario de traspaso:',
-                error,
-              );
-              Alert.alert(
-                'Error',
-                'El traspaso se marcó como recibido pero no se pudo guardar en inventario.',
-              );
-            });
+          receiveTraspaso();
         },
       },
     ]);
@@ -222,27 +316,17 @@ export default function TraspasoRecepcionScreen() {
 
       <View style={styles.card}>
         <View style={styles.row}>
-          <Icon
-            name="person"
-            type="material"
-            color={COLORS.primary}
-            size={24}
-          />
+          <Icon name="person" type="material" color={COLORS.primary} size={24} />
           <Text style={styles.cardTitle}>Vendedor</Text>
         </View>
         <TextInput
-          value={'Usuario Actual'}
+          value={"Usuario Actual"}
           editable={false}
           style={[styles.input, styles.disabledInput]}
         />
 
         <View style={styles.row}>
-          <Icon
-            name="filter-list"
-            type="material"
-            color={COLORS.primary}
-            size={24}
-          />
+          <Icon name="filter-list" type="material" color={COLORS.primary} size={24} />
           <Text style={styles.cardTitle}>Filtros</Text>
         </View>
 
@@ -284,7 +368,7 @@ export default function TraspasoRecepcionScreen() {
           <DateTimePicker
             value={fecha1}
             mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            display={Platform.OS === "ios" ? "spinner" : "default"}
             onChange={onChangeFecha1}
           />
         )}
@@ -292,52 +376,46 @@ export default function TraspasoRecepcionScreen() {
           <DateTimePicker
             value={fecha2}
             mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            display={Platform.OS === "ios" ? "spinner" : "default"}
             onChange={onChangeFecha2}
           />
         )}
 
         <Text style={styles.smallLabel}>Sucursal destino</Text>
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={{ marginBottom: SPACING.s }}
         >
           <View style={styles.rowWrap}>
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={[styles.pill, formFiltro.sucursal === 0 && styles.pillOn]}
               onPress={() => setFormFiltro({ ...formFiltro, sucursal: 0 })}
-            >
-              <Text
-                style={[
-                  styles.pillText,
-                  formFiltro.sucursal === 0 && styles.pillTextOn,
-                ]}
-              >
-                Todas
-              </Text>
-            </TouchableOpacity>
-            {sucursales.map(s => (
-              <TouchableOpacity
-                key={s.id_sucursal}
-                style={[
-                  styles.pill,
-                  formFiltro.sucursal === s.id_sucursal && styles.pillOn,
-                ]}
-                onPress={() =>
-                  setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })
-                }
-              >
-                <Text
+            ></TouchableOpacity> */}
+            {sucursales
+              .filter((suc) => suc.id_sucursal == currentSucursal)
+              .map((s) => (
+                <TouchableOpacity
+                  key={s.id_sucursal}
                   style={[
-                    styles.pillText,
-                    formFiltro.sucursal === s.id_sucursal && styles.pillTextOn,
+                    styles.pill,
+                    formFiltro.sucursal === s.id_sucursal && styles.pillOn,
                   ]}
+                  onPress={() =>
+                    setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })
+                  }
                 >
-                  {s.nombre}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.pillText,
+                      formFiltro.sucursal === s.id_sucursal && styles.pillTextOn,
+                    ]}
+                  >
+                    {s.nombre}
+                  </Text>
+                </TouchableOpacity>
+              ))}
           </View>
         </ScrollView>
         <TouchableOpacity style={styles.secondaryBtn} onPress={onConsultar}>
@@ -347,27 +425,31 @@ export default function TraspasoRecepcionScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Resultados</Text>
-        {filteredTraspasos.length === 0 ? (
+        {loading ? (
+          <Text style={styles.muted}>Cargando traspasos...</Text>
+        ) : filteredTraspasos.length === 0 ? (
           <Text style={styles.muted}>Sin resultados</Text>
         ) : (
           <FlatList
             data={filteredTraspasos}
-            keyExtractor={i => String(i.id)}
+            keyExtractor={(i) => String(i.id)}
             scrollEnabled={false}
             renderItem={({ item }) => (
               <View style={styles.rowItem}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.invTitle}>Folio {item.folio}</Text>
                   <Text style={styles.mutedRow}>
-                    {item.fecha.split('T')[0]} • Origen: {item.sucursalOrigen}
+                    {item.fecha.split("T")[0]} • Origen: {item.sucursalOrigen}
                   </Text>
                 </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <View style={{ alignItems: "flex-end", gap: 4 }}>
                   <Text
                     style={[
                       styles.status,
-                      item.estatus === 'Pendiente'
+                      item.estatus === "Pendiente"
                         ? styles.statusPending
+                        : item.estatus === "No recibido"
+                        ? styles.statusNoRecibido
                         : styles.statusDone,
                     ]}
                   >
@@ -376,8 +458,7 @@ export default function TraspasoRecepcionScreen() {
                   <TouchableOpacity
                     style={styles.smallBtn}
                     onPress={() => {
-                      setSelected(item);
-                      setModalOpen(true);
+                      loadTraspasoDetalle(item);
                     }}
                   >
                     <Text style={styles.smallBtnText}>Ver Detalle</Text>
@@ -417,7 +498,7 @@ export default function TraspasoRecepcionScreen() {
                 <Text
                   style={[
                     styles.statusValue,
-                    selected?.estatus === 'Pendiente'
+                    selected?.estatus === "Pendiente"
                       ? { color: COLORS.warning }
                       : { color: COLORS.success },
                   ]}
@@ -427,16 +508,15 @@ export default function TraspasoRecepcionScreen() {
               </View>
               <View style={styles.divider} />
               <Text style={styles.infoText}>
-                <Text style={{ fontWeight: 'bold' }}>Origen:</Text>{' '}
+                <Text style={{ fontWeight: "bold" }}>Origen:</Text>{" "}
                 {selected?.sucursalOrigen}
               </Text>
               <Text style={styles.infoText}>
-                <Text style={{ fontWeight: 'bold' }}>Destino:</Text>{' '}
+                <Text style={{ fontWeight: "bold" }}>Destino:</Text>{" "}
                 {selected
-                  ? sucursales.find(
-                      s => s.id_sucursal === selected.sucursalDestino,
-                    )?.nombre
-                  : '-'}
+                  ? sucursales.find((s) => s.id_sucursal === selected.sucursalDestino)
+                      ?.nombre
+                  : "-"}
               </Text>
             </View>
 
@@ -446,34 +526,29 @@ export default function TraspasoRecepcionScreen() {
                 <Text style={[styles.th, { flex: 2 }]}>Producto</Text>
                 <Text style={styles.thRight}>Cant.</Text>
               </View>
-              <FlatList
-                data={selected ? detalles[selected.id] || [] : []}
+              <FlatList<TraspasoDetalle>
+                data={detalles}
                 keyExtractor={(_, idx) => String(idx)}
-                renderItem={({ item }) => (
+                renderItem={({ item }: { item: TraspasoDetalle }) => (
                   <View style={styles.tr}>
-                    <Text style={[styles.td, { flex: 2 }]}>
-                      {item.descripcion}
-                    </Text>
+                    <Text style={[styles.td, { flex: 2 }]}>{item.descripcion}</Text>
                     <Text style={styles.tdRight}>{item.cantidad}</Text>
                   </View>
                 )}
-                ListEmptyComponent={
-                  <Text style={styles.muted}>Sin productos</Text>
-                }
+                ListEmptyComponent={<Text style={styles.muted}>Sin productos</Text>}
               />
             </View>
 
             <TouchableOpacity
               style={[
                 styles.primaryBtn,
-                (selected?.estatus === 'Finalizado' ||
-                  selected?.estatus === 'Cancelado') &&
+                (selected?.estatus === "Finalizado" ||
+                  selected?.estatus === "Cancelado") &&
                   styles.primaryBtnDisabled,
               ]}
               onPress={onRecibir}
               disabled={
-                selected?.estatus === 'Finalizado' ||
-                selected?.estatus === 'Cancelado'
+                selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado"
               }
             >
               <Icon
@@ -512,8 +587,8 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: SPACING.s,
     marginBottom: SPACING.s,
     marginTop: SPACING.s,
@@ -522,7 +597,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: 4,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   input: {
     backgroundColor: COLORS.background,
@@ -538,7 +613,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     opacity: 0.7,
   },
-  dateRow: { flexDirection: 'row', gap: SPACING.m, marginBottom: SPACING.m },
+  dateRow: { flexDirection: "row", gap: SPACING.m, marginBottom: SPACING.m },
   col: { flex: 1 },
   dateInput: {
     backgroundColor: COLORS.surface,
@@ -548,17 +623,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.m,
     marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   dateText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.primary,
   },
   rowWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 4,
     gap: SPACING.s,
   },
@@ -575,64 +650,65 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     ...SHADOWS.small,
   },
-  pillText: { color: COLORS.textSecondary, fontWeight: '500' },
-  pillTextOn: { color: '#fff', fontWeight: '700' },
+  pillText: { color: COLORS.textSecondary, fontWeight: "500" },
+  pillTextOn: { color: "#fff", fontWeight: "700" },
   secondaryBtn: {
     backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: SPACING.m,
   },
-  secondaryBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 16 },
-  muted: { color: COLORS.muted, padding: SPACING.m, textAlign: 'center' },
+  secondaryBtnText: { color: COLORS.primary, fontWeight: "700", fontSize: 16 },
+  muted: { color: COLORS.muted, padding: SPACING.m, textAlign: "center" },
   mutedRow: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
   rowItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  invTitle: { fontWeight: '600', color: COLORS.textPrimary, fontSize: 16 },
+  invTitle: { fontWeight: "600", color: COLORS.textPrimary, fontSize: 16 },
   status: {
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.s,
-    overflow: 'hidden',
+    overflow: "hidden",
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 4,
-    textAlign: 'center',
+    textAlign: "center",
   },
-  statusPending: { backgroundColor: '#FFF3CD', color: '#F57C00' },
-  statusDone: { backgroundColor: '#E8F5E9', color: '#2E7D32' },
+  statusPending: { backgroundColor: "#FFF3CD", color: "#F57C00" },
+  statusDone: { backgroundColor: "#E8F5E9", color: "#2E7D32" },
+  statusNoRecibido: { backgroundColor: "#F57C00", color: "#fff" },
   smallBtn: {
     backgroundColor: COLORS.primary,
     paddingHorizontal: SPACING.s,
     paddingVertical: 4,
     borderRadius: BORDER_RADIUS.s,
   },
-  smallBtnText: { color: '#fff', fontWeight: '600', fontSize: 10 },
+  smallBtnText: { color: "#fff", fontWeight: "600", fontSize: 10 },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
   },
   modalCard: {
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: BORDER_RADIUS.xl,
     borderTopRightRadius: BORDER_RADIUS.xl,
-    height: '90%',
+    height: "90%",
     padding: SPACING.l,
     ...SHADOWS.large,
   },
   modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: SPACING.m,
   },
   modalTitle: { ...TYPOGRAPHY.h2, fontSize: 20, marginBottom: 0 },
@@ -645,14 +721,14 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 4,
   },
-  folioLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
-  folioValue: { color: COLORS.textPrimary, fontSize: 14, fontWeight: 'bold' },
-  statusValue: { fontSize: 14, fontWeight: 'bold' },
+  folioLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: "600" },
+  folioValue: { color: COLORS.textPrimary, fontSize: 14, fontWeight: "bold" },
+  statusValue: { fontSize: 14, fontWeight: "bold" },
   divider: {
     height: 1,
     backgroundColor: COLORS.border,
@@ -660,7 +736,7 @@ const styles = StyleSheet.create({
   },
   infoText: { color: COLORS.textPrimary, fontSize: 14, marginBottom: 2 },
   tableHeader: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
@@ -670,15 +746,15 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: BORDER_RADIUS.m,
     borderTopRightRadius: BORDER_RADIUS.m,
   },
-  th: { flex: 1, fontWeight: '700', color: COLORS.primaryDark },
+  th: { flex: 1, fontWeight: "700", color: COLORS.primaryDark },
   thRight: {
     flex: 1,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.primaryDark,
-    textAlign: 'right',
+    textAlign: "right",
   },
   tr: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.s,
     borderBottomWidth: 1,
@@ -687,21 +763,21 @@ const styles = StyleSheet.create({
   td: { flex: 1, color: COLORS.textPrimary },
   tdRight: {
     flex: 1,
-    textAlign: 'right',
+    textAlign: "right",
     color: COLORS.textPrimary,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   primaryBtn: {
     backgroundColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: SPACING.l,
     marginBottom: SPACING.l,
-    flexDirection: 'row',
+    flexDirection: "row",
     ...SHADOWS.medium,
   },
   primaryBtnDisabled: { opacity: 0.6, backgroundColor: COLORS.muted },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

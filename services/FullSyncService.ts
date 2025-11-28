@@ -169,7 +169,7 @@ class FullSyncService {
     console.log("📊 Iniciando syncVentas para sucursal:", sucursal);
 
     try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas-full/${sucursal}`;
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/full/${sucursal}`;
       console.log("🌐 Haciendo request a:", url);
 
       const response = await fetch(url);
@@ -186,6 +186,8 @@ class FullSyncService {
       }
 
       const data = await response.json();
+      console.log({data})
+      console.log(11111)
       console.log("📋 Datos recibidos en syncVentas:", {
         type: typeof data,
         isArray: Array.isArray(data),
@@ -897,7 +899,21 @@ class FullSyncService {
     if (!this.realm) return;
 
     this.realm.write(() => {
-      ventas.forEach((v) => {
+      ventas.forEach((v, index) => {
+        // Validar fecha antes de pasar a Realm
+        console.log(`[FullSync] Venta ${index} fecha validation:`, {
+          fecha: v.fecha,
+          tipoFecha: typeof v.fecha,
+          isDate: v.fecha instanceof Date,
+          getTime: v.fecha?.getTime(),
+          isNaN: v.fecha ? isNaN(v.fecha.getTime()) : 'null/undefined'
+        });
+        
+        // Si la fecha es inválida, usar una fecha segura
+        const safeFecha = (v.fecha instanceof Date && !isNaN(v.fecha.getTime())) 
+          ? v.fecha 
+          : new Date();
+        
         this.realm!.create("Venta", {
           id: v.id,
           sucursal: v.sucursal ?? null,
@@ -910,7 +926,7 @@ class FullSyncService {
           importe: v.importe ?? null,
           cveCliente: v.cveCliente ?? null,
           nombreCliente: v.nombreCliente ?? null,
-          fecha: v.fecha ?? new Date(),
+          fecha: safeFecha,
           tipoPago: v.tipoPago ?? null,
           descripcionMedioPago: v.descripcionMedioPago ?? null,
           vendedor: v.vendedor ?? null,

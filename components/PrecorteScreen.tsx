@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,18 +8,12 @@ import {
   TextInput,
   Alert,
   ScrollView,
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import TicketPrinter from '../services/TicketPrinter';
-import BluetoothPrinterService from '../services/BluetoothPrinterService';
-import FullSyncService from '../services/FullSyncService';
-import {
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+} from "react-native";
+import { Icon } from "react-native-elements";
+import TicketPrinter from "../services/TicketPrinter";
+import BluetoothPrinterService from "../services/BluetoothPrinterService";
+import FullSyncService from "../services/FullSyncService";
+import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type PrecorteItem = {
   id: number;
@@ -34,8 +28,8 @@ export default function PrecorteScreen() {
   const today = useMemo(() => {
     const d = new Date();
     const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   }, []);
 
@@ -43,13 +37,13 @@ export default function PrecorteScreen() {
   const [items, setItems] = useState<PrecorteItem[]>([]);
   const [totalEfectivo, setTotalEfectivo] = useState(1234.56);
   const [printerConnected, setPrinterConnected] = useState(false);
-  const [printerName, setPrinterName] = useState<string>('');
+  const [printerName, setPrinterName] = useState<string>("");
 
   const loadInventario = async () => {
     try {
       // Parsear la fecha seleccionada (YYYY-MM-DD) a un rango de día LOCAL
       // para usarlo tanto en el filtro de inventario como en el cálculo de ventas
-      const [yearStr, monthStr, dayStr] = fecha.split('-');
+      const [yearStr, monthStr, dayStr] = fecha.split("-");
       const year = parseInt(yearStr, 10);
       const month = parseInt(monthStr, 10);
       const day = parseInt(dayStr, 10);
@@ -67,11 +61,10 @@ export default function PrecorteScreen() {
         const d = fa instanceof Date ? fa : new Date(fa);
         return d >= startOfDay && d <= endOfDay;
       });
-      consoleRealm('inventarioFiltrado', inventarioFiltrado);
 
       // Agrupar por claveProd y sumar saldos
       const groupedByClave = inventarioFiltrado.reduce((acc: any, inv: any) => {
-        const clave = String(inv.claveProd ?? '');
+        const clave = String(inv.claveProd ?? "");
         const saldo = inv.saldo ?? 0;
 
         if (!acc[clave]) {
@@ -90,21 +83,19 @@ export default function PrecorteScreen() {
       }, {});
 
       console.log(
-        '📊 Inventario agrupado por clave:',
+        "📊 Inventario agrupado por clave:",
         Object.keys(groupedByClave).length,
-        'productos únicos',
+        "productos únicos"
       );
 
-      const mapped: PrecorteItem[] = Object.values(groupedByClave).map(
-        (item: any) => ({
-          id: parseInt(item.clave_prod), // Usar claveProd como ID
-          clave_prod: item.clave_prod,
-          descripcion: item.descripcion,
-          entradas: 0,
-          salidas: 0,
-          ifValue: item.saldoTotal, // Saldo sumado y ajustado
-        }),
-      );
+      const mapped: PrecorteItem[] = Object.values(groupedByClave).map((item: any) => ({
+        id: parseInt(item.clave_prod), // Usar claveProd como ID
+        clave_prod: item.clave_prod,
+        descripcion: item.descripcion,
+        entradas: 0,
+        salidas: 0,
+        ifValue: item.saldoTotal, // Saldo sumado y ajustado
+      }));
 
       setItems(mapped);
 
@@ -112,15 +103,15 @@ export default function PrecorteScreen() {
       const totalEf = FullSyncService.getVentasTotalEfectivoForDate(startOfDay);
       setTotalEfectivo(totalEf);
     } catch (error) {
-      console.error('Error al cargar inventario para precorte:', error);
-      Alert.alert('Error', 'No se pudo cargar el inventario para el precorte');
+      console.error("Error al cargar inventario para precorte:", error);
+      Alert.alert("Error", "No se pudo cargar el inventario para el precorte");
     }
   };
 
   useEffect(() => {
     const status = BluetoothPrinterService.getStatus();
     setPrinterConnected(status.connected);
-    setPrinterName(status.printer?.name || '');
+    setPrinterName(status.printer?.name || "");
     loadInventario();
   }, []);
 
@@ -132,7 +123,7 @@ export default function PrecorteScreen() {
     try {
       await TicketPrinter.printPrecorteTicket({
         date: new Date(fecha),
-        items: items.map(it => ({
+        items: items.map((it) => ({
           product: it.descripcion,
           entries: it.entradas,
           exits: it.salidas,
@@ -146,10 +137,10 @@ export default function PrecorteScreen() {
       setPrinterConnected(status.connected);
 
       if (status.connected) {
-        Alert.alert('🖨️ Impreso', `Ticket enviado a ${status.printer?.name}`);
+        Alert.alert("🖨️ Impreso", `Ticket enviado a ${status.printer?.name}`);
       }
     } catch (error) {
-      Alert.alert('❌ Error', 'No se pudo imprimir el precorte');
+      Alert.alert("❌ Error", "No se pudo imprimir el precorte");
     }
   };
 
@@ -166,24 +157,17 @@ export default function PrecorteScreen() {
               color="#fff"
               style={{ marginRight: 4 }}
             />
-            <Text style={styles.printerBadgeText}>
-              {printerName || 'Conectada'}
-            </Text>
+            <Text style={styles.printerBadgeText}>{printerName || "Conectada"}</Text>
           </View>
         )}
       </View>
 
       {!printerConnected && (
         <View style={styles.warningCard}>
-          <Icon
-            name="warning"
-            type="material"
-            color={COLORS.warning}
-            size={24}
-          />
+          <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay impresora configurada. Ve a Configuración de Impresora para
-            conectar una.
+            No hay impresora configurada. Ve a Configuración de Impresora para conectar
+            una.
           </Text>
         </View>
       )}
@@ -223,19 +207,12 @@ export default function PrecorteScreen() {
           ) : (
             <FlatList
               data={items}
-              keyExtractor={i => String(i.id)}
+              keyExtractor={(i) => String(i.id)}
               scrollEnabled={false}
               renderItem={({ item }) => (
                 <View style={styles.tr}>
-                  <Text style={[styles.td, { flex: 2 }]}>
-                    {item.descripcion}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.tdRight,
-                      item.ifValue < 0 && styles.negative,
-                    ]}
-                  >
+                  <Text style={[styles.td, { flex: 2 }]}>{item.descripcion}</Text>
+                  <Text style={[styles.tdRight, item.ifValue < 0 && styles.negative]}>
                     {item.ifValue.toFixed(2)}
                   </Text>
                 </View>
@@ -268,9 +245,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { padding: SPACING.m, paddingBottom: SPACING.xxl },
   headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: SPACING.m,
   },
   title: { ...TYPOGRAPHY.h2 },
@@ -279,23 +256,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
     borderRadius: BORDER_RADIUS.l,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   printerBadgeText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   warningCard: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: "#FFF3E0",
     borderRadius: BORDER_RADIUS.m,
     padding: SPACING.m,
     marginBottom: SPACING.m,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.warning,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: SPACING.s,
     ...SHADOWS.small,
   },
@@ -303,7 +280,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.warning,
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   card: {
     backgroundColor: COLORS.surface,
@@ -313,8 +290,8 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: SPACING.s,
     marginBottom: SPACING.s,
   },
@@ -338,25 +315,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: BORDER_RADIUS.m,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   tableHeader: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.m,
     backgroundColor: COLORS.primaryLight,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  th: { flex: 1, fontWeight: '700', color: COLORS.primaryDark },
+  th: { flex: 1, fontWeight: "700", color: COLORS.primaryDark },
   thRight: {
     flex: 1,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.primaryDark,
-    textAlign: 'right',
+    textAlign: "right",
   },
   tr: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.m,
     borderBottomWidth: 1,
@@ -366,18 +343,18 @@ const styles = StyleSheet.create({
   td: { flex: 1, color: COLORS.textPrimary, fontSize: 14 },
   tdRight: {
     flex: 1,
-    textAlign: 'right',
+    textAlign: "right",
     color: COLORS.textPrimary,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   negative: { color: COLORS.error },
-  muted: { color: COLORS.muted, padding: SPACING.m, textAlign: 'center' },
+  muted: { color: COLORS.muted, padding: SPACING.m, textAlign: "center" },
   footerBox: {
     marginTop: SPACING.m,
     padding: SPACING.m,
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.m,
-    alignItems: 'center',
+    alignItems: "center",
   },
   footerLabel: {
     color: COLORS.textSecondary,
@@ -387,27 +364,27 @@ const styles = StyleSheet.create({
   footerValue: {
     color: COLORS.success,
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   primaryBtn: {
     backgroundColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: SPACING.l,
-    flexDirection: 'row',
+    flexDirection: "row",
     ...SHADOWS.medium,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   secondaryBtn: {
     backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.l,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: SPACING.m,
   },
-  secondaryBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 16 },
+  secondaryBtnText: { color: COLORS.primary, fontWeight: "700", fontSize: 16 },
 });

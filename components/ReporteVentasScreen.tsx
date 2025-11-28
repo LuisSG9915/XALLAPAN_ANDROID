@@ -37,6 +37,22 @@ type ReporteItem = {
   precio?: number;
 };
 
+type GroupedSale = {
+  idMovil: number;
+  no_venta: number;
+  fecha: string;
+  nombre: string;
+  totalImporte: number;
+  tipoPago: "Efectivo" | "Credito" | "Transferencia";
+  sucursal?: number;
+  cve_cliente?: number;
+  productos: Array<{
+    nombreProducto: string;
+    cantProducto: number;
+    precio: number;
+    importe: number;
+  }>;
+};
 type TicketLine = string;
 
 export default function ReporteVentasScreen() {
@@ -57,17 +73,22 @@ export default function ReporteVentasScreen() {
   const [items, setItems] = useState<ReporteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [allVentas, setAllVentas] = useState<any[]>([]);
+  const [groupedItems, setGroupedItems] = useState<GroupedSale[]>([]);
+  const [debugInfo, setDebugInfo] = useState<string>("");
+  const [isLocalView, setIsLocalView] = useState(false);
 
   const [ticketVisible, setTicketVisible] = useState(false);
   const [ticketContent, setTicketContent] = useState<TicketLine[]>([]);
 
   const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
   const totalEfectivo = useMemo(
-    () => items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
+    () =>
+      items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
     [items]
   );
   const totalCredito = useMemo(
-    () => items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
+    () =>
+      items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
     [items]
   );
 
@@ -104,7 +125,9 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const mapTipoPago = (tipo: number | undefined): "Efectivo" | "Credito" | "Transferencia" => {
+  const mapTipoPago = (
+    tipo: number | undefined
+  ): "Efectivo" | "Credito" | "Transferencia" => {
     if (tipo === 1) return "Efectivo";
     if (tipo === 2) return "Credito";
     if (tipo === 3) return "Transferencia";
@@ -113,7 +136,14 @@ export default function ReporteVentasScreen() {
 
   const filtrarVentas = (soloLocales: boolean) => {
     setLoading(true);
+    setIsLocalView(soloLocales);
     try {
+      if (!allVentas || allVentas.length === 0) {
+        Alert.alert("Sin datos", "No hay ventas cargadas. Intenta sincronizar primero.");
+        setLoading(false);
+        return;
+      }
+
       if (!fecha1 || !fecha2) {
         Alert.alert("Error", "Selecciona ambas fechas");
         setLoading(false);
@@ -126,109 +156,101 @@ export default function ReporteVentasScreen() {
       const fecha2Parsed = new Date(fecha2);
       fecha2Parsed.setHours(23, 59, 59, 999);
 
+      console.log("[Reporte] Filtering ventas", {
+        soloLocales,
+        fecha1Parsed,
+        fecha2Parsed,
+        totalVentas: allVentas.length,
+      });
       const filtered = allVentas.filter((venta) => {
         if (!venta.fecha) return false;
         const ventaDate = new Date(venta.fecha);
-        if (ventaDate < fecha1Parsed || ventaDate > fecha2Parsed) {
-          return false;
-        }
-        if (soloLocales && (!venta.id || venta.id <= LOCAL_SALE_ID_THRESHOLD)) {
-          return false;
-        }
-        return true;
-      });
 
-      const mapped: ReporteItem[] = [];
-      const localGroups = new Map<
-        number,
-        {
-          id: number;
-          noVenta: number;
-          fecha: string;
-          nombre: string;
-          importe: number;
-          tipoPago: "Efectivo" | "Credito" | "Transferencia";
-          facturacion: boolean;
-          timbrado: "0" | "1";
-          folioFactura: boolean;
-          facturacionMovil: boolean;
-          sucursal?: number;
-          cve_cliente?: number;
-        }
-      >();
+        // Filtrar por fecha siempre
+        const inDateRange = ventaDate >= fecha1Parsed && ventaDate <= fecha2Parsed;
 
-      filtered.forEach((venta: any) => {
-        const isLocal = !!venta.id && venta.id > LOCAL_SALE_ID_THRESHOLD;
-        const noVenta = venta.noVenta || 0;
-
-        if (isLocal && noVenta) {
-          const existente = localGroups.get(noVenta);
-          const importeLinea = Number(venta.importe) || 0;
-
-          if (existente) {
-            existente.importe += importeLinea;
-          } else {
-            localGroups.set(noVenta, {
-              id: venta.id,
-              noVenta,
-              fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
-              nombre: venta.nombreCliente || "Sin nombre",
-              importe: importeLinea,
-              tipoPago: mapTipoPago(venta.tipoPago),
-              facturacion: !!venta.facturacionMovil,
-              timbrado: venta.folioFactura ? "1" : "0",
-              folioFactura: !!venta.folioFactura,
-              facturacionMovil: !!venta.facturacionMovil,
-              sucursal: venta.sucursal,
-              cve_cliente: venta.cveCliente,
-            });
-          }
+        if (soloLocales) {
+          // Consultar Local: solo ventas con id >= threshold (ventas locales)
+          return inDateRange && venta.id && venta.id >= LOCAL_SALE_ID_THRESHOLD;
         } else {
-          mapped.push({
-            id: venta.id,
-            no_venta: noVenta,
-            fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
-            nombre: venta.nombreCliente || "Sin nombre",
-            importe: venta.importe || 0,
-            tipoPago: mapTipoPago(venta.tipoPago),
-            facturacion: !!venta.facturacionMovil,
-            timbrado: venta.folioFactura ? "1" : "0",
-            folioFactura: !!venta.folioFactura,
-            facturacionMovil: !!venta.facturacionMovil,
-            sucursal: venta.sucursal,
-            cve_cliente: venta.cveCliente,
-            nombreProducto: venta.nombreProducto,
-            cantProducto: venta.cantProducto,
-            precio: venta.precio,
-          });
+          // Consultar: solo ventas con id < threshold (ventas remotas/API)
+          return inDateRange && (!venta.id || venta.id < LOCAL_SALE_ID_THRESHOLD);
         }
       });
 
-      const localItems: ReporteItem[] = Array.from(localGroups.values()).map((grupo) => ({
-        id: grupo.id,
-        no_venta: grupo.noVenta,
-        fecha: grupo.fecha,
-        nombre: grupo.nombre,
-        importe: grupo.importe,
-        tipoPago: grupo.tipoPago,
-        facturacion: grupo.facturacion,
-        timbrado: grupo.timbrado,
-        folioFactura: grupo.folioFactura,
-        facturacionMovil: grupo.facturacionMovil,
-        sucursal: grupo.sucursal,
-        cve_cliente: grupo.cve_cliente,
+      console.log("[Reporte] Filtered results", { count: filtered.length });
+
+      const mapped: ReporteItem[] = filtered.map((venta) => ({
+        id: venta.id,
+        idMovil: venta.idMovil,
+        no_venta: venta.noVenta || 0,
+        fecha: venta.fecha
+          ? new Date(venta.fecha).toISOString()
+          : new Date().toISOString(),
+        nombre: venta.nombreCliente || "Sin nombre",
+        importe: venta.importe || 0,
+        tipoPago: mapTipoPago(venta.tipoPago),
+        facturacion: !!venta.facturacionMovil,
+        timbrado: venta.folioFactura ? "1" : "0",
+        folioFactura: !!venta.folioFactura,
+        facturacionMovil: !!venta.facturacionMovil,
+        sucursal: venta.sucursal,
+        cve_cliente: venta.cveCliente,
+        nombreProducto: venta.nombreProducto,
+        cantProducto: venta.cantProducto,
+        precio: venta.precio,
       }));
 
-      const finalItems = [...mapped, ...localItems].sort((a, b) => {
-        const da = new Date(a.fecha).getTime();
-        const db = new Date(b.fecha).getTime();
-        return db - da;
-      });
+      setItems(mapped);
 
-      setItems(finalItems);
-    } catch (error) {
+      // Si es vista local, agrupar por idMovil
+      if (soloLocales) {
+        const groupedMap = new Map<number, GroupedSale>();
+
+        filtered.forEach((venta) => {
+          const idMovil = venta.idMovil || venta.id;
+          if (!groupedMap.has(idMovil)) {
+            groupedMap.set(idMovil, {
+              idMovil,
+              no_venta: venta.noVenta || idMovil,
+              fecha: venta.fecha
+                ? new Date(venta.fecha).toISOString()
+                : new Date().toISOString(),
+              nombre: venta.nombreCliente || "Sin nombre",
+              totalImporte: 0,
+              tipoPago: mapTipoPago(venta.tipoPago),
+              sucursal: venta.sucursal,
+              cve_cliente: venta.cveCliente,
+              productos: [],
+            });
+          }
+
+          const group = groupedMap.get(idMovil)!;
+          const productoImporte = venta.importe || 0;
+          group.totalImporte += productoImporte;
+          group.productos.push({
+            nombreProducto: venta.nombreProducto || "Sin nombre",
+            cantProducto: venta.cantProducto || 0,
+            precio: venta.precio || 0,
+            importe: productoImporte,
+          });
+        });
+
+        setGroupedItems(Array.from(groupedMap.values()));
+      } else {
+        setGroupedItems([]);
+      }
+    } catch (error: any) {
       console.error("Error al filtrar ventas:", error);
-      Alert.alert("Error", "Ocurrió un error al consultar las ventas");
+      const errorMsg = error?.message || String(error) || "Error desconocido";
+      const errorStack = error?.stack || "";
+      setDebugInfo(`Error filtrado: ${errorMsg}\nStack: ${errorStack.substring(0, 200)}`);
+      Alert.alert(
+        "Error al consultar",
+        `No se pudieron filtrar las ventas: ${errorMsg}\n\nVentas disponibles: ${
+          allVentas?.length || 0
+        }\nThreshold: ${LOCAL_SALE_ID_THRESHOLD}\n\nIntenta sincronizar de nuevo desde el menú principal.`
+      );
     } finally {
       setLoading(false);
     }
@@ -250,7 +272,11 @@ export default function ReporteVentasScreen() {
 
     const base = relacionadas[0] as any | undefined;
 
-    const date = base?.fecha ? (base.fecha instanceof Date ? base.fecha : new Date(base.fecha)) : new Date(row.fecha);
+    const date = base?.fecha
+      ? base.fecha instanceof Date
+        ? base.fecha
+        : new Date(base.fecha)
+      : new Date(row.fecha);
 
     const clientName = base?.nombreCliente || row.nombre;
     const paymentMethod = row.tipoPago;
@@ -279,7 +305,8 @@ export default function ReporteVentasScreen() {
           ]
         : [];
 
-    const total = items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : row.importe;
+    const total =
+      items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : row.importe;
 
     const saleTicketData: SaleTicketData = {
       clientName,
@@ -319,8 +346,11 @@ export default function ReporteVentasScreen() {
           return;
         }
 
-        await FacturaService.getInstance().imprimirFacturaExistente(row.no_venta, row.sucursal, row.caja || 2, () =>
-          loadVentas()
+        await FacturaService.getInstance().imprimirFacturaExistente(
+          row.no_venta,
+          row.sucursal,
+          row.caja || 2,
+          () => loadVentas()
         );
         return;
       }
@@ -346,7 +376,11 @@ export default function ReporteVentasScreen() {
           usoCFDI: "G03", // Gastos en general
         };
 
-        await FacturaService.getInstance().generarFactura([facturaItem], fechaFactura, () => loadVentas());
+        await FacturaService.getInstance().generarFactura(
+          [facturaItem],
+          fechaFactura,
+          () => loadVentas()
+        );
         return;
       }
 
@@ -367,8 +401,16 @@ export default function ReporteVentasScreen() {
 
       {allVentas.length > 0 && (
         <View style={styles.infoCard}>
-          <Icon name="info" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
-          <Text style={styles.infoText}>{allVentas.length} ventas sincronizadas en la base local</Text>
+          <Icon
+            name="info"
+            type="material"
+            color={COLORS.primary}
+            size={20}
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.infoText}>
+            {allVentas.length} ventas sincronizadas en la base local
+          </Text>
         </View>
       )}
 
@@ -376,7 +418,8 @@ export default function ReporteVentasScreen() {
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el menú principal.
+            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el
+            menú principal.
           </Text>
         </View>
       )}
@@ -385,15 +428,33 @@ export default function ReporteVentasScreen() {
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha inicial</Text>
-            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
-              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowPicker1(true)}
+            >
+              <Icon
+                name="event"
+                type="material"
+                color={COLORS.primary}
+                size={20}
+                style={{ marginRight: 8 }}
+              />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha final</Text>
-            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
-              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowPicker2(true)}
+            >
+              <Icon
+                name="event"
+                type="material"
+                color={COLORS.primary}
+                size={20}
+                style={{ marginRight: 8 }}
+              />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -460,11 +521,23 @@ export default function ReporteVentasScreen() {
             )}
           </>
         )}
-        <TouchableOpacity style={styles.secondaryBtn} onPress={consultar} disabled={loading}>
-          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar"}</Text>
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={consultar}
+          disabled={loading}
+        >
+          <Text style={styles.secondaryBtnText}>
+            {loading ? "Cargando..." : "Consultar"}
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={consultarLocal} disabled={loading}>
-          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar local"}</Text>
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={consultarLocal}
+          disabled={loading}
+        >
+          <Text style={styles.secondaryBtnText}>
+            {loading ? "Cargando..." : "Consultar local"}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -490,11 +563,27 @@ export default function ReporteVentasScreen() {
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.money}>${item.importe.toFixed(2)}</Text>
                   <View style={styles.actionRow}>
-                    <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
-                      <Icon name="print" type="material" color={COLORS.primary} size={20} />
+                    <TouchableOpacity
+                      onPress={() => imprimirTicket(item)}
+                      style={styles.iconBtn}
+                    >
+                      <Icon
+                        name="print"
+                        type="material"
+                        color={COLORS.primary}
+                        size={20}
+                      />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
-                      <Icon name="visibility" type="material" color={COLORS.info} size={20} />
+                    <TouchableOpacity
+                      onPress={() => visualizarTicket(item)}
+                      style={styles.iconBtn}
+                    >
+                      <Icon
+                        name="visibility"
+                        type="material"
+                        color={COLORS.info}
+                        size={20}
+                      />
                     </TouchableOpacity>
                     <Text onPress={() => console.log(item)}>Caja {item?.caja}</Text>
                     <TouchableOpacity
@@ -505,7 +594,11 @@ export default function ReporteVentasScreen() {
                       <Icon
                         name="receipt"
                         type="material"
-                        color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
+                        color={
+                          !item.folioFactura && !item.facturacionMovil
+                            ? COLORS.muted
+                            : COLORS.success
+                        }
                         size={20}
                       />
                     </TouchableOpacity>
