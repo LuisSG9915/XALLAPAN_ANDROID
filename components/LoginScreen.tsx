@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,34 +10,27 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import AuthService from '../services/AuthService';
-import FullSyncService, { SyncProgress } from '../services/FullSyncService';
-import SyncProgressModal from './SyncProgressModal';
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+} from "react-native";
+import { Icon } from "react-native-elements";
+import AuthService from "../services/AuthService";
+import FullSyncService, { SyncProgress } from "../services/FullSyncService";
+import SyncProgressModal from "./SyncProgressModal";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 export default function LoginScreen({ navigation }: any) {
-  const [usuario, setUsuario] = useState('');
-  const [password, setPassword] = useState('');
+  const [usuario, setUsuario] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress[]>([]);
 
   useEffect(() => {
-    console.log('Checking for existing session in LoginScreen');
+    console.log("Checking for existing session in LoginScreen");
     const checkSession = async () => {
       const session = await AuthService.restoreSession();
       if (session) {
-        console.log('Session found, redirecting to Home');
-        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+        console.log("Session found, redirecting to Home");
+        navigation.reset({ index: 0, routes: [{ name: "Home" }] });
       }
     };
     checkSession();
@@ -45,31 +38,35 @@ export default function LoginScreen({ navigation }: any) {
 
   const handleLogin = async () => {
     if (!usuario || !password) {
-      Alert.alert('Campos requeridos', 'Ingresa usuario y contraseña');
+      Alert.alert("Campos requeridos", "Ingresa usuario y contraseña");
       return;
     }
-    console.log('Login attempt with user:', usuario);
+    console.log("Login attempt with user:", usuario);
     setLoading(true);
     try {
-      await AuthService.login(usuario.trim(), password.trim());
+      const user = await AuthService.login(usuario.trim(), password.trim());
+
+      // Obtener la sucursal del usuario que acaba de hacer login
+      const sucursal = user?.sucursal_origen || user?.sucursal || 1;
+      console.log("🏢 Sincronizando datos para sucursal:", sucursal);
 
       // Iniciar sincronización después del login exitoso
       setLoading(false);
       setSyncing(true);
       setSyncProgress([]);
 
-      await FullSyncService.syncAll(1, (progress: SyncProgress) => {
-        setSyncProgress(prev => [...prev, progress]);
+      await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
+        setSyncProgress((prev) => [...prev, progress]);
       });
 
       // Mantener el modal visible 2 segundos después de terminar
-      await new Promise<void>(resolve => setTimeout(resolve, 2000));
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
       setSyncing(false);
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
     } catch (err: any) {
-      const msg = err?.message || 'Ocurrió un error al iniciar sesión';
-      Alert.alert('No autorizado', msg);
+      const msg = err?.message || "Ocurrió un error al iniciar sesión";
+      Alert.alert("No autorizado", msg);
       setSyncing(false);
     } finally {
       setLoading(false);
@@ -77,19 +74,11 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerContainer}>
           <View style={styles.logoContainer}>
-            <Icon
-              name="ac-unit"
-              type="material"
-              size={50}
-              color={COLORS.primary}
-            />
+            <Icon name="ac-unit" type="material" size={50} color={COLORS.primary} />
           </View>
           <Text style={styles.appName}>{APP_NAME}</Text>
           <Text style={styles.subtitle}>Bienvenido de nuevo</Text>
@@ -117,13 +106,7 @@ export default function LoginScreen({ navigation }: any) {
           </View>
 
           <View style={styles.inputContainer}>
-            <Icon
-              name="lock-outline"
-              type="material"
-              size={24}
-              color={COLORS.textSecondary}
-              style={styles.inputIcon}
-            />
+            <Icon name="lock-outline" type="material" size={24} color={COLORS.textSecondary} style={styles.inputIcon} />
             <TextInput
               placeholder="Contraseña"
               placeholderTextColor={COLORS.muted}
@@ -148,19 +131,12 @@ export default function LoginScreen({ navigation }: any) {
             ) : (
               <>
                 <Text style={styles.buttonText}>INGRESAR</Text>
-                <Icon
-                  name="arrow-forward"
-                  type="material"
-                  size={20}
-                  color="#fff"
-                />
+                <Icon name="arrow-forward" type="material" size={20} color="#fff" />
               </>
             )}
           </TouchableOpacity>
 
-          <Text style={styles.note}>
-            Login solo online por ahora. IndexedDB/Realm pendiente.
-          </Text>
+          <Text style={styles.note}>Login solo online por ahora. IndexedDB/Realm pendiente.</Text>
         </View>
 
         <SyncProgressModal visible={syncing} progress={syncProgress} />
@@ -176,20 +152,20 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     padding: SPACING.l,
   },
   headerContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: SPACING.xxl,
   },
   logoContainer: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: SPACING.m,
     ...SHADOWS.medium,
   },
@@ -203,14 +179,14 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   formContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     padding: SPACING.l,
     borderRadius: BORDER_RADIUS.xl,
     ...SHADOWS.medium,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.m,
     marginBottom: SPACING.m,
@@ -231,9 +207,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.m,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: SPACING.s,
     marginTop: SPACING.s,
     ...SHADOWS.small,
@@ -243,8 +219,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.muted,
   },
   buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: "#fff",
+    fontWeight: "bold",
     fontSize: 16,
     letterSpacing: 1,
   },
@@ -252,6 +228,6 @@ const styles = StyleSheet.create({
     marginTop: SPACING.l,
     fontSize: 12,
     color: COLORS.muted,
-    textAlign: 'center',
+    textAlign: "center",
   },
 });

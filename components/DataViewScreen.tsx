@@ -1,32 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  RefreshControl,
-  Alert,
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import FullSyncService from '../services/FullSyncService';
-import {
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from '../theme/theme';
+import React, { useState, useEffect, useCallback } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, RefreshControl, Alert } from "react-native";
+import { Icon } from "react-native-elements";
+import FullSyncService from "../services/FullSyncService";
+import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
-type EntityType =
-  | 'ventas'
-  | 'usuarios'
-  | 'productos'
-  | 'precios'
-  | 'inventario'
-  | 'cartera'
-  | 'clientes';
+type EntityType = "ventas" | "usuarios" | "productos" | "precios" | "inventario" | "cartera" | "clientes";
 
 interface EntityTab {
   key: EntityType;
@@ -35,17 +13,17 @@ interface EntityTab {
 }
 
 const ENTITY_TABS: EntityTab[] = [
-  { key: 'ventas', title: 'Ventas', icon: 'attach-money' },
-  { key: 'clientes', title: 'Clientes', icon: 'people' },
-  { key: 'productos', title: 'Productos', icon: 'inventory' },
-  { key: 'precios', title: 'Precios', icon: 'price-check' },
-  { key: 'inventario', title: 'Inventario', icon: 'bar-chart' },
-  { key: 'cartera', title: 'Cartera', icon: 'account-balance-wallet' },
-  { key: 'usuarios', title: 'Usuarios', icon: 'person' },
+  { key: "ventas", title: "Ventas", icon: "attach-money" },
+  { key: "clientes", title: "Clientes", icon: "people" },
+  { key: "productos", title: "Productos", icon: "inventory" },
+  { key: "precios", title: "Precios", icon: "price-check" },
+  { key: "inventario", title: "Inventario", icon: "bar-chart" },
+  { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
+  { key: "usuarios", title: "Usuarios", icon: "person" },
 ];
 
 export default function DataViewScreen() {
-  const [selectedTab, setSelectedTab] = useState<EntityType>('ventas');
+  const [selectedTab, setSelectedTab] = useState<EntityType>("ventas");
   const [data, setData] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [refreshing, setRefreshing] = useState(false);
@@ -62,37 +40,31 @@ export default function DataViewScreen() {
       const offset = currentPage * ITEMS_PER_PAGE;
 
       switch (selectedTab) {
-        case 'ventas':
+        case "ventas":
           setData(FullSyncService.getVentasPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'usuarios':
+        case "usuarios":
           setData(FullSyncService.getUsuariosPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'productos':
-          setData(
-            FullSyncService.getProductosPaginated(offset, ITEMS_PER_PAGE),
-          );
+        case "productos":
+          setData(FullSyncService.getProductosPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'precios':
+        case "precios":
           setData(FullSyncService.getPreciosPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'inventario':
-          setData(
-            FullSyncService.getInventarioPaginated(offset, ITEMS_PER_PAGE),
-          );
+        case "inventario":
+          setData(FullSyncService.getInventarioPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'cartera':
+        case "cartera":
           setData(FullSyncService.getCarteraPaginated(offset, ITEMS_PER_PAGE));
           break;
-        case 'clientes':
-          setData(
-            FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE),
-          );
+        case "clientes":
+          setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));
           break;
       }
     } catch (error) {
-      console.error('Error al cargar datos:', error);
-      Alert.alert('Error', 'No se pudieron cargar los datos');
+      console.error("Error al cargar datos:", error);
+      Alert.alert("Error", "No se pudieron cargar los datos");
     }
   }, [selectedTab, currentPage]);
 
@@ -126,144 +98,140 @@ export default function DataViewScreen() {
   };
 
   const renderVenta = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>Venta #{item.noVenta}</Text>
-        <Text style={styles.cardSubtitle}>
-          {item.fecha?.toLocaleDateString()}
-        </Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Venta #{item.noVenta}</Text>
+          <Text style={styles.cardSubtitle}>{item.fecha?.toLocaleDateString()}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Cliente: {item.nombreCliente}</Text>
+          <Text style={styles.cardText}>Producto: {item.nombreProducto}</Text>
+          <Text style={styles.cardText}>Cantidad: {item.cantProducto}</Text>
+          <Text style={styles.cardPrice}>Importe: ${item.importe?.toFixed(2)}</Text>
+          <Text style={styles.cardText}>Vendedor: {item.vendedor}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>Cliente: {item.nombreCliente}</Text>
-        <Text style={styles.cardText}>Producto: {item.nombreProducto}</Text>
-        <Text style={styles.cardText}>Cantidad: {item.cantProducto}</Text>
-        <Text style={styles.cardPrice}>
-          Importe: ${item.importe?.toFixed(2)}
-        </Text>
-        <Text style={styles.cardText}>Vendedor: {item.vendedor}</Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderCliente = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.nombre}</Text>
-        <Text style={styles.cardSubtitle}>ID: {item.id}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.nombre}</Text>
+          <Text style={styles.cardSubtitle}>ID: {item.id}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Grupo: {item.idGrupo || "N/A"}</Text>
+          <Text style={styles.cardText}>Crédito: {item.credito ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}</Text>
+          {item.latitud && item.longitud ? (
+            <Text style={styles.cardText}>
+              Ubicación: {item.latitud.toFixed(4)}, {item.longitud.toFixed(4)}
+            </Text>
+          ) : null}
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>Grupo: {item.idGrupo || 'N/A'}</Text>
-        <Text style={styles.cardText}>
-          Crédito: {item.credito ? 'Sí' : 'No'}
-        </Text>
-        <Text style={styles.cardText}>
-          Facturación móvil: {item.facturacionMovil ? 'Sí' : 'No'}
-        </Text>
-        {item.latitud && item.longitud ? (
-          <Text style={styles.cardText}>
-            Ubicación: {item.latitud.toFixed(4)}, {item.longitud.toFixed(4)}
-          </Text>
-        ) : null}
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderProducto = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.descripcion}</Text>
-        <Text style={styles.cardSubtitle}>Clave: {item.claveProd}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.descripcion}</Text>
+          <Text style={styles.cardSubtitle}>Clave: {item.claveProd}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID: {item.id}</Text>
+          <Text style={styles.cardText}>Es Kit: {item.esKit ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>ID: {item.id}</Text>
-        <Text style={styles.cardText}>Es Kit: {item.esKit ? 'Sí' : 'No'}</Text>
-        <Text style={styles.cardText}>
-          Actualizado: {item.fechaAct?.toLocaleDateString() || 'N/A'}
-        </Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderPrecio = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.descripcion}</Text>
-        <Text style={styles.cardPrice}>${item.precio?.toFixed(2)}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.descripcion}</Text>
+          <Text style={styles.cardPrice}>${item.precio?.toFixed(2)}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
+          <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
+          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
-        <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
-        <Text style={styles.cardText}>
-          Actualizado: {item.fechaAct?.toLocaleDateString() || 'N/A'}
-        </Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderInventario = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>Producto {item.claveProd}</Text>
-        <Text style={styles.cardSubtitle}>Sucursal {item.sucursal}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Producto {item.claveProd}</Text>
+          <Text style={styles.cardSubtitle}>Sucursal {item.sucursal}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID: {item.id}</Text>
+          <Text style={styles.cardPrice}>Saldo: {item.saldo}</Text>
+          <Text style={styles.cardText}>Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || "N/A"}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>ID: {item.id}</Text>
-        <Text style={styles.cardPrice}>Saldo: {item.saldo}</Text>
-        <Text style={styles.cardText}>
-          Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || 'N/A'}
-        </Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderCartera = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.nombreCliente}</Text>
-        <Text style={styles.cardPrice}>${item.saldo?.toFixed(2)}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.nombreCliente}</Text>
+          <Text style={styles.cardPrice}>${item.saldo?.toFixed(2)}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
+          <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
+          <Text style={styles.cardText}>No. Venta: {item.noVenta}</Text>
+          <Text style={styles.cardText}>Fecha: {item.fecha?.toLocaleDateString() || "N/A"}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
-        <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
-        <Text style={styles.cardText}>No. Venta: {item.noVenta}</Text>
-        <Text style={styles.cardText}>
-          Fecha: {item.fecha?.toLocaleDateString() || 'N/A'}
-        </Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderUsuario = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.nombre}</Text>
-        <Text style={styles.cardSubtitle}>{item.claveEmpleado}</Text>
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.nombre}</Text>
+          <Text style={styles.cardSubtitle}>{item.claveEmpleado}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Perfil: {item.descripcionPerfil}</Text>
+          <Text style={styles.cardText}>Puesto: {item.descripcionPuesto}</Text>
+          <Text style={styles.cardText}>Sucursal Origen: {item.sucursalOrigen}</Text>
+        </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>Perfil: {item.descripcionPerfil}</Text>
-        <Text style={styles.cardText}>Puesto: {item.descripcionPuesto}</Text>
-        <Text style={styles.cardText}>
-          Sucursal Origen: {item.sucursalOrigen}
-        </Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderItem = ({ item }: { item: any }) => {
     switch (selectedTab) {
-      case 'ventas':
+      case "ventas":
         return renderVenta({ item });
-      case 'clientes':
+      case "clientes":
         return renderCliente({ item });
-      case 'productos':
+      case "productos":
         return renderProducto({ item });
-      case 'precios':
+      case "precios":
         return renderPrecio({ item });
-      case 'inventario':
+      case "inventario":
         return renderInventario({ item });
-      case 'cartera':
+      case "cartera":
         return renderCartera({ item });
-      case 'usuarios':
+      case "usuarios":
         return renderUsuario({ item });
       default:
         return null;
@@ -272,19 +240,19 @@ export default function DataViewScreen() {
 
   const getCount = () => {
     switch (selectedTab) {
-      case 'ventas':
+      case "ventas":
         return stats.ventas || 0;
-      case 'usuarios':
+      case "usuarios":
         return stats.usuarios || 0;
-      case 'productos':
+      case "productos":
         return stats.productos || 0;
-      case 'precios':
+      case "precios":
         return stats.precios || 0;
-      case 'inventario':
+      case "inventario":
         return stats.inventario || 0;
-      case 'cartera':
+      case "cartera":
         return stats.cartera || 0;
-      case 'clientes':
+      case "clientes":
         return stats.clientes || 0;
       default:
         return 0;
@@ -300,7 +268,7 @@ export default function DataViewScreen() {
         style={styles.tabsContainer}
         contentContainerStyle={styles.tabsContent}
       >
-        {ENTITY_TABS.map(tab => (
+        {ENTITY_TABS.map((tab) => (
           <TouchableOpacity
             key={tab.key}
             style={[styles.tab, selectedTab === tab.key && styles.tabActive]}
@@ -310,24 +278,15 @@ export default function DataViewScreen() {
               name={tab.icon}
               type="material"
               size={24}
-              color={selectedTab === tab.key ? '#fff' : COLORS.textSecondary}
+              color={selectedTab === tab.key ? "#fff" : COLORS.textSecondary}
               style={styles.tabIcon}
             />
-            <Text
-              style={[
-                styles.tabText,
-                selectedTab === tab.key && styles.tabTextActive,
-              ]}
-            >
-              {tab.title}
-            </Text>
+            <Text style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}>{tab.title}</Text>
             <View style={styles.badge}>
               <Text
                 style={[
                   styles.badgeText,
-                  selectedTab === tab.key
-                    ? { color: COLORS.primary }
-                    : { color: COLORS.textPrimary },
+                  selectedTab === tab.key ? { color: COLORS.primary } : { color: COLORS.textPrimary },
                 ]}
               >
                 {selectedTab === tab.key ? data.length : getCount()}
@@ -347,37 +306,27 @@ export default function DataViewScreen() {
       {/* Pagination Controls */}
       <View style={styles.paginationContainer}>
         <TouchableOpacity
-          style={[
-            styles.paginationButton,
-            currentPage === 0 && styles.paginationButtonDisabled,
-          ]}
+          style={[styles.paginationButton, currentPage === 0 && styles.paginationButtonDisabled]}
           onPress={handlePreviousPage}
           disabled={currentPage === 0}
         >
           <Icon
             name="chevron-left"
             type="material"
-            color={currentPage === 0 ? COLORS.textSecondary : '#fff'}
+            color={currentPage === 0 ? COLORS.textSecondary : "#fff"}
             size={20}
           />
-          <Text
-            style={[
-              styles.paginationButtonText,
-              currentPage === 0 && { color: COLORS.textSecondary },
-            ]}
-          >
+          <Text style={[styles.paginationButtonText, currentPage === 0 && { color: COLORS.textSecondary }]}>
             Anterior
           </Text>
         </TouchableOpacity>
         <Text style={styles.paginationInfo}>
-          Página {currentPage + 1} de{' '}
-          {Math.ceil(getCount() / ITEMS_PER_PAGE) || 1}
+          Página {currentPage + 1} de {Math.ceil(getCount() / ITEMS_PER_PAGE) || 1}
         </Text>
         <TouchableOpacity
           style={[
             styles.paginationButton,
-            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 &&
-              styles.paginationButtonDisabled,
+            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 && styles.paginationButtonDisabled,
           ]}
           onPress={handleNextPage}
           disabled={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1}
@@ -395,11 +344,7 @@ export default function DataViewScreen() {
           <Icon
             name="chevron-right"
             type="material"
-            color={
-              currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1
-                ? COLORS.textSecondary
-                : '#fff'
-            }
+            color={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 ? COLORS.textSecondary : "#fff"}
             size={20}
           />
         </TouchableOpacity>
@@ -421,17 +366,9 @@ export default function DataViewScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Icon
-              name="inbox"
-              type="material"
-              size={64}
-              color={COLORS.muted}
-              style={{ marginBottom: 16 }}
-            />
+            <Icon name="inbox" type="material" size={64} color={COLORS.muted} style={{ marginBottom: 16 }} />
             <Text style={styles.emptyText}>No hay datos sincronizados</Text>
-            <Text style={styles.emptySubtext}>
-              Inicia sesión nuevamente para sincronizar
-            </Text>
+            <Text style={styles.emptySubtext}>Inicia sesión nuevamente para sincronizar</Text>
           </View>
         }
       />
@@ -461,8 +398,8 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.m,
     backgroundColor: COLORS.background,
     minWidth: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -476,24 +413,24 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textSecondary,
   },
   tabTextActive: {
-    color: '#FFF',
+    color: "#FFF",
   },
   badge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
     borderRadius: BORDER_RADIUS.round,
     paddingHorizontal: 6,
     paddingVertical: 2,
     marginTop: 4,
     minWidth: 20,
-    alignItems: 'center',
+    alignItems: "center",
   },
   badgeText: {
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   statsContainer: {
     backgroundColor: COLORS.surface,
@@ -505,7 +442,7 @@ const styles = StyleSheet.create({
   statsText: {
     fontSize: 14,
     color: COLORS.textSecondary,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   listContent: {
     padding: SPACING.m,
@@ -518,9 +455,9 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     marginBottom: SPACING.s,
     paddingBottom: SPACING.s,
     borderBottomWidth: 1,
@@ -528,7 +465,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: COLORS.textPrimary,
     flex: 1,
   },
@@ -547,17 +484,17 @@ const styles = StyleSheet.create({
   },
   cardPrice: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: COLORS.primary,
   },
   emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: SPACING.xxl,
   },
   emptyText: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textSecondary,
     marginBottom: 8,
   },
@@ -566,9 +503,9 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
   },
   paginationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     backgroundColor: COLORS.surface,
     paddingVertical: SPACING.m,
     paddingHorizontal: SPACING.m,
@@ -581,9 +518,9 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.s,
     borderRadius: BORDER_RADIUS.m,
     minWidth: 100,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
     gap: 4,
   },
   paginationButtonDisabled: {
@@ -592,13 +529,13 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   paginationButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
+    color: "#FFF",
+    fontWeight: "600",
     fontSize: 14,
   },
   paginationInfo: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textSecondary,
   },
 });

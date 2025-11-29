@@ -15,14 +15,7 @@ import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "../theme/theme";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type Cliente = {
   id: number;
@@ -36,6 +29,7 @@ type Producto = {
   claveProd: string;
   descripcion: string;
   precio: number;
+  existencia: number;
 };
 
 type CartItem = Producto & { cantidad: number };
@@ -55,9 +49,7 @@ export default function SalesScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<
-    "efectivo" | "transferencia" | "credito" | null
-  >(null);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -81,14 +73,9 @@ export default function SalesScreen() {
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
-          const vendedor =
-            (user.claveEmpleado as string | undefined) ||
-            (user.nombre as string | undefined) ||
-            "";
+          const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ??
-            (user.sucursal as number | null | undefined) ??
-            1;
+            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
           setCurrentSucursal(sucursal);
         }
 
@@ -119,7 +106,7 @@ export default function SalesScreen() {
       // Cargar productos con precios
       const productosData = FullSyncService.getProductos(1000);
       const preciosData = FullSyncService.getPrecios(5000);
-
+      const inventarioData = FullSyncService.getInventario();
       // Crear mapa de precios por claveProd
       const preciosMap = new Map();
       preciosData.forEach((p: any) => {
@@ -133,7 +120,14 @@ export default function SalesScreen() {
         claveProd: p.claveProd || "",
         descripcion: p.descripcion || "Sin descripción",
         precio: preciosMap.get(parseInt(p.claveProd)) || 0,
+        existencia:
+          inventarioData
+            .filter((i: any) => i.sucursal == currentSucursal && i.sucursal == currentSucursal && i.id < 1000)
+            .find((i: any) => i.claveProd == p.claveProd)?.saldo || 0,
       }));
+      console.log({ productosFormateados });
+      console.log(inventarioData);
+      console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal));
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     } catch (error) {
@@ -153,8 +147,7 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = clientes.filter(
-        (c) =>
-          c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
+        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
       );
 
       setFilteredClientes(filtered);
@@ -184,10 +177,7 @@ export default function SalesScreen() {
     [productos]
   );
 
-  const total = useMemo(
-    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
-    [cart]
-  );
+  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
   const addToCart = (p: Producto) => {
     setCart((prev) => {
@@ -220,7 +210,7 @@ export default function SalesScreen() {
   useEffect(() => {
     if (selectedClient) {
       const preciosCliente = FullSyncService.getPreciosByCliente(selectedClient.id);
-      console.log(selectedClient);
+      const inventario = FullSyncService.getInventario();
       // Crear mapa de precios por claveProd
       const preciosMap = new Map();
       preciosCliente.forEach((p: any) => {
@@ -228,13 +218,18 @@ export default function SalesScreen() {
           preciosMap.set(p.claveProd, p.precio || 0);
         }
       });
-
+      //  inventario.filter((i)=> i.sucursal == currentSucursal)
       const productosFormateados = preciosCliente.map((p: any) => ({
         id: p.id,
         claveProd: p.claveProd || "",
         descripcion: p.descripcion || "Sin descripción",
         precio: preciosMap.get(parseInt(p.claveProd)) || 0,
+        existencia:
+          inventario
+            .filter((i: any) => i.sucursal == currentSucursal && i.id < 1000)
+            .find((i: any) => i.claveProd == p.claveProd)?.saldo || 0,
       }));
+      console.log({ productosFormateados });
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     }
@@ -266,18 +261,11 @@ export default function SalesScreen() {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode =
-        metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
-        metodoPago === "efectivo"
-          ? "Efectivo"
-          : metodoPago === "credito"
-          ? "Credito"
-          : "Transferencia";
+        metodoPago === "efectivo" ? "Efectivo" : metodoPago === "credito" ? "Credito" : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) ||
-        (currentUser?.nombre as string | undefined) ||
-        "";
+        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = new Date();
 
       console.log("[Sales] Built sale metadata", {
@@ -344,27 +332,22 @@ export default function SalesScreen() {
       );
       console.log("[Sales] Local ventas created");
 
-      // Registrar movimiento de inventario (una fila por producto, saldo negativo)
-      console.log("[Sales] Creating local inventario movements", {
+      // Actualizar inventario restando las cantidades vendidas
+      console.log("[Sales] Updating inventory after sale", {
         rows: cart.length,
-        inventarioBaseId,
       });
-      await FullSyncService.createLocalInventarioMovements(
-        cart.map((item, index) => ({
-          id: inventarioBaseId + index,
+      await FullSyncService.updateInventarioAfterSale(
+        cart.map((item) => ({
           sucursal,
-          claveProd: parseInt(item.claveProd || "0", 10) || null,
-          saldo: -Math.abs(item.cantidad),
-          fechaArrastre: now,
-          descripcion: item.descripcion,
+          claveProd: parseInt(item.claveProd || "0", 10),
+          cantidad: item.cantidad,
         }))
       );
-      console.log("[Sales] Local inventario movements created");
+      console.log("[Sales] Inventory updated successfully");
 
       try {
         const rawUserId = (currentUser as any)?.id;
-        const idUsuario =
-          rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
+        const idUsuario = rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
 
         const fecha = now.toISOString();
         const fechaTransfer = new Date().toISOString();
@@ -433,9 +416,9 @@ export default function SalesScreen() {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(
-            2
-          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`
+          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
+            status.printer?.name
+          }`
         );
       } else {
         Alert.alert(
@@ -460,9 +443,7 @@ export default function SalesScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>
-              Preparando conexión con la impresora...
-            </Text>
+            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
           </View>
         </ScrollView>
       </View>
@@ -485,9 +466,7 @@ export default function SalesScreen() {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>
-              Sin impresora. Los tickets se compartirán o deberás configurar una.
-            </Text>
+            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
           </View>
         )}
 
@@ -495,16 +474,11 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity
-              style={styles.smallBtn}
-              onPress={() => setClienteModalOpen(true)}
-            >
+            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
               <Text style={styles.smallBtnText}>Seleccionar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>
-            {selectedClient ? selectedClient.nombre : "Sin seleccionar"}
-          </Text>
+          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
         </View>
 
         {/* Productos */}
@@ -569,13 +543,8 @@ export default function SalesScreen() {
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>
-                    ${(item.precio * item.cantidad).toFixed(2)}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.removeBtn}
-                    onPress={() => removeFromCart(item.id)}
-                  >
+                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -588,11 +557,7 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip
-              label="Efectivo"
-              selected={metodoPago === "efectivo"}
-              onPress={() => setMetodoPago("efectivo")}
-            />
+            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
             <PayChip
               label="Transferencia"
               selected={metodoPago === "transferencia"}
@@ -612,11 +577,7 @@ export default function SalesScreen() {
           </View>
 
           <TouchableOpacity
-            style={[
-              styles.primaryBtn,
-              (!selectedClient || !cart.length || !metodoPago) &&
-                styles.primaryBtnDisabled,
-            ]}
+            style={[styles.primaryBtn, (!selectedClient || !cart.length || !metodoPago) && styles.primaryBtnDisabled]}
             onPress={processSale}
             disabled={!selectedClient || !cart.length || !metodoPago}
           >
@@ -644,10 +605,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchCliente("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -723,10 +681,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchProducto("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -754,15 +709,14 @@ export default function SalesScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
                       <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
+                      <Text style={styles.listSubtitle}>Existencia: {item.existencia}</Text>
                     </View>
                     <Text style={styles.productPrice}>${item.precio.toFixed(2)}</Text>
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>
-                      No se encontraron productos
-                    </Text>
+                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
                   </View>
                 }
               />
@@ -799,11 +753,7 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.chip,
-        selected && styles.chipSelected,
-        disabled && styles.chipDisabled,
-      ]}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
     >
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>

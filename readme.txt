@@ -1,1 +1,2 @@
 pnpm android
+./gradlew assembleRelease

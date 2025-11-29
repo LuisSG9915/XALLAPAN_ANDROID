@@ -186,8 +186,8 @@ class FullSyncService {
       }
 
       const data = await response.json();
-      console.log({data})
-      console.log(11111)
+      console.log({ data });
+      console.log(11111);
       console.log("📋 Datos recibidos en syncVentas:", {
         type: typeof data,
         isArray: Array.isArray(data),
@@ -529,17 +529,38 @@ class FullSyncService {
       const effectiveFechaMovto =
         fechaMovto ??
         (() => {
+          // Obtener fecha y hora en horario mexicano (America/Mexico_City)
           const now = new Date();
-          const yyyy = now.getFullYear();
-          const mm = String(now.getMonth() + 1).padStart(2, "0");
-          const dd = String(now.getDate()).padStart(2, "0");
-          return `${yyyy}-${mm}-${dd}`;
+
+          // Usar Intl.DateTimeFormat para obtener componentes en zona horaria mexicana
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "America/Mexico_City",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+
+          const parts = formatter.formatToParts(now);
+          const getValue = (type: string) => parts.find((p) => p.type === type)?.value || "00";
+
+          const yyyy = getValue("year");
+          const mm = getValue("month");
+          const dd = getValue("day");
+          const hh = getValue("hour");
+          const min = getValue("minute");
+          const ss = getValue("second");
+
+          // Formato ISO 8601: YYYY-MM-DDTHH:mm:ss
+          return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`;
         })();
 
       console.log("📅 Fecha efectiva para inventario:", effectiveFechaMovto);
-
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${sucursal}&fechaMovto=${effectiveFechaMovto}`;
       console.log(effectiveFechaMovto);
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${sucursal}&fechaMovto=${effectiveFechaMovto}`;
       console.log("🌐 Haciendo request a:", url);
 
       const response = await fetch(url);
@@ -906,14 +927,12 @@ class FullSyncService {
           tipoFecha: typeof v.fecha,
           isDate: v.fecha instanceof Date,
           getTime: v.fecha?.getTime(),
-          isNaN: v.fecha ? isNaN(v.fecha.getTime()) : 'null/undefined'
+          isNaN: v.fecha ? isNaN(v.fecha.getTime()) : "null/undefined",
         });
-        
+
         // Si la fecha es inválida, usar una fecha segura
-        const safeFecha = (v.fecha instanceof Date && !isNaN(v.fecha.getTime())) 
-          ? v.fecha 
-          : new Date();
-        
+        const safeFecha = v.fecha instanceof Date && !isNaN(v.fecha.getTime()) ? v.fecha : new Date();
+
         this.realm!.create("Venta", {
           id: v.id,
           sucursal: v.sucursal ?? null,
@@ -942,6 +961,48 @@ class FullSyncService {
   /**
    * Crea movimientos locales en Inventario (por ejemplo, recepción de traspasos).
    */
+
+  async updateInventarioAfterSale(
+    items: {
+      sucursal: number;
+      claveProd: number;
+      cantidad: number;
+    }[]
+  ): Promise<void> {
+    if (!items.length) return;
+
+    if (!this.isInitialized || !this.realm) {
+      await this.initialize();
+    }
+    if (!this.realm) return;
+
+    this.realm.write(() => {
+      items.forEach((item) => {
+        // Buscar el registro de inventario existente
+        const inventario = this.realm!.objects("Inventario").filtered(
+          "sucursal == $0 AND claveProd == $1",
+          item.sucursal,
+          item.claveProd
+        )[0] as any;
+
+        if (inventario) {
+          // Actualizar el saldo restando la cantidad vendida
+          inventario.saldo = (inventario.saldo || 0) - item.cantidad;
+          inventario.fechaArrastre = new Date();
+          console.log(
+            `[FullSync] Inventario actualizado: Producto ${item.claveProd}, Saldo anterior: ${
+              (inventario.saldo || 0) + item.cantidad
+            }, Nuevo saldo: ${inventario.saldo}`
+          );
+        } else {
+          console.warn(
+            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+          );
+        }
+      });
+    });
+  }
+
   async createLocalInventarioMovements(
     movimientos: {
       id: number;

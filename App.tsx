@@ -36,14 +36,7 @@ import AuthService from "./services/AuthService";
 import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "./theme/theme";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
@@ -63,8 +56,7 @@ if (__DEV__) {
         return;
       }
 
-      const isArrayLike =
-        Array.isArray(value) || typeof (value as any).length === "number";
+      const isArrayLike = Array.isArray(value) || typeof (value as any).length === "number";
 
       const arr = isArrayLike ? Array.from(value as any).slice(0, limit) : [value];
       const plain = JSON.parse(JSON.stringify(arr));
@@ -113,11 +105,7 @@ function App() {
             },
           }}
         >
-          <Stack.Screen
-            name="Login"
-            component={LoginScreen}
-            options={{ headerShown: false }}
-          />
+          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <Stack.Screen
             name="Home"
             component={AppContent}
@@ -126,16 +114,8 @@ function App() {
               headerLeft: () => null,
             }}
           />
-          <Stack.Screen
-            name="Sales"
-            component={SalesScreen}
-            options={{ title: " Punto de Venta" }}
-          />
-          <Stack.Screen
-            name="Billing"
-            component={BillingScreen}
-            options={{ title: " Cobranza" }}
-          />
+          <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
+          <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
           {/* <Stack.Screen
             name="Precorte"
             component={PrecorteScreen}
@@ -156,11 +136,7 @@ function App() {
             component={ClienteGruposScreen}
             options={{ title: ' Grupos de Clientes' }}
           /> */}
-          <Stack.Screen
-            name="DataView"
-            component={DataViewScreen}
-            options={{ title: "📊 Datos Sincronizados" }}
-          />
+          <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} />
           <Stack.Screen
             name="PrinterSettings"
             component={PrinterSettingsScreen}
@@ -175,6 +151,7 @@ function App() {
 function AppContent({ navigation }: { navigation: any }) {
   const isDarkMode = useColorScheme() === "dark";
   const [syncing, setSyncing] = useState(false);
+  const [sucursalName, setSucursalName] = useState("");
   const [syncProgress, setSyncProgress] = useState<SyncProgress[]>([]);
   const [userName, setUserName] = useState<string>("");
 
@@ -183,6 +160,7 @@ function AppContent({ navigation }: { navigation: any }) {
       const user = await AuthService.restoreSession();
       if (user) {
         setUserName(user.claveEmpleado || "Usuario");
+        setSucursalName(user.sucursal_origen || user.sucursal || "Sucursal");
       }
     };
     loadUserInfo();
@@ -218,15 +196,9 @@ function AppContent({ navigation }: { navigation: any }) {
 
       // Mantener el modal visible 2 segundos después de terminar
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-      Alert.alert(
-        "✅ Sincronización Completa",
-        "Todos los datos han sido actualizados correctamente."
-      );
+      Alert.alert("✅ Sincronización Completa", "Todos los datos han sido actualizados correctamente.");
     } catch (error: any) {
-      Alert.alert(
-        "❌ Error de Sincronización",
-        error?.message || "No se pudo completar la sincronización"
-      );
+      Alert.alert("❌ Error de Sincronización", error?.message || "No se pudo completar la sincronización");
     } finally {
       setSyncing(false);
     }
@@ -309,18 +281,14 @@ function AppContent({ navigation }: { navigation: any }) {
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View>
-              <Text style={styles.welcomeText}>Bienvenido</Text>
+              <Text style={styles.welcomeText}>Bienvenido {sucursalName}</Text>
               <Text style={styles.businessName}>{APP_NAME}</Text>
               <View style={styles.userBadge}>
                 <Icon name="person" type="material" size={14} color={COLORS.primary} />
                 <Text style={styles.userName}>{userName}</Text>
               </View>
             </View>
-            <TouchableOpacity
-              style={styles.logoutButton}
-              onPress={handleLogout}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
               <Icon name="logout" type="material" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -352,16 +320,8 @@ function AppContent({ navigation }: { navigation: any }) {
             disabled={syncing}
             activeOpacity={0.85}
           >
-            <Icon
-              name="sync"
-              type="material"
-              size={24}
-              color="#fff"
-              style={syncing ? styles.spinning : {}}
-            />
-            <Text style={styles.syncButtonText}>
-              {syncing ? "Sincronizando..." : "Sincronizar Datos"}
-            </Text>
+            <Icon name="sync" type="material" size={24} color="#fff" style={syncing ? styles.spinning : {}} />
+            <Text style={styles.syncButtonText}>{syncing ? "Sincronizando..." : "Sincronizar Datos"}</Text>
           </TouchableOpacity>
         </View>
 
