@@ -30,6 +30,7 @@ type Producto = {
   descripcion: string;
   precio: number;
   existencia: number;
+  esKit?: boolean;
 };
 
 type CartItem = Producto & { cantidad: number };
@@ -55,6 +56,112 @@ export default function SalesScreen() {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
   const [initializingPrinter, setInitializingPrinter] = useState(true);
+  const [kits, setKits] = useState<any[]>([]);
+  const [productosBase, setProductosBase] = useState<any[]>([]);
+
+  const buildProductosFormateados = useCallback(
+    (preciosSource: any[], productosData: any[], inventarioData: any[], kitsData: any[]): Producto[] => {
+      // Mapa de precios por claveProd (prioriza idCliente == 0)
+      const preciosMap = new Map<number, number>();
+      preciosSource.forEach((p: any) => {
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        if (Number.isNaN(clave)) return;
+        if (!preciosMap.has(clave) || p.idCliente === 0) {
+          preciosMap.set(clave, p.precio || 0);
+        }
+      });
+
+      // Productos por id y por claveProd para lookup de esKit / descripcion / clave
+      const productosPorId = new Map<number, any>();
+      const productosPorClave = new Map<number, any>();
+      productosData.forEach((p: any) => {
+        productosPorId.set(p.id, p);
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        if (!Number.isNaN(clave)) {
+          productosPorClave.set(clave, p);
+        }
+      });
+
+      // Inventario por claveProd de la sucursal actual
+      const inventarioPorClave = new Map<number, number>();
+      inventarioData
+        .filter((i: any) => i.sucursal == currentSucursal && i.id < 1000)
+        .forEach((i: any) => {
+          const clave = i.claveProd;
+          if (clave === null || clave === undefined) return;
+          const saldoActual = inventarioPorClave.get(clave) || 0;
+          inventarioPorClave.set(clave, saldoActual + (i.saldo || 0));
+        });
+
+      // Kits por idProducto
+      const kitsPorProducto = new Map<number, any[]>();
+      kitsData.forEach((k: any) => {
+        if (k.idProducto === null || k.idProducto === undefined) return;
+        const arr = kitsPorProducto.get(k.idProducto) || [];
+        arr.push(k);
+        kitsPorProducto.set(k.idProducto, arr);
+      });
+
+      const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
+        if (esKit && productoId !== undefined) {
+          const componentes = kitsPorProducto.get(productoId) || [];
+          if (!componentes.length) return 0;
+          let minimo = Infinity;
+
+          for (const comp of componentes) {
+            const cantidadInsumo = comp.cantidad ? Number(comp.cantidad) : 0;
+            if (cantidadInsumo <= 0) {
+              minimo = 0;
+              break;
+            }
+
+            const insumoClave = comp.idInsumo !== null && comp.idInsumo !== undefined ? Number(comp.idInsumo) : NaN;
+            const insumoProducto =
+              productosPorId.get(comp.idInsumo) ||
+              (!Number.isNaN(insumoClave) ? productosPorClave.get(insumoClave) : undefined);
+            const claveInsumo =
+              insumoProducto?.claveProd !== undefined && insumoProducto?.claveProd !== null
+                ? parseInt(insumoProducto.claveProd, 10)
+                : insumoClave;
+
+            if (Number.isNaN(claveInsumo)) {
+              minimo = 0;
+              break;
+            }
+
+            const saldo = inventarioPorClave.get(claveInsumo) || 0;
+            const posible = Math.floor(saldo / cantidadInsumo);
+            minimo = Math.min(minimo, posible);
+          }
+
+          return minimo === Infinity ? 0 : minimo;
+        }
+
+        if (claveProd === undefined || Number.isNaN(claveProd)) return 0;
+        return inventarioPorClave.get(claveProd) || 0;
+      };
+
+      return preciosSource.map((p: any) => {
+        const claveNum = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        const productoBase = (!Number.isNaN(claveNum) && productosPorClave.get(claveNum)) || productosPorId.get(p.id);
+        const esKit = Boolean(productoBase?.esKit);
+        const productoId = productoBase?.id ?? (Number.isNaN(claveNum) ? p.id : claveNum);
+        const descripcion = p.descripcion || productoBase?.descripcion || "Sin descripción";
+        const precio = preciosMap.get(claveNum) || 0;
+        const existencia = calcularExistencia(productoId, claveNum, esKit);
+
+        return {
+          id: productoId,
+          claveProd: (p.claveProd || productoBase?.claveProd || "").toString(),
+          descripcion,
+          precio,
+          existencia,
+          esKit,
+        };
+      });
+    },
+    [currentSucursal]
+  );
 
   useEffect(() => {
     const init = async () => {
@@ -103,28 +210,16 @@ export default function SalesScreen() {
       setClientes(clientesFormateados);
       setFilteredClientes(clientesFormateados);
 
-      // Cargar productos con precios
+      // Cargar clientes con precios
       const productosData = FullSyncService.getProductos(1000);
       const preciosData = FullSyncService.getPrecios(5000);
       const inventarioData = FullSyncService.getInventario();
-      // Crear mapa de precios por claveProd
-      const preciosMap = new Map();
-      preciosData.forEach((p: any) => {
-        if (!preciosMap.has(p.claveProd) || p.idCliente === 0) {
-          preciosMap.set(p.claveProd, p.precio || 0);
-        }
-      });
+      const kitsData = FullSyncService.getKits(5000);
 
-      const productosFormateados = productosData.map((p: any) => ({
-        id: p.id,
-        claveProd: p.claveProd || "",
-        descripcion: p.descripcion || "Sin descripción",
-        precio: preciosMap.get(parseInt(p.claveProd)) || 0,
-        existencia:
-          inventarioData
-            .filter((i: any) => i.sucursal == currentSucursal && i.sucursal == currentSucursal && i.id < 1000)
-            .find((i: any) => i.claveProd == p.claveProd)?.saldo || 0,
-      }));
+      setProductosBase(productosData);
+      setKits(kitsData);
+
+      const productosFormateados = buildProductosFormateados(preciosData, productosData, inventarioData, kitsData);
       console.log({ productosFormateados });
       console.log(inventarioData);
       console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal));
@@ -211,29 +306,15 @@ export default function SalesScreen() {
     if (selectedClient) {
       const preciosCliente = FullSyncService.getPreciosByCliente(selectedClient.id);
       const inventario = FullSyncService.getInventario();
-      // Crear mapa de precios por claveProd
-      const preciosMap = new Map();
-      preciosCliente.forEach((p: any) => {
-        if (!preciosMap.has(p.claveProd) || p.idCliente === 0) {
-          preciosMap.set(p.claveProd, p.precio || 0);
-        }
-      });
-      //  inventario.filter((i)=> i.sucursal == currentSucursal)
-      const productosFormateados = preciosCliente.map((p: any) => ({
-        id: p.id,
-        claveProd: p.claveProd || "",
-        descripcion: p.descripcion || "Sin descripción",
-        precio: preciosMap.get(parseInt(p.claveProd)) || 0,
-        existencia:
-          inventario
-            .filter((i: any) => i.sucursal == currentSucursal && i.id < 1000)
-            .find((i: any) => i.claveProd == p.claveProd)?.saldo || 0,
-      }));
+      const productosData = productosBase.length ? productosBase : FullSyncService.getProductos(1000);
+      const kitsData = kits.length ? kits : FullSyncService.getKits(5000);
+
+      const productosFormateados = buildProductosFormateados(preciosCliente, productosData, inventario, kitsData);
       console.log({ productosFormateados });
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     }
-  }, [selectedClient]);
+  }, [selectedClient, buildProductosFormateados, productosBase, kits]);
 
   const processSale = async () => {
     const client = selectedClient;

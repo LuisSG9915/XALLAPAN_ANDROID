@@ -1,20 +1,14 @@
 import Realm, { UpdateMode } from "realm";
-import { ALL_SCHEMAS } from "./RealmSchemas";
-
-export interface SyncProgress {
-  current: number;
-  total: number;
-  entity: string;
-  status: "syncing" | "completed" | "error";
-  message?: string;
-}
+import { ALL_SCHEMAS, SyncLogSchema } from "./RealmSchemas";
+import { SyncProgress } from "./sync/SyncTask";
+import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 
 export type SyncProgressCallback = (progress: SyncProgress) => void;
 
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
-  private apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+  private apiBaseUrl = "https://cbinfo.no-ip.info:9011";
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -25,7 +19,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 4,
+        schemaVersion: 6, // v6: SyncTableLogSchema + syncedAr en tablas de datos
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {
@@ -38,123 +32,599 @@ class FullSyncService {
       });
 
       this.isInitialized = true;
-      console.log("✅ FullSyncService inicializado correctamente");
+      console.log("✅ FullSyncService inicializado correctamente (v5 con SyncTableLog)");
     } catch (error) {
       console.error("❌ Error al inicializar FullSyncService:", error);
       throw error;
     }
   }
 
+  /**
+   * Obtiene la última fecha syncedAr (horario México) de una tabla dada.
+   * Si no hay registros o todas son null, regresa null.
+   */
+  private getLastSyncedAr(tableName: string): Date | null {
+    if (!this.realm) return null;
+
+    const collection: any = this.realm.objects(tableName);
+    if (!collection || collection.length === 0) return null;
+
+    const maxDate = collection.max("syncedAr") as Date | null;
+    return maxDate || null;
+  }
+
+  /**
+   * Normaliza un Date a un string "YYYY-MM-DD HH:mm" para fechaInicial.
+   */
+  private formatDateTimeForApi(date: Date): string {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mi = String(date.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  }
+
+  /**
+   * Normaliza un Date a un string "YYYY-MM-DD" para fechaInicial sin hora.
+   */
+  private formatDateForApi(date: Date): string {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * Obtiene la fecha/hora actual.
+   * El dispositivo ya está en hora de México, no se requiere conversión.
+   */
+  private getMexicoNow(): Date {
+    return new Date();
+  }
+
+  /**
+   * Sincronización INCREMENTAL para background (cada 3 minutos).
+   *
+   * Usa los nuevos endpoints basados en fechaInicial, tomando como referencia
+   * la fecha máxima de syncedAr (horario México) en cada tabla.
+   *
+   * Tablas cubiertas:
+   * - Clientes  -> /api/MovilesVentas/clientes?fechaInicial=YYYY-MM-DD HH:mm
+   * - Precios   -> /api/MovilesVentas/precios?fechaInicial=YYYY-MM-DD HH:mm
+   * - Cartera   -> /api/MovilesVentas/cartera?fechaInicial=YYYY-MM-DD
+   * - Ventas    -> /api/MovilesVentas/ventas-erp-movil?fechaInicial=YYYY-MM-DD HH:mm&sucursal=...
+   */
+  async syncIncremental(
+    sucursal: number = 1,
+    onProgress?: SyncProgressCallback
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!this.realm) {
+      throw new Error("Realm no inicializado");
+    }
+
+    // Crear SyncLog principal específico para incremental
+    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const fechaInicio = new Date();
+
+    this.realm.write(() => {
+      this.realm!.create("SyncLog", {
+        id: syncLogId,
+        fechaInicio,
+        exitoso: true,
+        tipo: "incremental",
+      } as any);
+    });
+
+    // console.log(
+    //   `[FullSyncService] Iniciando sincronización incremental (ID: ${syncLogId})`,
+    // );
+
+    const errors: string[] = [];
+    const nowMexico = this.getMexicoNow();
+
+    const notify = (
+      entity: string,
+      current: number,
+      total: number,
+      status: SyncProgress["status"],
+      message: string
+    ) => {
+      if (onProgress) {
+        onProgress({ current, total, entity, status, message });
+      }
+    };
+
+    // Tipo para resultado de tarea incremental
+    type IncrementalTaskResult = {
+      tabla: string;
+      endpoint: string;
+      registrosLeidos: number;
+      registrosGuardados: number;
+      registrosActualizados: number;
+    };
+
+    // Orden fijo de tablas incrementales
+    const tasks: { name: string; run: () => Promise<IncrementalTaskResult> }[] = [
+      {
+        name: "ClientesIncremental",
+        run: async () => {
+          const tableName = "ClienteFull";
+          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+
+          // console.log('[Incremental] Clientes desde', fechaInicial, url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} Clientes`);
+          }
+
+          const clientes = await response.json();
+          const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const cliente of clientes) {
+              const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
+
+              const clienteData: any = {
+                id: cliente.id,
+                nombre: cliente.nombre,
+                longitud: cliente.longitud,
+                latitud: cliente.latitud,
+                idGrupo: cliente.idGrupo,
+                credito: cliente.credito,
+                facturacionMovil: cliente.facturacionMovil,
+                fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
+                correoFactura: cliente.correo_factura || null,
+                syncedAt: new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("ClienteFull", clienteData);
+                registrosGuardados++;
+              }
+            }
+          });
+
+          // console.log(
+          //   `[Incremental] Clientes leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+          // );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "PreciosIncremental",
+        run: async () => {
+          const tableName = "Precio";
+          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+
+          console.log("[Incremental] Precios desde", fechaInicial, url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} Precios`);
+          }
+
+          const precios = await response.json();
+          const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const precio of precios) {
+              const existing = this.realm!.objectForPrimaryKey("Precio", precio.id) as any;
+
+              const precioData: any = {
+                ...precio,
+                syncedAt: new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("Precio", precioData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("Precio", precioData);
+                registrosGuardados++;
+              }
+            }
+          });
+
+          console.log(
+            `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "CarteraIncremental",
+        run: async () => {
+          const tableName = "Cartera";
+          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          const fechaInicial = this.formatDateForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+
+          console.log("[Incremental] Cartera desde", fechaInicial, url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} Cartera`);
+          }
+
+          const cartera = await response.json();
+          const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const item of cartera) {
+              const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
+
+              const carteraData: any = {
+                ...item,
+                syncedAt: new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("Cartera", carteraData);
+                registrosGuardados++;
+              }
+            }
+          });
+
+          // console.log(
+          //   `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+          // );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "VentasIncremental",
+        run: async () => {
+          const tableName = "Venta";
+          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas-erp-movil?fechaInicial=${encodeURIComponent(
+            fechaInicial
+          )}&sucursal=${encodeURIComponent(String(sucursal))}`;
+
+          console.log("[Incremental] Ventas desde", fechaInicial, url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} Ventas`);
+          }
+
+          const ventas = await response.json();
+          console.log(ventas, "Ventas sincronizadas");
+          const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const venta of ventas) {
+              // Buscar por idMovil: si existe, actualizar; si no, crear registro
+              const localVentas = this.realm!.objects("Venta").filtered("idMovil == $0", venta.idMovil);
+
+              if (localVentas.length > 0) {
+                // Actualizar solo los campos específicos en cada registro encontrado
+                for (const localVenta of localVentas) {
+                  (localVenta as any).noVenta = venta.noVenta;
+                  (localVenta as any).folioFactura = venta.folioFactura;
+                  (localVenta as any).facturacionMovil = venta.facturacionMovil;
+                  (localVenta as any).syncedAt = nowMexico;
+                  registrosActualizados++;
+                }
+              } else {
+                // Crear registro porque no existe relación por idMovil en local
+                this.realm!.create("Venta", {
+                  id: venta.id,
+                  idMovil: venta.idMovil ?? null,
+                  sucursal: venta.sucursal ?? null,
+                  noVenta: venta.noVenta ?? null,
+                  claveProd: venta.claveProd ?? null,
+                  nombreProducto: venta.nombreProducto ?? null,
+                  cantProducto: venta.cantProducto ?? null,
+                  precio: venta.precio ?? null,
+                  importe: venta.importe ?? null,
+                  cveCliente: venta.cveCliente ?? null,
+                  nombreCliente: venta.nombreCliente ?? null,
+                  fecha: venta.fecha ? new Date(venta.fecha) : null,
+                  tipoPago: venta.tipoPago ?? null,
+                  descripcionMedioPago: venta.descripcionMedioPago ?? null,
+                  vendedor: venta.vendedor ?? null,
+                  folioFactura: venta.folioFactura ?? false,
+                  facturacionMovil: venta.facturacionMovil ?? false,
+                  syncedAt: nowMexico,
+                  syncedAr: nowMexico,
+                });
+                registrosGuardados++;
+              }
+            }
+
+            // Actualizar syncedAr en TODOS los registros locales con id > 1700000000
+            const allLocalVentas = this.realm!.objects("Venta").filtered("id > 1700000000");
+            for (const localVenta of allLocalVentas) {
+              (localVenta as any).syncedAr = nowMexico;
+            }
+          });
+
+          console.log(
+            `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "InventarioIncremental",
+        run: async () => {
+          const tableName = "Inventario";
+          const now = this.getMexicoNow();
+          const fechaMovto = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString();
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-erp-movil/${sucursal}?fechaMovto=${fechaMovto}`;
+
+          console.log("[Incremental] Inventario desde", url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} Inventario`);
+          }
+
+          const inventario = await response.json();
+          const registrosLeidos = Array.isArray(inventario) ? inventario.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const item of inventario) {
+              const existing = this.realm!.objectForPrimaryKey("Inventario", item.id);
+
+              const inventarioData = {
+                ...item,
+                sucursal: sucursal,
+                syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("Inventario", inventarioData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("Inventario", inventarioData);
+                registrosGuardados++;
+              }
+            }
+          });
+
+          console.log(
+            `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+    ];
+
+    const totalTasks = tasks.length;
+    let currentTask = 0;
+
+    for (const task of tasks) {
+      currentTask++;
+      const fechaInicioTask = new Date();
+      notify(task.name, currentTask, totalTasks, "syncing", `Sincronizando ${task.name}...`);
+
+      try {
+        const result = await task.run();
+        const fechaFinalTask = new Date();
+
+        // Guardar bitácora por tabla
+        this.realm!.write(() => {
+          this.realm!.create("SyncTableLog", {
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            syncLogId,
+            tabla: result.tabla,
+            fechaInicio: fechaInicioTask,
+            fechaFinal: fechaFinalTask,
+            exitoso: true,
+            razon: null,
+            registrosLeidos: result.registrosLeidos,
+            registrosGuardados: result.registrosGuardados,
+            registrosActualizados: result.registrosActualizados,
+            duracionMs: fechaFinalTask.getTime() - fechaInicioTask.getTime(),
+            endpoint: result.endpoint,
+            detalles: null,
+          });
+        });
+
+        notify(task.name, currentTask, totalTasks, "success", `${task.name} sincronizado`);
+      } catch (error: any) {
+        const msg = error?.message || "Error desconocido";
+        console.error(`[FullSyncService] Error incremental en ${task.name}:`, msg);
+        errors.push(`${task.name}: ${msg}`);
+        notify(task.name, currentTask, totalTasks, "error", `Error en ${task.name}: ${msg}`);
+      }
+    }
+
+    const fechaFinal = new Date();
+
+    // Actualizar SyncLog
+    this.realm.write(() => {
+      const log: any = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
+      if (log) {
+        log.fechaFinal = fechaFinal;
+        log.exitoso = errors.length === 0;
+        log.totalRegistros = undefined;
+        log.duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
+        if (errors.length > 0) {
+          log.razon = errors.join("; ");
+        }
+      }
+    });
+
+    const success = errors.length === 0;
+    // console.log(
+    //   `[FullSyncService] Sincronización incremental completada. Éxito: ${success}, Errores: ${errors.length}`,
+    // );
+
+    return {
+      success,
+      error: success ? undefined : errors.join("; "),
+    };
+  }
+
+  /**
+   * Sincroniza todas las tablas usando la nueva arquitectura escalable
+   * Maneja dependencias, prioridades y bitácora detallada por tabla
+   */
   async syncAll(
     sucursal: number = 1,
     onProgress?: SyncProgressCallback
   ): Promise<{ success: boolean; error?: string }> {
-    console.log("🚀 Iniciando sincronización completa para sucursal:", sucursal);
-
     if (!this.isInitialized) {
-      console.log("📦 Inicializando Realm...");
       await this.initialize();
-      console.log("✅ Realm inicializado");
     }
 
-    const syncTasks = [
-      { name: "Usuarios", fn: () => this.syncUsuarios() },
-      { name: "Productos", fn: () => this.syncProductos() },
-      { name: "Precios", fn: () => this.syncPrecios() },
-      { name: "Clientes", fn: () => this.syncClientesFull() },
-      { name: "Inventario", fn: () => this.syncInventario(sucursal) },
-      { name: "Cartera", fn: () => this.syncCartera() },
-      { name: "Ventas", fn: () => this.syncVentas(sucursal) },
-    ];
+    if (!this.realm) {
+      throw new Error("Realm no inicializado");
+    }
 
-    const total = syncTasks.length;
-    let current = 0;
+    // Crear SyncLog principal
+    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const fechaInicio = new Date();
 
     try {
-      console.log(`📋 Iniciando ${total} tareas de sincronización`);
-
-      for (const task of syncTasks) {
-        current++;
-        console.log(`🔄 [${current}/${total}] Iniciando sincronización de ${task.name}`);
-
-        if (onProgress) {
-          onProgress({
-            current,
-            total,
-            entity: task.name,
-            status: "syncing",
-            message: `Sincronizando ${task.name}...`,
-          });
-        }
-
-        const startTime = Date.now();
-        const result = await task.fn();
-        const duration = Date.now() - startTime;
-
-        console.log(`⏱️ ${task.name} completado en ${duration}ms`);
-
-        if (!result.success) {
-          console.error(`❌ ERROR CRÍTICO en ${task.name}:`, {
-            error: result.error,
-            duration: `${duration}ms`,
-            step: `${current}/${total}`,
-          });
-
-          if (onProgress) {
-            onProgress({
-              current,
-              total,
-              entity: task.name,
-              status: "error",
-              message: result.error || "Error desconocido",
-            });
-          }
-          console.warn(`⚠️ Error al sincronizar ${task.name}:`, result.error);
-        } else {
-          console.log(`✅ ${task.name} sincronizado exitosamente:`, {
-            registros: result.count || 0,
-            duration: `${duration}ms`,
-            step: `${current}/${total}`,
-          });
-
-          if (onProgress) {
-            onProgress({
-              current,
-              total,
-              entity: task.name,
-              status: "completed",
-              message: `${task.name} sincronizado (${result.count || 0} registros)`,
-            });
-          }
-        }
-      }
-
-      // Actualizar estado de sincronización
-      this.updateSyncStatus("all", true);
-
-      if (onProgress) {
-        onProgress({
-          current: total,
-          total,
-          entity: "Completado",
-          status: "completed",
-          message: "✅ Sincronización completa exitosa",
+      // Guardar log inicial
+      this.realm.write(() => {
+        this.realm!.create("SyncLog", {
+          id: syncLogId,
+          fechaInicio,
+          exitoso: true, // Se actualizará si hay errores
+          tipo: "automatica",
         });
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      console.error("❌ ERROR GENERAL durante la sincronización completa:", {
-        error: error?.message,
-        stack: error?.stack,
-        currentTask: syncTasks[current - 1]?.name || "Desconocida",
-        progress: `${current}/${total}`,
       });
 
+      // console.log(
+      //   `[FullSyncService] Iniciando sincronización completa (ID: ${syncLogId})`,
+      // );
+
+      // Crear orquestador y ejecutar todas las tareas
+      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, onProgress);
+
+      const result = await orchestrator.executeAll();
+
+      // Actualizar log final
+      const fechaFinal = new Date();
+      const totalRegistros = Array.from(result.results.values()).reduce(
+        (sum, r) => sum + (r.registrosGuardados || 0) + (r.registrosActualizados || 0),
+        0
+      );
+
+      this.realm.write(() => {
+        const log = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
+        if (log) {
+          log.fechaFinal = fechaFinal;
+          log.exitoso = result.success;
+          log.totalRegistros = totalRegistros;
+          log.duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
+          if (!result.success) {
+            log.razon = result.errors.join("; ");
+          }
+        }
+      });
+
+      // console.log(
+      //   `[FullSyncService] Sincronización completada. Éxito: ${result.success}, Total registros: ${totalRegistros}`,
+      // );
+
+      return {
+        success: result.success,
+        error: result.success ? undefined : result.errors.join("; "),
+      };
+    } catch (error: any) {
+      console.error("❌ Error durante la sincronización completa:", error);
+
+      // Actualizar log con error crítico
+      const fechaFinal = new Date();
+      try {
+        this.realm.write(() => {
+          const log = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
+          if (log) {
+            log.fechaFinal = fechaFinal;
+            log.exitoso = false;
+            log.razon = error?.message || "Error desconocido";
+            log.duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
+          }
+        });
+      } catch (logError) {
+        console.error("[FullSyncService] Error al actualizar log:", logError);
+      }
+
       if (onProgress) {
         onProgress({
-          current,
-          total,
+          current: 0,
+          total: 0,
           entity: "Error",
           status: "error",
           message: error?.message || "Error durante la sincronización",
@@ -165,661 +635,98 @@ class FullSyncService {
     }
   }
 
-  private async syncVentas(sucursal: number): Promise<{ success: boolean; error?: string; count?: number }> {
-    console.log("📊 Iniciando syncVentas para sucursal:", sucursal);
-
-    try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/full/${sucursal}`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncVentas:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log({ data });
-      console.log(11111);
-      console.log("📋 Datos recibidos en syncVentas:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncVentas:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      const localIdThreshold = Date.now();
-      console.log("🗑️ Limpiando ventas anteriores de sucursal:", sucursal);
-
-      this.realm!.write(() => {
-        // Limpiar ventas anteriores de esta sucursal (solo ids "normales")
-        const existingVentas = this.realm!.objects("Venta").filtered(
-          "sucursal == $0 AND id <= $1",
-          sucursal,
-          localIdThreshold
-        );
-        console.log("🗑️ Ventas a eliminar:", existingVentas.length);
-        this.realm!.delete(existingVentas);
-
-        // Insertar nuevas ventas
-        console.log("💾 Insertando", data.length, "nuevas ventas");
-        let insertCount = 0;
-        let errorCount = 0;
-
-        data.forEach((venta: any, index: number) => {
-          try {
-            this.realm!.create("Venta", {
-              id: venta.id,
-              sucursal: venta.sucursal,
-              noVenta: venta.noVenta,
-              idMovil: venta.idMovil ?? null,
-              claveProd: venta.claveProd,
-              nombreProducto: venta.nombreProducto,
-              cantProducto: venta.cantProducto,
-              precio: venta.precio,
-              importe: venta.importe,
-              cveCliente: venta.cveCliente,
-              nombreCliente: venta.nombreCliente,
-              fecha: venta.fecha ? new Date(venta.fecha) : null,
-              tipoPago: venta.tipoPago,
-              descripcionMedioPago: venta.descripcionMedioPago,
-              vendedor: venta.vendedor,
-              folioFactura: venta.folioFactura ?? false,
-              facturacionMovil: venta.facturacionMovil ?? false,
-              syncedAt: new Date(),
-            });
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando venta", index, ":", err, venta);
-            errorCount++;
-          }
-        });
-
-        console.log("📊 Resultado inserción ventas:", {
-          insertadas: insertCount,
-          errores: errorCount,
-          total: data.length,
-        });
-      });
-
-      console.log(`✅ Ventas sincronizadas: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncVentas:", {
-        message: error?.message,
-        stack: error?.stack,
-        sucursal,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
+  /**
+   * Sincroniza una tabla específica
+   * Útil para sincronizaciones manuales o selectivas
+   */
+  async syncTable(
+    tableName: string,
+    sucursal: number = 1,
+    onProgress?: SyncProgressCallback
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.isInitialized) {
+      await this.initialize();
     }
-  }
 
-  private async syncUsuarios(): Promise<{
-    success: boolean;
-    error?: string;
-    count?: number;
-  }> {
-    console.log("👥 Iniciando syncUsuarios");
-
-    try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncUsuarios:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncUsuarios:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncUsuarios:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncUsuarios:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      console.log("💾 Insertando", data.length, "usuarios en Realm");
-      let insertCount = 0;
-      let errorCount = 0;
-
-      this.realm!.write(() => {
-        data.forEach((usuario: any, index: number) => {
-          try {
-            this.realm!.create(
-              "Usuario",
-              {
-                id: usuario.id,
-                nombre: usuario.nombre,
-                perfil: usuario.perfil,
-                descripcionPerfil: usuario.descripcionPerfil,
-                puesto: usuario.puesto,
-                descripcionPuesto: usuario.descripcionPuesto,
-                claveEmpleado: usuario.claveEmpleado,
-                password: usuario.password,
-                sucursalOrigen: usuario.sucursalOrigen,
-                syncedAt: new Date(),
-              },
-              UpdateMode.Modified
-            );
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando usuario", index, ":", err, usuario);
-            errorCount++;
-          }
-        });
-      });
-
-      console.log("📊 Resultado inserción usuarios:", {
-        insertados: insertCount,
-        errores: errorCount,
-        total: data.length,
-      });
-
-      console.log(`✅ Usuarios sincronizados: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncUsuarios:", {
-        message: error?.message,
-        stack: error?.stack,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
+    if (!this.realm) {
+      throw new Error("Realm no inicializado");
     }
-  }
 
-  private async syncProductos(): Promise<{
-    success: boolean;
-    error?: string;
-    count?: number;
-  }> {
-    console.log("📦 Iniciando syncProductos");
+    // Crear SyncLog principal
+    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const fechaInicio = new Date();
 
     try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncProductos:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncProductos:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
+      // Guardar log inicial
+      this.realm.write(() => {
+        this.realm!.create("SyncLog", {
+          id: syncLogId,
+          fechaInicio,
+          exitoso: true,
+          tipo: "manual",
         });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncProductos:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
       });
 
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncProductos:", data);
-        throw new Error("Respuesta inválida del servidor");
+      // console.log(
+      //   `[FullSyncService] Iniciando sincronización de tabla: ${tableName} (ID: ${syncLogId})`,
+      // );
+
+      // Crear orquestador y ejecutar tarea específica
+      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, onProgress);
+
+      const result = await orchestrator.executeTask(tableName);
+
+      if (!result) {
+        throw new Error(`Tabla no encontrada: ${tableName}`);
       }
 
-      console.log("💾 Insertando", data.length, "productos en Realm");
-      let insertCount = 0;
-      let errorCount = 0;
+      // Actualizar log final
+      const fechaFinal = new Date();
+      const totalRegistros = (result.registrosGuardados || 0) + (result.registrosActualizados || 0);
 
-      this.realm!.write(() => {
-        data.forEach((producto: any, index: number) => {
-          try {
-            this.realm!.create(
-              "Producto",
-              {
-                id: producto.id,
-                claveProd: producto.claveProd,
-                descripcion: producto.descripcion,
-                esKit: producto.esKit ?? false,
-                fechaAct: producto.fechaAct ? new Date(producto.fechaAct) : null,
-                syncedAt: new Date(),
-              },
-              UpdateMode.Modified
-            );
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando producto", index, ":", err, producto);
-            errorCount++;
+      this.realm.write(() => {
+        const log = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
+        if (log) {
+          log.fechaFinal = fechaFinal;
+          log.exitoso = result.success;
+          log.totalRegistros = totalRegistros;
+          log.duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
+          if (!result.success) {
+            log.razon = result.error || "Error desconocido";
+          }
+        }
+      });
+
+      // console.log(
+      //   `[FullSyncService] Sincronización de ${tableName} completada. Éxito: ${result.success}`,
+      // );
+
+      return {
+        success: result.success,
+        error: result.success ? undefined : result.error,
+      };
+    } catch (error: any) {
+      // Actualizar log con error
+      const fechaFinal = new Date();
+      try {
+        this.realm.write(() => {
+          const log = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
+          if (log) {
+            log.fechaFinal = fechaFinal;
+            log.exitoso = false;
+            log.razon = error?.message || "Error desconocido";
+            log.duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
           }
         });
-      });
-
-      console.log("📊 Resultado inserción productos:", {
-        insertados: insertCount,
-        errores: errorCount,
-        total: data.length,
-      });
-
-      console.log(`✅ Productos sincronizados: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncProductos:", {
-        message: error?.message,
-        stack: error?.stack,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
-    }
-  }
-
-  private async syncPrecios(): Promise<{
-    success: boolean;
-    error?: string;
-    count?: number;
-  }> {
-    console.log("💰 Iniciando syncPrecios");
-
-    try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/precios/full`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncPrecios:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncPrecios:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      } catch (logError) {
+        console.error("[FullSyncService] Error al actualizar log:", logError);
       }
 
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncPrecios:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncPrecios:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      console.log("💾 Insertando", data.length, "precios en Realm");
-      let insertCount = 0;
-      let errorCount = 0;
-
-      this.realm!.write(() => {
-        data.forEach((precio: any, index: number) => {
-          try {
-            this.realm!.create(
-              "Precio",
-              {
-                id: String(precio.id),
-                descripcion: precio.descripcion,
-                idCliente: precio.idCliente,
-                claveProd: precio.claveProd,
-                precio: precio.precio,
-                fechaAct: precio.fechaAct ? new Date(precio.fechaAct) : null,
-                syncedAt: new Date(),
-              },
-              UpdateMode.Modified
-            );
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando precio", index, ":", err, precio);
-            errorCount++;
-          }
-        });
-      });
-
-      console.log("📊 Resultado inserción precios:", {
-        insertados: insertCount,
-        errores: errorCount,
-        total: data.length,
-      });
-
-      console.log(`✅ Precios sincronizados: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncPrecios:", {
-        message: error?.message,
-        stack: error?.stack,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
-    }
-  }
-
-  private async syncInventario(
-    sucursal: number,
-    fechaMovto?: string
-  ): Promise<{ success: boolean; error?: string; count?: number }> {
-    console.log("📋 Iniciando syncInventario para sucursal:", sucursal, "fecha:", fechaMovto);
-
-    try {
-      // Si no se proporciona fecha, usar fecha LOCAL (YYYY-MM-DD) del dispositivo
-      const effectiveFechaMovto =
-        fechaMovto ??
-        (() => {
-          // Obtener fecha y hora en horario mexicano (America/Mexico_City)
-          const now = new Date();
-
-          // Usar Intl.DateTimeFormat para obtener componentes en zona horaria mexicana
-          const formatter = new Intl.DateTimeFormat("en-US", {
-            timeZone: "America/Mexico_City",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false,
-          });
-
-          const parts = formatter.formatToParts(now);
-          const getValue = (type: string) => parts.find((p) => p.type === type)?.value || "00";
-
-          const yyyy = getValue("year");
-          const mm = getValue("month");
-          const dd = getValue("day");
-          const hh = getValue("hour");
-          const min = getValue("minute");
-          const ss = getValue("second");
-
-          // Formato ISO 8601: YYYY-MM-DDTHH:mm:ss
-          return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`;
-        })();
-
-      console.log("📅 Fecha efectiva para inventario:", effectiveFechaMovto);
-      console.log(effectiveFechaMovto);
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${sucursal}&fechaMovto=${effectiveFechaMovto}`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncInventario:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncInventario:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncInventario:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncInventario:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      const localIdThreshold = Date.now();
-      const unsyncedSentinel = new Date(0);
-      console.log("🗑️ Limpiando inventario anterior");
-
-      this.realm!.write(() => {
-        // Limpiar inventario anterior de TODAS las sucursales.
-        // Se borran:
-        // - Todos los registros con id "normal" (<= Date.now()).
-        // - Cualquier registro ya sincronizado (syncedAt != fecha centinela),
-        //   incluso si su id es mayor a Date.now().
-        // Se conservan únicamente los movimientos locales no sincronizados
-        // (id > Date.now() y syncedAt == new Date(0)).
-        const existingInventario = this.realm!.objects("Inventario").filtered(
-          "id <= $0 OR syncedAt != $1",
-          localIdThreshold,
-          unsyncedSentinel
-        );
-        console.log("🗑️ Registros de inventario a eliminar:", existingInventario.length);
-        this.realm!.delete(existingInventario);
-
-        // Insertar nuevo inventario
-        console.log("💾 Insertando", data.length, "nuevos registros de inventario");
-        let insertCount = 0;
-        let errorCount = 0;
-
-        data.forEach((inventario: any, index: number) => {
-          try {
-            this.realm!.create("Inventario", {
-              id: inventario.id,
-              sucursal: inventario.sucursal,
-              claveProd: inventario.claveProd,
-              fechaArrastre: inventario.fechaArrastre ? new Date(inventario.fechaArrastre) : null,
-              saldo: inventario.saldo,
-              descripcion: inventario.descripcion ?? null,
-              syncedAt: new Date(),
-            });
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando inventario", index, ":", err, inventario);
-            errorCount++;
-          }
-        });
-
-        console.log("📊 Resultado inserción inventario:", {
-          insertados: insertCount,
-          errores: errorCount,
-          total: data.length,
-        });
-      });
-
-      console.log(`✅ Inventario sincronizado: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncInventario:", {
-        message: error?.message,
-        stack: error?.stack,
-        sucursal,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
-    }
-  }
-
-  private async syncCartera(): Promise<{
-    success: boolean;
-    error?: string;
-    count?: number;
-  }> {
-    console.log("💳 Iniciando syncCartera");
-
-    try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera/full`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncCartera:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncCartera:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncCartera:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncCartera:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      console.log("💾 Insertando", data.length, "registros de cartera en Realm");
-      let insertCount = 0;
-      let errorCount = 0;
-
-      this.realm!.write(() => {
-        data.forEach((cartera: any, index: number) => {
-          try {
-            this.realm!.create(
-              "Cartera",
-              {
-                id: cartera.id,
-                idCliente: cartera.idCliente,
-                nombreCliente: cartera.nombreCliente,
-                sucursal: cartera.sucursal,
-                sucursalSegmento: cartera.sucursalSegmento,
-                saldo: cartera.saldo,
-                fecha: cartera.fecha ? new Date(cartera.fecha) : null,
-                idSegmento: cartera.idSegmento,
-                noVenta: cartera.noVenta,
-                syncedAt: new Date(),
-              },
-              UpdateMode.Modified
-            );
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando cartera", index, ":", err, cartera);
-            errorCount++;
-          }
-        });
-      });
-
-      console.log("📊 Resultado inserción cartera:", {
-        insertados: insertCount,
-        errores: errorCount,
-        total: data.length,
-      });
-
-      console.log(`✅ Cartera sincronizada: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncCartera:", {
-        message: error?.message,
-        stack: error?.stack,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
-    }
-  }
-
-  private async syncClientesFull(): Promise<{
-    success: boolean;
-    error?: string;
-    count?: number;
-  }> {
-    console.log("👤 Iniciando syncClientesFull");
-
-    try {
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full`;
-      console.log("🌐 Haciendo request a:", url);
-
-      const response = await fetch(url);
-      console.log("📡 Response status syncClientesFull:", response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Error HTTP en syncClientesFull:", {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorText,
-        });
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("📋 Datos recibidos en syncClientesFull:", {
-        type: typeof data,
-        isArray: Array.isArray(data),
-        length: Array.isArray(data) ? data.length : "N/A",
-        preview: Array.isArray(data) ? data.slice(0, 2) : data,
-      });
-
-      if (!Array.isArray(data)) {
-        console.error("❌ Formato de datos inválido en syncClientesFull:", data);
-        throw new Error("Respuesta inválida del servidor");
-      }
-
-      console.log("💾 Insertando", data.length, "clientes en Realm");
-      let insertCount = 0;
-      let errorCount = 0;
-
-      this.realm!.write(() => {
-        data.forEach((cliente: any, index: number) => {
-          try {
-            this.realm!.create(
-              "ClienteFull",
-              {
-                id: cliente.id,
-                nombre: cliente.nombre,
-                longitud: cliente.longitud ?? 0,
-                latitud: cliente.latitud ?? 0,
-                idGrupo: cliente.idGrupo,
-                credito: cliente.credito ?? false,
-                facturacionMovil: cliente.facturacionMovil ?? false,
-                fechaAct: cliente.fechaAct ? new Date(cliente.fechaAct) : null,
-                syncedAt: new Date(),
-              },
-              UpdateMode.Modified
-            );
-            insertCount++;
-          } catch (err) {
-            console.error("❌ Error insertando cliente", index, ":", err, cliente);
-            errorCount++;
-          }
-        });
-      });
-
-      console.log("📊 Resultado inserción clientes:", {
-        insertados: insertCount,
-        errores: errorCount,
-        total: data.length,
-      });
-
-      console.log(`✅ Clientes sincronizados: ${data.length} registros`);
-      return { success: true, count: data.length };
-    } catch (error: any) {
-      console.error("❌ ERROR CRÍTICO en syncClientesFull:", {
-        message: error?.message,
-        stack: error?.stack,
-        apiBaseUrl: this.apiBaseUrl,
-      });
-      return { success: false, error: error?.message };
+      console.error(`[FullSyncService] Error en sincronización de ${tableName}:`, error);
+      return {
+        success: false,
+        error: error?.message || "Error desconocido",
+      };
     }
   }
 
@@ -879,11 +786,10 @@ class FullSyncService {
     );
   }
 
-  getLocalVentasByNoVenta(noVenta: number): any[] {
+  getVentasBySucursal(sucursal: number, limit: number = 10000): any[] {
     if (!this.isInitialized || !this.realm) return [];
-    const unsyncedSentinel = new Date(0);
     return Array.from(
-      this.realm.objects("Venta").filtered("noVenta == $0 AND syncedAt == $1", noVenta, unsyncedSentinel)
+      this.realm.objects("Venta").filtered("sucursal == $0", sucursal).sorted("fecha", true).slice(0, limit)
     );
   }
 
@@ -894,9 +800,9 @@ class FullSyncService {
   async createLocalVentas(
     ventas: {
       id: number;
+      idMovil?: number | null;
       sucursal?: number | null;
       noVenta?: number | null;
-      idMovil?: number | null;
       claveProd?: number | null;
       nombreProducto?: string | null;
       cantProducto?: number | null;
@@ -920,24 +826,12 @@ class FullSyncService {
     if (!this.realm) return;
 
     this.realm.write(() => {
-      ventas.forEach((v, index) => {
-        // Validar fecha antes de pasar a Realm
-        console.log(`[FullSync] Venta ${index} fecha validation:`, {
-          fecha: v.fecha,
-          tipoFecha: typeof v.fecha,
-          isDate: v.fecha instanceof Date,
-          getTime: v.fecha?.getTime(),
-          isNaN: v.fecha ? isNaN(v.fecha.getTime()) : "null/undefined",
-        });
-
-        // Si la fecha es inválida, usar una fecha segura
-        const safeFecha = v.fecha instanceof Date && !isNaN(v.fecha.getTime()) ? v.fecha : new Date();
-
+      ventas.forEach((v) => {
         this.realm!.create("Venta", {
           id: v.id,
+          idMovil: v.idMovil ?? null,
           sucursal: v.sucursal ?? null,
           noVenta: v.noVenta ?? null,
-          idMovil: v.idMovil ?? null,
           claveProd: v.claveProd ?? null,
           nombreProducto: v.nombreProducto ?? null,
           cantProducto: v.cantProducto ?? null,
@@ -945,7 +839,7 @@ class FullSyncService {
           importe: v.importe ?? null,
           cveCliente: v.cveCliente ?? null,
           nombreCliente: v.nombreCliente ?? null,
-          fecha: safeFecha,
+          fecha: v.fecha ?? new Date(),
           tipoPago: v.tipoPago ?? null,
           descripcionMedioPago: v.descripcionMedioPago ?? null,
           vendedor: v.vendedor ?? null,
@@ -958,10 +852,15 @@ class FullSyncService {
     });
   }
 
-  /**
-   * Crea movimientos locales en Inventario (por ejemplo, recepción de traspasos).
-   */
+  getVentasByMovilId(idMovil: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("Venta").filtered("idMovil == $0", idMovil));
+  }
 
+  /**
+   * Actualiza el inventario restando las cantidades vendidas.
+   * Busca el registro existente por sucursal y claveProd y actualiza el saldo.
+   */
   async updateInventarioAfterSale(
     items: {
       sucursal: number;
@@ -989,11 +888,13 @@ class FullSyncService {
           // Actualizar el saldo restando la cantidad vendida
           inventario.saldo = (inventario.saldo || 0) - item.cantidad;
           inventario.fechaArrastre = new Date();
-          console.log(
-            `[FullSync] Inventario actualizado: Producto ${item.claveProd}, Saldo anterior: ${
-              (inventario.saldo || 0) + item.cantidad
-            }, Nuevo saldo: ${inventario.saldo}`
-          );
+          // console.log(
+          //   `[FullSync] Inventario actualizado: Producto ${
+          //     item.claveProd
+          //   }, Saldo anterior: ${
+          //     (inventario.saldo || 0) + item.cantidad
+          //   }, Nuevo saldo: ${inventario.saldo}`,
+          // );
         } else {
           console.warn(
             `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
@@ -1003,6 +904,57 @@ class FullSyncService {
     });
   }
 
+  /**
+   * Actualiza el inventario sumando las cantidades recibidas en un traspaso.
+   * Busca el registro existente por sucursal y claveProd y actualiza el saldo.
+   */
+  async updateInventarioAfterReception(
+    items: {
+      sucursal: number;
+      claveProd: number;
+      cantidad: number;
+    }[]
+  ): Promise<void> {
+    if (!items.length) return;
+
+    if (!this.isInitialized || !this.realm) {
+      await this.initialize();
+    }
+    if (!this.realm) return;
+
+    this.realm.write(() => {
+      items.forEach((item) => {
+        // Buscar el registro de inventario existente
+        const inventario = this.realm!.objects("Inventario").filtered(
+          "sucursal == $0 AND claveProd == $1",
+          item.sucursal,
+          item.claveProd
+        )[0] as any;
+
+        if (inventario) {
+          // Actualizar el saldo sumando la cantidad recibida
+          inventario.saldo = (inventario.saldo || 0) + item.cantidad;
+          inventario.fechaArrastre = new Date();
+          // console.log(
+          //   `[FullSync] Inventario actualizado (recepción): Producto ${
+          //     item.claveProd
+          //   }, Saldo anterior: ${
+          //     (inventario.saldo || 0) - item.cantidad
+          //   }, Nuevo saldo: ${inventario.saldo}`,
+          // );
+        } else {
+          console.warn(
+            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+          );
+        }
+      });
+    });
+  }
+
+  /**
+   * Crea movimientos locales en Inventario (por ejemplo, recepción de traspasos).
+   * @deprecated Usar updateInventarioAfterSale para ventas
+   */
   async createLocalInventarioMovements(
     movimientos: {
       id: number;
@@ -1054,6 +1006,7 @@ class FullSyncService {
       fecha?: Date | null;
       idSegmento?: number | null;
       noVenta?: number | null;
+      tipoPago?: number | null;
     }[]
   ): Promise<void> {
     if (!movimientos.length) return;
@@ -1075,6 +1028,7 @@ class FullSyncService {
           fecha: m.fecha ?? new Date(),
           idSegmento: m.idSegmento ?? null,
           noVenta: m.noVenta ?? null,
+          tipoPago: m.tipoPago ?? null,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -1170,16 +1124,25 @@ class FullSyncService {
     );
   }
 
-  getVentasTotalEfectivoForDate(date: Date): number {
+  getVentasTotalEfectivoForDate(date: Date, sucursal?: number): number {
     if (!this.isInitialized || !this.realm) return 0;
 
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
-    console.log(Array.from(this.realm.objects("Venta").filtered("id > 1700000000")));
-    const ventas = this.realm.objects("Venta").filtered("fecha >= $0 AND fecha <= $1 AND tipoPago == 1", start, end);
 
+    let query = "fecha >= $0 AND fecha <= $1 AND tipoPago == 1 and noVenta>0";
+    const args: any[] = [start, end];
+
+    if (sucursal !== undefined) {
+      query += " AND sucursal == $2";
+      args.push(sucursal);
+    }
+    // console.log(sucursal);
+    const ventas = this.realm.objects("Venta").filtered(query, ...args);
+    // console.log(ventas);
+    // console.log('Venta:', ventas);
     let total = 0;
     for (let i = 0; i < ventas.length; i++) {
       const v: any = ventas[i];
@@ -1235,6 +1198,111 @@ class FullSyncService {
   getSyncStatus(entity: string = "all"): any {
     if (!this.isInitialized || !this.realm) return null;
     return this.realm.objectForPrimaryKey("SyncStatus", entity);
+  }
+
+  getSyncTableLogsPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(
+      this.realm
+        .objects("SyncTableLog")
+        .sorted("fechaInicio", true) // Más recientes primero
+        .slice(offset, offset + limit)
+    );
+  }
+
+  /**
+   * Envía las ventas locales pendientes al servidor.
+   * Solo envía ventas con id >= LOCAL_SALE_ID_THRESHOLD y noVenta === 0.
+   * Se puede usar desde SalesScreen o desde la sincronización periódica.
+   */
+  async sendPendingVentasToServer(
+    sucursal: number,
+    idUsuario: number
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    const LOCAL_SALE_ID_THRESHOLD = 1700000000;
+
+    try {
+      if (!this.isInitialized || !this.realm) {
+        await this.initialize();
+      }
+      if (!this.realm) {
+        return { success: false, sent: 0, error: "Realm no inicializado" };
+      }
+
+      const ventasRealm = this.getVentas();
+
+      // Solo enviar ventas locales (id >= threshold) y sin número de venta asignado
+      const ventasLocales = ventasRealm.filter(
+        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD
+      );
+
+      console.log("[FullSyncService] Filtering local sales", {
+        totalVentas: ventasRealm.length,
+        localVentas: ventasLocales.length,
+        threshold: LOCAL_SALE_ID_THRESHOLD,
+      });
+
+      if (ventasLocales.length === 0) {
+        console.log("[FullSyncService] No pending ventas to send");
+        return { success: true, sent: 0 };
+      }
+
+      const payload = ventasLocales.map((venta: any) => {
+        const cliente = venta.cveCliente ? this.getClienteFullById(venta.cveCliente) : null;
+
+        return {
+          sucursal: venta.sucursal ?? sucursal,
+          clave_prod: venta.claveProd ?? 0,
+          Cant_producto: venta.cantProducto ?? 0,
+          precio: venta.precio ?? 0,
+          Cve_cliente: venta.cveCliente ?? 0,
+          fecha: (venta.fecha ?? new Date()).toISOString(),
+          tipo_pago: venta.tipoPago ?? 1,
+          usuario: idUsuario,
+          longitud: cliente?.longitud ?? 0,
+          latitud: cliente?.latitud ?? 0,
+          id_movil: venta.idMovil,
+          fechaTransfer: new Date().toISOString(),
+        };
+      });
+
+      console.log("[FullSyncService] Payload to send:", payload);
+
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasArrastreJSON?sucursal=${encodeURIComponent(
+        String(sucursal)
+      )}&idUsuario=${encodeURIComponent(String(idUsuario))}`;
+
+      console.log("[FullSyncService] Sending ventas arrastre", {
+        url,
+        rows: payload.length,
+      });
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error("[FullSyncService] Error sending ventas arrastre", response.status, errorText);
+        return {
+          success: false,
+          sent: 0,
+          error: `HTTP ${response.status}: ${errorText}`,
+        };
+      }
+
+      console.log("[FullSyncService] Ventas arrastre sent successfully", response.status);
+      return { success: true, sent: payload.length };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSyncService] Error sending ventas arrastre", error);
+      return { success: false, sent: 0, error: errorMsg };
+    }
   }
 
   getStats(): any {

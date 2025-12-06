@@ -21,6 +21,7 @@ export const VentaSchema = {
     folioFactura: "bool?",
     facturacionMovil: "bool?",
     syncedAt: "date",
+    syncedAr: "date?",
   },
   primaryKey: "id",
 };
@@ -55,6 +56,20 @@ export const ProductoSchema = {
   primaryKey: "id",
 };
 
+export const KitSchema = {
+  name: "Kit",
+  properties: {
+    id: "int",
+    idProducto: "int?",
+    idInsumo: "int?",
+    cantidad: "float?",
+    precio: "float?",
+    descuento: "float?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
 export const PrecioSchema = {
   name: "Precio",
   properties: {
@@ -65,6 +80,7 @@ export const PrecioSchema = {
     precio: "float?",
     fechaAct: "date?",
     syncedAt: "date",
+    syncedAr: "date?",
   },
   primaryKey: "id",
 };
@@ -97,6 +113,7 @@ export const CarteraSchema = {
     noVenta: "int?",
     cobrado: "bool?",
     syncedAt: "date",
+    syncedAr: "date",
   },
   primaryKey: "id",
 };
@@ -113,6 +130,7 @@ export const ClienteFullSchema = {
     facturacionMovil: "bool?",
     fechaAct: "date?",
     syncedAt: "date",
+    syncedAr: "date?",
   },
   primaryKey: "id",
 };
@@ -129,13 +147,59 @@ export const SyncStatusSchema = {
   primaryKey: "id",
 };
 
+export const SyncLogSchema = {
+  name: "SyncLog",
+  properties: {
+    id: "string", // UUID único
+    fechaInicio: "date", // Fecha y hora de inicio
+    fechaFinal: "date?", // Fecha y hora de finalización
+    exitoso: "bool", // Si fue exitoso o no
+    razon: "string?", // Razón específica si falló
+    usuario: "string?", // Usuario que ejecutó la sincronización
+    ruta: "string?", // Ruta/endpoint de la API
+    sucursal: "int?", // Sucursal sincronizada
+    totalRegistros: "int?", // Total de registros sincronizados
+    duracionMs: "int?", // Duración en milisegundos
+    tipo: "string?", // 'manual' o 'automatica'
+    detalles: "string?", // JSON con detalles adicionales
+  },
+  primaryKey: "id",
+};
+
+/**
+ * Schema para logs de sincronización por tabla
+ * Registra cada sincronización individual con detalles específicos
+ */
+export const SyncTableLogSchema = {
+  name: "SyncTableLog",
+  properties: {
+    id: "string", // UUID único
+    syncLogId: "string", // Referencia al SyncLog principal
+    tabla: "string", // Nombre de la tabla sincronizada
+    fechaInicio: "date", // Fecha y hora de inicio de esta tabla
+    fechaFinal: "date?", // Fecha y hora de finalización
+    exitoso: "bool", // Si fue exitoso o no
+    razon: "string?", // Razón específica si falló
+    registrosLeidos: "int?", // Total de registros leídos de la API
+    registrosGuardados: "int?", // Total de registros guardados en Realm
+    registrosActualizados: "int?", // Total de registros actualizados
+    duracionMs: "int?", // Duración en milisegundos
+    endpoint: "string?", // Endpoint específico de esta tabla
+    detalles: "string?", // JSON con detalles adicionales
+  },
+  primaryKey: "id",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
   ProductoSchema,
+  KitSchema,
   PrecioSchema,
   InventarioSchema,
   CarteraSchema,
   ClienteFullSchema,
   SyncStatusSchema,
+  SyncLogSchema,
+  SyncTableLogSchema,
 ];

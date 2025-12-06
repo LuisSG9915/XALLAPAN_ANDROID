@@ -40,6 +40,7 @@ import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from ".
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
+import SyncStatusPanel from "./components/SyncStatusPanel";
 
 declare const global: any;
 
@@ -277,6 +278,8 @@ function AppContent({ navigation }: { navigation: any }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        <SyncStatusPanel />
+
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
