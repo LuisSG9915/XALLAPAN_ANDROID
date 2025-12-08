@@ -11,7 +11,7 @@ export class ClientesSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9011/api/MovilesVentas/clientes-full';
+    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full';
   }
 
   getPriority(): number {

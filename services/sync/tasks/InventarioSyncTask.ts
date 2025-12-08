@@ -21,7 +21,9 @@ export class InventarioSyncTask extends SyncTask {
     const nowMexico = this.getMexicoNow();
     const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
 
-    return `https://cbinfo.no-ip.info:9011/api/MovilesVentas/inventario-erp-movil/${this.sucursal}?fechaMovto=${fechaMovto}`;
+    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+      String(this.sucursal),
+    )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
   }
   // fechaMovto
   getPriority(): number {
@@ -60,7 +62,6 @@ export class InventarioSyncTask extends SyncTask {
             syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : nowMexico,
             syncedAr: nowMexico,
           };
-          console.log(inventarioData);
           if (existing) {
             this.realm.create("Inventario", inventarioData, UpdateMode.Modified);
             registrosActualizados++;

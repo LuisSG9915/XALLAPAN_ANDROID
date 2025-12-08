@@ -1,10 +1,29 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, RefreshControl, Alert } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  FlatList,
+  RefreshControl,
+  Alert,
+} from "react-native";
+import Clipboard from "@react-native-clipboard/clipboard";
 import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
-type EntityType = "ventas" | "usuarios" | "productos" | "precios" | "inventario" | "cartera" | "clientes";
+type EntityType =
+  | "ventas"
+  | "usuarios"
+  | "productos"
+  | "kits"
+  | "precios"
+  | "inventario"
+  | "cartera"
+  | "clientes"
+  | "bitacora";
 
 interface EntityTab {
   key: EntityType;
@@ -16,10 +35,12 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "ventas", title: "Ventas", icon: "attach-money" },
   { key: "clientes", title: "Clientes", icon: "people" },
   { key: "productos", title: "Productos", icon: "inventory" },
+  { key: "kits", title: "Kits", icon: "category" },
   { key: "precios", title: "Precios", icon: "price-check" },
   { key: "inventario", title: "Inventario", icon: "bar-chart" },
   { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
   { key: "usuarios", title: "Usuarios", icon: "person" },
+  { key: "bitacora", title: "Bitácora", icon: "history" },
 ];
 
 export default function DataViewScreen() {
@@ -49,6 +70,9 @@ export default function DataViewScreen() {
         case "productos":
           setData(FullSyncService.getProductosPaginated(offset, ITEMS_PER_PAGE));
           break;
+        case "kits":
+          setData(FullSyncService.getKitsPaginated(offset, ITEMS_PER_PAGE));
+          break;
         case "precios":
           setData(FullSyncService.getPreciosPaginated(offset, ITEMS_PER_PAGE));
           break;
@@ -60,6 +84,9 @@ export default function DataViewScreen() {
           break;
         case "clientes":
           setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "bitacora":
+          setData(FullSyncService.getSyncTableLogsPaginated(offset, ITEMS_PER_PAGE));
           break;
       }
     } catch (error) {
@@ -115,6 +142,59 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const renderBitacora = ({ item }: { item: any }) => (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>{item.tabla}</Text>
+        <View style={styles.headerRight}>
+          <Text style={styles.cardSubtitle}>
+            {item.fechaInicio ? new Date(item.fechaInicio).toLocaleString() : "Sin fecha"}
+          </Text>
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={() => {
+              if (!item.endpoint) {
+                Alert.alert("Sin endpoint", "No hay endpoint para copiar");
+                return;
+              }
+              Clipboard.setString(String(item.endpoint));
+              Alert.alert("Copiado", "Endpoint copiado al portapapeles");
+            }}
+          >
+            <Icon name="content-copy" type="material" size={16} color={COLORS.primary} />
+            <Text style={styles.copyButtonText}>Copiar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardText}>SyncLog ID: {item.syncLogId}</Text>
+        <Text style={styles.cardText}>ID Bitácora: {item.id}</Text>
+        <Text style={styles.cardText}>Endpoint: {item.endpoint || "N/A"}</Text>
+        <Text style={styles.cardText}>
+          Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
+        </Text>
+        <Text style={styles.cardText}>
+          Leídos: {item.registrosLeidos ?? 0} | Guardados: {item.registrosGuardados ?? 0}{" "}
+          | Actualizados: {item.registrosActualizados ?? 0}
+        </Text>
+        <Text style={styles.cardText}>
+          Estado:{" "}
+          <Text style={{ color: item.exitoso ? COLORS.success : COLORS.error }}>
+            {item.exitoso ? "Éxito" : "Error"}
+          </Text>
+        </Text>
+        {!item.exitoso && item.razon ? (
+          <Text style={[styles.cardText, { color: COLORS.error }]}>
+            Razón: {item.razon}
+          </Text>
+        ) : null}
+        {item.detalles ? (
+          <Text style={styles.cardText}>Detalles: {item.detalles}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+
   const renderCliente = ({ item }: { item: any }) => (
     <TouchableOpacity onPress={() => console.log(item)}>
       <View style={styles.card}>
@@ -125,7 +205,9 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Grupo: {item.idGrupo || "N/A"}</Text>
           <Text style={styles.cardText}>Crédito: {item.credito ? "Sí" : "No"}</Text>
-          <Text style={styles.cardText}>Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>
+            Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}
+          </Text>
           {item.latitud && item.longitud ? (
             <Text style={styles.cardText}>
               Ubicación: {item.latitud.toFixed(4)}, {item.longitud.toFixed(4)}
@@ -146,7 +228,26 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID: {item.id}</Text>
           <Text style={styles.cardText}>Es Kit: {item.esKit ? "Sí" : "No"}</Text>
-          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
+          <Text style={styles.cardText}>
+            Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderKit = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Kit #{item.id}</Text>
+          <Text style={styles.cardSubtitle}>Producto: {item.idProducto ?? "N/A"}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Insumo: {item.idInsumo ?? "N/A"}</Text>
+          <Text style={styles.cardText}>Cantidad: {item.cantidad ?? 0}</Text>
+          <Text style={styles.cardText}>Precio: {item.precio ?? 0}</Text>
+          <Text style={styles.cardText}>Descuento: {item.descuento ?? 0}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -162,7 +263,9 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
           <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
-          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
+          <Text style={styles.cardText}>
+            Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -178,7 +281,9 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID: {item.id}</Text>
           <Text style={styles.cardPrice}>Saldo: {item.saldo}</Text>
-          <Text style={styles.cardText}>Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>
+            Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || "N/A"}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -195,7 +300,9 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
           <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
           <Text style={styles.cardText}>No. Venta: {item.noVenta}</Text>
-          <Text style={styles.cardText}>Fecha: {item.fecha?.toLocaleDateString() || "N/A"}</Text>
+          <Text style={styles.cardText}>
+            Fecha: {item.fecha?.toLocaleDateString() || "N/A"}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -225,6 +332,8 @@ export default function DataViewScreen() {
         return renderCliente({ item });
       case "productos":
         return renderProducto({ item });
+      case "kits":
+        return renderKit({ item });
       case "precios":
         return renderPrecio({ item });
       case "inventario":
@@ -233,6 +342,8 @@ export default function DataViewScreen() {
         return renderCartera({ item });
       case "usuarios":
         return renderUsuario({ item });
+      case "bitacora":
+        return renderBitacora({ item });
       default:
         return null;
     }
@@ -254,6 +365,10 @@ export default function DataViewScreen() {
         return stats.cartera || 0;
       case "clientes":
         return stats.clientes || 0;
+      case "kits":
+        return stats.kits || 0;
+      case "bitacora":
+        return stats.bitacora || 0;
       default:
         return 0;
     }
@@ -281,12 +396,18 @@ export default function DataViewScreen() {
               color={selectedTab === tab.key ? "#fff" : COLORS.textSecondary}
               style={styles.tabIcon}
             />
-            <Text style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}>{tab.title}</Text>
+            <Text
+              style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}
+            >
+              {tab.title}
+            </Text>
             <View style={styles.badge}>
               <Text
                 style={[
                   styles.badgeText,
-                  selectedTab === tab.key ? { color: COLORS.primary } : { color: COLORS.textPrimary },
+                  selectedTab === tab.key
+                    ? { color: COLORS.primary }
+                    : { color: COLORS.textPrimary },
                 ]}
               >
                 {selectedTab === tab.key ? data.length : getCount()}
@@ -306,7 +427,10 @@ export default function DataViewScreen() {
       {/* Pagination Controls */}
       <View style={styles.paginationContainer}>
         <TouchableOpacity
-          style={[styles.paginationButton, currentPage === 0 && styles.paginationButtonDisabled]}
+          style={[
+            styles.paginationButton,
+            currentPage === 0 && styles.paginationButtonDisabled,
+          ]}
           onPress={handlePreviousPage}
           disabled={currentPage === 0}
         >
@@ -316,7 +440,12 @@ export default function DataViewScreen() {
             color={currentPage === 0 ? COLORS.textSecondary : "#fff"}
             size={20}
           />
-          <Text style={[styles.paginationButtonText, currentPage === 0 && { color: COLORS.textSecondary }]}>
+          <Text
+            style={[
+              styles.paginationButtonText,
+              currentPage === 0 && { color: COLORS.textSecondary },
+            ]}
+          >
             Anterior
           </Text>
         </TouchableOpacity>
@@ -326,7 +455,8 @@ export default function DataViewScreen() {
         <TouchableOpacity
           style={[
             styles.paginationButton,
-            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 && styles.paginationButtonDisabled,
+            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 &&
+              styles.paginationButtonDisabled,
           ]}
           onPress={handleNextPage}
           disabled={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1}
@@ -344,7 +474,11 @@ export default function DataViewScreen() {
           <Icon
             name="chevron-right"
             type="material"
-            color={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 ? COLORS.textSecondary : "#fff"}
+            color={
+              currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1
+                ? COLORS.textSecondary
+                : "#fff"
+            }
             size={20}
           />
         </TouchableOpacity>
@@ -366,9 +500,17 @@ export default function DataViewScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Icon name="inbox" type="material" size={64} color={COLORS.muted} style={{ marginBottom: 16 }} />
+            <Icon
+              name="inbox"
+              type="material"
+              size={64}
+              color={COLORS.muted}
+              style={{ marginBottom: 16 }}
+            />
             <Text style={styles.emptyText}>No hay datos sincronizados</Text>
-            <Text style={styles.emptySubtext}>Inicia sesión nuevamente para sincronizar</Text>
+            <Text style={styles.emptySubtext}>
+              Inicia sesión nuevamente para sincronizar
+            </Text>
           </View>
         }
       />
@@ -474,6 +616,10 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     marginLeft: 8,
   },
+  headerRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
   cardBody: {
     gap: 4,
   },
@@ -537,5 +683,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: COLORS.textSecondary,
+  },
+  copyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  copyButtonText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "600",
   },
 });

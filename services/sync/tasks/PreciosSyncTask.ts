@@ -11,7 +11,7 @@ export class PreciosSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9011/api/MovilesVentas/precios-full';
+    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/precios/full';
   }
 
   getPriority(): number {

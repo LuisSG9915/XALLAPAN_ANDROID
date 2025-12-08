@@ -11,7 +11,7 @@ export class CarteraSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9011/api/MovilesVentas/cartera-full';
+    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/cartera/full';
   }
 
   getPriority(): number {

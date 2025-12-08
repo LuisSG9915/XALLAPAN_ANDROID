@@ -8,7 +8,7 @@ export type SyncProgressCallback = (progress: SyncProgress) => void;
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
-  private apiBaseUrl = "https://cbinfo.no-ip.info:9011";
+  private apiBaseUrl = "https://cbinfo.no-ip.info:9031";
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -329,7 +329,7 @@ class FullSyncService {
           const tableName = "Venta";
           const last = this.getLastSyncedAr(tableName) || new Date(0);
           const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas-erp-movil?fechaInicial=${encodeURIComponent(
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
             fechaInicial
           )}&sucursal=${encodeURIComponent(String(sucursal))}`;
 
@@ -413,9 +413,11 @@ class FullSyncService {
         name: "InventarioIncremental",
         run: async () => {
           const tableName = "Inventario";
-          const now = this.getMexicoNow();
-          const fechaMovto = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString();
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-erp-movil/${sucursal}?fechaMovto=${fechaMovto}`;
+          const nowMexico = this.getMexicoNow();
+          const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+            String(sucursal)
+          )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
 
           console.log("[Incremental] Inventario desde", url);
 
@@ -786,6 +788,11 @@ class FullSyncService {
     );
   }
 
+  getSyncTableLogsCount(): number {
+    if (!this.isInitialized || !this.realm) return 0;
+    return this.realm.objects("SyncTableLog").length;
+  }
+
   getVentasBySucursal(sucursal: number, limit: number = 10000): any[] {
     if (!this.isInitialized || !this.realm) return [];
     return Array.from(
@@ -1084,6 +1091,54 @@ class FullSyncService {
     );
   }
 
+  /**
+   * Obtiene todos los kits (relación producto-insumo)
+   */
+  getKits(limit: number = 100): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("Kit").slice(0, limit));
+  }
+
+  /**
+   * Obtiene kits con paginación
+   */
+  getKitsPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(
+      this.realm
+        .objects("Kit")
+        .slice(offset, offset + limit)
+    );
+  }
+
+  /**
+   * Obtiene los kits (insumos) de un producto específico
+   */
+  getKitsByProducto(idProducto: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(
+      this.realm.objects("Kit").filtered("idProducto == $0", idProducto)
+    );
+  }
+
+  /**
+   * Obtiene los productos que usan un insumo específico
+   */
+  getKitsByInsumo(idInsumo: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(
+      this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo)
+    );
+  }
+
+  /**
+   * Obtiene un kit específico por ID
+   */
+  getKitById(id: number): any | null {
+    if (!this.isInitialized || !this.realm) return null;
+    return this.realm.objectForPrimaryKey("Kit", id) || null;
+  }
+
   getPrecios(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm) return [];
     return Array.from(this.realm.objects("Precio").sorted("descripcion").slice(0, limit));
@@ -1311,10 +1366,12 @@ class FullSyncService {
         ventas: 0,
         usuarios: 0,
         productos: 0,
+        kits: 0,
         precios: 0,
         inventario: 0,
         cartera: 0,
         clientes: 0,
+        bitacora: 0,
       };
     }
 
@@ -1322,10 +1379,12 @@ class FullSyncService {
       ventas: this.realm.objects("Venta").length,
       usuarios: this.realm.objects("Usuario").length,
       productos: this.realm.objects("Producto").length,
+      kits: this.realm.objects("Kit").length,
       precios: this.realm.objects("Precio").length,
       inventario: this.realm.objects("Inventario").length,
       cartera: this.realm.objects("Cartera").length,
       clientes: this.realm.objects("ClienteFull").length,
+      bitacora: this.realm.objects("SyncTableLog").length,
     };
   }
 

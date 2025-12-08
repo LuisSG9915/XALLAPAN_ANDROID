@@ -11,7 +11,7 @@ export class ProductosSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9011/api/MovilesVentas/productos-full';
+    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/productos/full';
   }
 
   getPriority(): number {
@@ -32,6 +32,7 @@ export class ProductosSyncTask extends SyncTask {
       }
 
       const productos = await response.json();
+      console.log({productos})
       const registrosLeidos = productos.length;
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
@@ -48,6 +49,7 @@ export class ProductosSyncTask extends SyncTask {
             ...producto,
             syncedAt: new Date(),
             syncedAr: nowMexico,
+            
           };
 
           if (existing) {
