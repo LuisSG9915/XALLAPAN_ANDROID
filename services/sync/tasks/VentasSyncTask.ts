@@ -18,7 +18,7 @@ export class VentasSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return `https://cbinfo.no-ip.info:9011/api/MovilesVentas/ventas/full/${this.sucursal}`;
+    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/ventas/full/${this.sucursal}`;
   }
 
   getPriority(): number {
@@ -44,7 +44,7 @@ export class VentasSyncTask extends SyncTask {
       let registrosGuardados = 0;
       let registrosActualizados = 0;
 
-      console.log(ventas);
+      console.log({ventas});
 
       this.realm.write(() => {
         for (const venta of ventas) {
