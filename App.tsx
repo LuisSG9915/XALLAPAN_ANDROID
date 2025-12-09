@@ -117,11 +117,7 @@ function App() {
           />
           <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
           <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
-          {/* <Stack.Screen
-            name="Precorte"
-            component={PrecorteScreen}
-            options={{ title: " Precorte" }}
-          /> */}
+          <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Precorte" }} />
           <Stack.Screen
             name="Traspaso"
             component={TraspasoRecepcionScreen}
@@ -153,6 +149,7 @@ function AppContent({ navigation }: { navigation: any }) {
   const isDarkMode = useColorScheme() === "dark";
   const [syncing, setSyncing] = useState(false);
   const [sucursalName, setSucursalName] = useState("");
+  const [dsucursalName, dsetSucursalName] = useState("");
   const [syncProgress, setSyncProgress] = useState<SyncProgress[]>([]);
   const [userName, setUserName] = useState<string>("");
 
@@ -162,6 +159,7 @@ function AppContent({ navigation }: { navigation: any }) {
       if (user) {
         setUserName(user.claveEmpleado || "Usuario");
         setSucursalName(user.sucursal_origen || user.sucursal || "Sucursal");
+        dsetSucursalName(user.dSucursal || "Sucursal");
       }
     };
     loadUserInfo();
@@ -224,15 +222,15 @@ function AppContent({ navigation }: { navigation: any }) {
       screen: "Billing",
       description: "Gestiona pagos",
     },
-    // {
-    //   id: 'precorte',
-    //   title: 'Precorte',
-    //   icon: 'assignment',
-    //   type: 'material',
-    //   color: COLORS.cards.precorte,
-    //   screen: 'Precorte',
-    //   description: 'Revisa el corte',
-    // },
+    {
+      id: "precorte",
+      title: "Precorte",
+      icon: "assignment",
+      type: "material",
+      color: COLORS.cards.precorte,
+      screen: "Precorte",
+      description: "Revisa el corte",
+    },
     {
       id: "traspaso",
       title: "Traspasos",
@@ -278,13 +276,17 @@ function AppContent({ navigation }: { navigation: any }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <SyncStatusPanel />
+        {/* <SyncStatusPanel /> */}
 
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View>
-              <Text style={styles.welcomeText}>Bienvenido {sucursalName}</Text>
+              <TouchableOpacity onPress={async () => console.log(await AuthService.restoreSession())}>
+                <Text style={styles.welcomeText}>
+                  Bienvenido {sucursalName} {"  -   " + dsucursalName}
+                </Text>
+              </TouchableOpacity>
               <Text style={styles.businessName}>{APP_NAME}</Text>
               <View style={styles.userBadge}>
                 <Icon name="person" type="material" size={14} color={COLORS.primary} />

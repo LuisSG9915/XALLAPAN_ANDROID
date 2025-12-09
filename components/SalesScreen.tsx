@@ -15,20 +15,14 @@ import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "../theme/theme";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type Cliente = {
   id: number;
   nombre: string;
   credito?: boolean;
   idGrupo?: number;
+  listaPrecio?: number;
 };
 
 type Producto = {
@@ -57,9 +51,7 @@ export default function SalesScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<
-    "efectivo" | "transferencia" | "credito" | null
-  >(null);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -69,19 +61,11 @@ export default function SalesScreen() {
   const [productosBase, setProductosBase] = useState<any[]>([]);
 
   const buildProductosFormateados = useCallback(
-    (
-      preciosSource: any[],
-      productosData: any[],
-      inventarioData: any[],
-      kitsData: any[]
-    ): Producto[] => {
+    (preciosSource: any[], productosData: any[], inventarioData: any[], kitsData: any[]): Producto[] => {
       // Mapa de precios por claveProd (prioriza idCliente == 0)
       const preciosMap = new Map<number, number>();
       preciosSource.forEach((p: any) => {
-        const clave =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         if (Number.isNaN(clave)) return;
         if (!preciosMap.has(clave) || p.idCliente === 0) {
           preciosMap.set(clave, p.precio || 0);
@@ -93,10 +77,7 @@ export default function SalesScreen() {
       const productosPorClave = new Map<number, any>();
       productosData.forEach((p: any) => {
         productosPorId.set(p.id, p);
-        const clave =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         if (!Number.isNaN(clave)) {
           productosPorClave.set(clave, p);
         }
@@ -122,11 +103,7 @@ export default function SalesScreen() {
         kitsPorProducto.set(k.idProducto, arr);
       });
 
-      const calcularExistencia = (
-        productoId: number | undefined,
-        claveProd: number | undefined,
-        esKit: boolean
-      ) => {
+      const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
         if (esKit && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
@@ -159,22 +136,15 @@ export default function SalesScreen() {
       };
 
       return preciosSource.map((p: any) => {
-        const claveNum =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const claveNum = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         const productoBase =
           (!Number.isNaN(claveNum) && productosPorClave.get(claveNum)) ||
           (!Number.isNaN(claveNum) ? productosPorId.get(claveNum) : undefined) ||
-          (p.idProducto !== undefined && p.idProducto !== null
-            ? productosPorId.get(p.idProducto)
-            : undefined) ||
+          (p.idProducto !== undefined && p.idProducto !== null ? productosPorId.get(p.idProducto) : undefined) ||
           productosPorId.get(Number(p.id));
         const esKit = Boolean(productoBase?.esKit);
-        const productoId =
-          productoBase?.id ?? (!Number.isNaN(claveNum) ? claveNum : p.idProducto ?? p.id);
-        const descripcion =
-          p.descripcion || productoBase?.descripcion || "Sin descripción";
+        const productoId = productoBase?.id ?? (!Number.isNaN(claveNum) ? claveNum : p.idProducto ?? p.id);
+        const descripcion = p.descripcion || productoBase?.descripcion || "Sin descripción";
         const precio = preciosMap.get(claveNum) || 0;
         const existencia = calcularExistencia(productoId, claveNum, esKit);
 
@@ -208,14 +178,9 @@ export default function SalesScreen() {
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
-          const vendedor =
-            (user.claveEmpleado as string | undefined) ||
-            (user.nombre as string | undefined) ||
-            "";
+          const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ??
-            (user.sucursal as number | null | undefined) ??
-            1;
+            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
           setCurrentSucursal(sucursal);
         }
 
@@ -239,6 +204,7 @@ export default function SalesScreen() {
         nombre: c.nombre || "Sin nombre",
         credito: c.credito || false,
         idGrupo: c.idGrupo,
+        listaPrecio: c.listaPrecio,
       }));
       setClientes(clientesFormateados);
       setFilteredClientes(clientesFormateados);
@@ -257,7 +223,7 @@ export default function SalesScreen() {
         productosData,
         inventarioData,
         kitsData
-      );
+      ).filter((p) => p.existencia > 0);
       console.log({ productosFormateados });
       console.log(inventarioData);
       console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal));
@@ -280,8 +246,7 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = clientes.filter(
-        (c) =>
-          c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
+        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
       );
 
       setFilteredClientes(filtered);
@@ -311,10 +276,7 @@ export default function SalesScreen() {
     [productos]
   );
 
-  const total = useMemo(
-    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
-    [cart]
-  );
+  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
   const addToCart = (p: Producto) => {
     setCart((prev) => {
@@ -346,20 +308,48 @@ export default function SalesScreen() {
 
   useEffect(() => {
     if (selectedClient) {
-      const preciosCliente = FullSyncService.getPreciosByCliente(selectedClient.id);
+      // Usar listaPrecio del cliente para buscar precios, si no tiene usar 0 (precio general)
+      const listaPrecios = selectedClient.listaPrecio ?? 0;
+      console.log("[DEBUG] Cliente seleccionado:", {
+        id: selectedClient.id,
+        nombre: selectedClient.nombre,
+        listaPrecio: selectedClient.listaPrecio,
+        listaPreciosUsado: listaPrecios,
+      });
+
+      const preciosCliente = FullSyncService.getPreciosByCliente(listaPrecios);
+      console.log("[DEBUG] Precios encontrados para listaPrecio=" + listaPrecios + ":", preciosCliente.length);
+      if (preciosCliente.length > 0) {
+        console.log("[DEBUG] Ejemplo precio:", preciosCliente[0]);
+      }
+
+      // También mostrar todos los precios disponibles para debug
+      const todosPrecios = FullSyncService.getPrecios(100);
+      console.log("[DEBUG] Total precios en Realm (primeros 100):", todosPrecios.length);
+      if (todosPrecios.length > 0) {
+        console.log("[DEBUG] Ejemplo de idClientes disponibles:", [
+          ...new Set(todosPrecios.map((p: any) => p.idCliente)),
+        ]);
+      }
+
       const inventario = FullSyncService.getInventario();
-      const productosData = productosBase.length
-        ? productosBase
-        : FullSyncService.getProductos(1000);
+      const productosData = productosBase.length ? productosBase : FullSyncService.getProductos(1000);
       const kitsData = kits.length ? kits : FullSyncService.getKits(5000);
+
+      console.log("[DEBUG] Datos cargados:", {
+        preciosCliente: preciosCliente.length,
+        inventario: inventario.length,
+        productosData: productosData.length,
+        kitsData: kitsData.length,
+      });
 
       const productosFormateados = buildProductosFormateados(
         preciosCliente,
         productosData,
         inventario,
         kitsData
-      );
-      console.log({ productosFormateados });
+      ).filter((p) => p.existencia > 0);
+      console.log("[DEBUG] Productos formateados (con existencia > 0):", productosFormateados.length);
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     }
@@ -391,18 +381,11 @@ export default function SalesScreen() {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode =
-        metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
-        metodoPago === "efectivo"
-          ? "Efectivo"
-          : metodoPago === "credito"
-          ? "Credito"
-          : "Transferencia";
+        metodoPago === "efectivo" ? "Efectivo" : metodoPago === "credito" ? "Credito" : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) ||
-        (currentUser?.nombre as string | undefined) ||
-        "";
+        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = new Date();
 
       console.log("[Sales] Built sale metadata", {
@@ -484,8 +467,7 @@ export default function SalesScreen() {
 
       try {
         const rawUserId = (currentUser as any)?.id;
-        const idUsuario =
-          rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
+        const idUsuario = rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
 
         const fecha = now.toISOString();
         const fechaTransfer = new Date().toISOString();
@@ -554,9 +536,9 @@ export default function SalesScreen() {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(
-            2
-          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`
+          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
+            status.printer?.name
+          }`
         );
       } else {
         Alert.alert(
@@ -581,9 +563,7 @@ export default function SalesScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>
-              Preparando conexión con la impresora...
-            </Text>
+            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
           </View>
         </ScrollView>
       </View>
@@ -606,9 +586,7 @@ export default function SalesScreen() {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>
-              Sin impresora. Los tickets se compartirán o deberás configurar una.
-            </Text>
+            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
           </View>
         )}
 
@@ -616,16 +594,11 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity
-              style={styles.smallBtn}
-              onPress={() => setClienteModalOpen(true)}
-            >
+            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
               <Text style={styles.smallBtnText}>Seleccionar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>
-            {selectedClient ? selectedClient.nombre : "Sin seleccionar"}
-          </Text>
+          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
         </View>
 
         {/* Productos */}
@@ -690,13 +663,8 @@ export default function SalesScreen() {
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>
-                    ${(item.precio * item.cantidad).toFixed(2)}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.removeBtn}
-                    onPress={() => removeFromCart(item.id)}
-                  >
+                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -709,11 +677,7 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip
-              label="Efectivo"
-              selected={metodoPago === "efectivo"}
-              onPress={() => setMetodoPago("efectivo")}
-            />
+            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
             <PayChip
               label="Transferencia"
               selected={metodoPago === "transferencia"}
@@ -733,11 +697,7 @@ export default function SalesScreen() {
           </View>
 
           <TouchableOpacity
-            style={[
-              styles.primaryBtn,
-              (!selectedClient || !cart.length || !metodoPago) &&
-                styles.primaryBtnDisabled,
-            ]}
+            style={[styles.primaryBtn, (!selectedClient || !cart.length || !metodoPago) && styles.primaryBtnDisabled]}
             onPress={processSale}
             disabled={!selectedClient || !cart.length || !metodoPago}
           >
@@ -765,10 +725,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchCliente("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -844,10 +801,7 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchProducto("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -876,21 +830,15 @@ export default function SalesScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
                       <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
-                      <Text style={styles.listSubtitle}>
-                        Existencia: {item.existencia}
-                      </Text>
-                      <Text style={styles.listSubtitle}>
-                        EsKit?: {item.esKit ? "Sí" : "No"}
-                      </Text>
+                      <Text style={styles.listSubtitle}>Existencia: {item.existencia}</Text>
+                      <Text style={styles.listSubtitle}>EsKit?: {item.esKit ? "Sí" : "No"}</Text>
                     </View>
                     <Text style={styles.productPrice}>${item.precio.toFixed(2)}</Text>
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>
-                      No se encontraron productos
-                    </Text>
+                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
                   </View>
                 }
               />
@@ -927,11 +875,7 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.chip,
-        selected && styles.chipSelected,
-        disabled && styles.chipDisabled,
-      ]}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
     >
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>

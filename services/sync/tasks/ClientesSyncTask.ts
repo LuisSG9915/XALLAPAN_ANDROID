@@ -1,17 +1,17 @@
-import Realm, { UpdateMode } from 'realm';
-import { SyncTask, SyncTaskResult } from '../SyncTask';
-import { ClienteFullSchema } from '../../RealmSchemas';
+import Realm, { UpdateMode } from "realm";
+import { SyncTask, SyncTaskResult } from "../SyncTask";
+import { ClienteFullSchema } from "../../RealmSchemas";
 
 /**
  * Tarea de sincronización para la tabla Clientes
  */
 export class ClientesSyncTask extends SyncTask {
   getTableName(): string {
-    return 'Clientes';
+    return "Clientes";
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full';
+    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full";
   }
 
   getPriority(): number {
@@ -24,7 +24,7 @@ export class ClientesSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log('[ClientesSyncTask] Obteniendo clientes desde API...');
+      console.log("[ClientesSyncTask] Obteniendo clientes desde API...");
 
       const response = await fetch(this.getEndpoint());
       if (!response.ok) {
@@ -42,10 +42,7 @@ export class ClientesSyncTask extends SyncTask {
       // Sincronizar con Realm
       this.realm.write(() => {
         for (const cliente of clientes) {
-          const existing = this.realm.objectForPrimaryKey(
-            'ClienteFull',
-            cliente.id,
-          );
+          const existing = this.realm.objectForPrimaryKey("ClienteFull", cliente.id);
 
           const clienteData = {
             id: cliente.id,
@@ -59,21 +56,20 @@ export class ClientesSyncTask extends SyncTask {
             correoFactura: cliente.correo_factura || null,
             syncedAt: new Date(),
             syncedAr: cliente.fechaLog ? new Date(cliente.fechaLog) : null,
+            listaPrecio: cliente.listaPrecio,
           };
 
           if (existing) {
-            this.realm.create('ClienteFull', clienteData, UpdateMode.Modified);
+            this.realm.create("ClienteFull", clienteData, UpdateMode.Modified);
             registrosActualizados++;
           } else {
-            this.realm.create('ClienteFull', clienteData);
+            this.realm.create("ClienteFull", clienteData);
             registrosGuardados++;
           }
         }
       });
 
-      console.log(
-        `[ClientesSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`,
-      );
+      console.log(`[ClientesSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
 
       return {
         success: true,
@@ -85,10 +81,10 @@ export class ClientesSyncTask extends SyncTask {
         },
       };
     } catch (error) {
-      console.error('[ClientesSyncTask] Error:', error);
+      console.error("[ClientesSyncTask] Error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Error desconocido',
+        error: error instanceof Error ? error.message : "Error desconocido",
       };
     }
   }

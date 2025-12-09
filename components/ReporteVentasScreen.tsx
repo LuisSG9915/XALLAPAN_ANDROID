@@ -17,6 +17,7 @@ import TicketPrinter, { SaleTicketData } from "../services/TicketPrinter";
 import FullSyncService from "../services/FullSyncService";
 import FacturaService, { FacturaItem } from "../services/FacturaService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
+import AuthService from "../services/AuthService";
 
 type ReporteItem = {
   id: number;
@@ -82,13 +83,11 @@ export default function ReporteVentasScreen() {
 
   const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
   const totalEfectivo = useMemo(
-    () =>
-      items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
+    () => items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
     [items]
   );
   const totalCredito = useMemo(
-    () =>
-      items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
+    () => items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
     [items]
   );
 
@@ -125,9 +124,7 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const mapTipoPago = (
-    tipo: number | undefined
-  ): "Efectivo" | "Credito" | "Transferencia" => {
+  const mapTipoPago = (tipo: number | undefined): "Efectivo" | "Credito" | "Transferencia" => {
     if (tipo === 1) return "Efectivo";
     if (tipo === 2) return "Credito";
     if (tipo === 3) return "Transferencia";
@@ -135,6 +132,7 @@ export default function ReporteVentasScreen() {
   };
 
   const filtrarVentas = (soloLocales: boolean) => {
+    console.log("Filtrando ventas, soloLocales:", soloLocales);
     setLoading(true);
     setIsLocalView(soloLocales);
     try {
@@ -150,43 +148,40 @@ export default function ReporteVentasScreen() {
         return;
       }
 
+      // Obtener sucursal del usuario actual
+      const currentUser = AuthService.currentUser;
+      const sucursalUsuario = currentUser?.sucursal_origen;
+
       // Crear copias para no mutar los estados y normalizar rango a día completo
       const fecha1Parsed = new Date(fecha1);
       fecha1Parsed.setHours(0, 0, 0, 0);
       const fecha2Parsed = new Date(fecha2);
       fecha2Parsed.setHours(23, 59, 59, 999);
 
-      console.log("[Reporte] Filtering ventas", {
-        soloLocales,
-        fecha1Parsed,
-        fecha2Parsed,
-        totalVentas: allVentas.length,
-      });
       const filtered = allVentas.filter((venta) => {
         if (!venta.fecha) return false;
         const ventaDate = new Date(venta.fecha);
-
         // Filtrar por fecha siempre
         const inDateRange = ventaDate >= fecha1Parsed && ventaDate <= fecha2Parsed;
 
+        // Filtrar por sucursal del usuario (si está definida)
+        const inSucursal = sucursalUsuario === undefined || venta.sucursal === sucursalUsuario;
+
         if (soloLocales) {
           // Consultar Local: solo ventas con id >= threshold (ventas locales)
-          return inDateRange && venta.id && venta.id >= LOCAL_SALE_ID_THRESHOLD;
+          return inDateRange && inSucursal && venta.noVenta == 0;
         } else {
           // Consultar: solo ventas con id < threshold (ventas remotas/API)
-          return inDateRange && (!venta.id || venta.id < LOCAL_SALE_ID_THRESHOLD);
+          return inDateRange && inSucursal && venta.noVenta > 0;
         }
       });
-
       console.log("[Reporte] Filtered results", { count: filtered.length });
 
       const mapped: ReporteItem[] = filtered.map((venta) => ({
         id: venta.id,
         idMovil: venta.idMovil,
         no_venta: venta.noVenta || 0,
-        fecha: venta.fecha
-          ? new Date(venta.fecha).toISOString()
-          : new Date().toISOString(),
+        fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
         nombre: venta.nombreCliente || "Sin nombre",
         importe: venta.importe || 0,
         tipoPago: mapTipoPago(venta.tipoPago),
@@ -203,43 +198,64 @@ export default function ReporteVentasScreen() {
 
       setItems(mapped);
 
-      // Si es vista local, agrupar por idMovil
-      if (soloLocales) {
-        const groupedMap = new Map<number, GroupedSale>();
+      // Agrupar ventas por idMovil (locales) o por noVenta+sucursal (remotas)
+      const groupedMap = new Map<string, GroupedSale>();
 
-        filtered.forEach((venta) => {
-          const idMovil = venta.idMovil || venta.id;
-          if (!groupedMap.has(idMovil)) {
-            groupedMap.set(idMovil, {
-              idMovil,
-              no_venta: venta.noVenta || idMovil,
-              fecha: venta.fecha
-                ? new Date(venta.fecha).toISOString()
-                : new Date().toISOString(),
-              nombre: venta.nombreCliente || "Sin nombre",
-              totalImporte: 0,
-              tipoPago: mapTipoPago(venta.tipoPago),
-              sucursal: venta.sucursal,
-              cve_cliente: venta.cveCliente,
-              productos: [],
-            });
-          }
+      filtered.forEach((venta) => {
+        // Para ventas locales usar idMovil, para remotas usar noVenta+sucursal
+        let groupKey: string;
+        let displayId: number;
 
-          const group = groupedMap.get(idMovil)!;
-          const productoImporte = venta.importe || 0;
-          group.totalImporte += productoImporte;
-          group.productos.push({
-            nombreProducto: venta.nombreProducto || "Sin nombre",
-            cantProducto: venta.cantProducto || 0,
-            precio: venta.precio || 0,
-            importe: productoImporte,
+        if (soloLocales) {
+          // Ventas locales: agrupar por idMovil
+          displayId = venta.idMovil || venta.id;
+          groupKey = `local_${displayId}`;
+        } else {
+          // Ventas remotas: agrupar por noVenta + sucursal
+          const noVenta = venta.noVenta || venta.id;
+          const sucursal = venta.sucursal || 0;
+          displayId = noVenta;
+          groupKey = `remote_${noVenta}_${sucursal}`;
+        }
+
+        if (!groupedMap.has(groupKey)) {
+          groupedMap.set(groupKey, {
+            idMovil: displayId,
+            no_venta: venta.noVenta || displayId,
+            fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
+            nombre: venta.nombreCliente || "Sin nombre",
+            totalImporte: 0,
+            tipoPago: mapTipoPago(venta.tipoPago),
+            sucursal: venta.sucursal,
+            cve_cliente: venta.cveCliente,
+            productos: [],
+            folioFactura: venta.folioFactura,
+            facturacionMovil: venta.facturacionMovil,
           });
-        });
+        }
 
-        setGroupedItems(Array.from(groupedMap.values()));
-      } else {
-        setGroupedItems([]);
-      }
+        const group = groupedMap.get(groupKey)!;
+        const productoImporte = venta.importe || 0;
+        group.totalImporte += productoImporte;
+        group.productos.push({
+          nombreProducto: venta.nombreProducto || "Sin nombre",
+          cantProducto: venta.cantProducto || 0,
+          precio: venta.precio || 0,
+          importe: productoImporte,
+        });
+      });
+
+      const groupedArray = Array.from(groupedMap.values());
+      console.log("[Reporte] Grouped results", {
+        totalGroups: groupedArray.length,
+        groups: groupedArray.map((g) => ({
+          no_venta: g.no_venta,
+          productos: g.productos.length,
+          total: g.totalImporte,
+        })),
+      });
+
+      setGroupedItems(groupedArray);
     } catch (error: any) {
       console.error("Error al filtrar ventas:", error);
       const errorMsg = error?.message || String(error) || "Error desconocido";
@@ -272,11 +288,7 @@ export default function ReporteVentasScreen() {
 
     const base = relacionadas[0] as any | undefined;
 
-    const date = base?.fecha
-      ? base.fecha instanceof Date
-        ? base.fecha
-        : new Date(base.fecha)
-      : new Date(row.fecha);
+    const date = base?.fecha ? (base.fecha instanceof Date ? base.fecha : new Date(base.fecha)) : new Date(row.fecha);
 
     const clientName = base?.nombreCliente || row.nombre;
     const paymentMethod = row.tipoPago;
@@ -305,8 +317,7 @@ export default function ReporteVentasScreen() {
           ]
         : [];
 
-    const total =
-      items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : row.importe;
+    const total = items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : row.importe;
 
     const saleTicketData: SaleTicketData = {
       clientName,
@@ -346,11 +357,8 @@ export default function ReporteVentasScreen() {
           return;
         }
 
-        await FacturaService.getInstance().imprimirFacturaExistente(
-          row.no_venta,
-          row.sucursal,
-          row.caja || 2,
-          () => loadVentas()
+        await FacturaService.getInstance().imprimirFacturaExistente(row.no_venta, row.sucursal, row.caja || 2, () =>
+          loadVentas()
         );
         return;
       }
@@ -376,11 +384,7 @@ export default function ReporteVentasScreen() {
           usoCFDI: "G03", // Gastos en general
         };
 
-        await FacturaService.getInstance().generarFactura(
-          [facturaItem],
-          fechaFactura,
-          () => loadVentas()
-        );
+        await FacturaService.getInstance().generarFactura([facturaItem], fechaFactura, () => loadVentas());
         return;
       }
 
@@ -401,16 +405,8 @@ export default function ReporteVentasScreen() {
 
       {allVentas.length > 0 && (
         <View style={styles.infoCard}>
-          <Icon
-            name="info"
-            type="material"
-            color={COLORS.primary}
-            size={20}
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.infoText}>
-            {allVentas.length} ventas sincronizadas en la base local
-          </Text>
+          <Icon name="info" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+          <Text style={styles.infoText}>{allVentas.length} ventas sincronizadas en la base local</Text>
         </View>
       )}
 
@@ -418,8 +414,7 @@ export default function ReporteVentasScreen() {
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el
-            menú principal.
+            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el menú principal.
           </Text>
         </View>
       )}
@@ -428,33 +423,15 @@ export default function ReporteVentasScreen() {
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha inicial</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker1(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha final</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker2(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -521,23 +498,11 @@ export default function ReporteVentasScreen() {
             )}
           </>
         )}
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultar}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? "Cargando..." : "Consultar"}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultar} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar"}</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultarLocal}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? "Cargando..." : "Consultar local"}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultarLocal} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar local"}</Text>
         </TouchableOpacity>
       </View>
 
@@ -563,27 +528,11 @@ export default function ReporteVentasScreen() {
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.money}>${item.importe.toFixed(2)}</Text>
                   <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      onPress={() => imprimirTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="print"
-                        type="material"
-                        color={COLORS.primary}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
+                      <Icon name="print" type="material" color={COLORS.primary} size={20} />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => visualizarTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="visibility"
-                        type="material"
-                        color={COLORS.info}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
+                      <Icon name="visibility" type="material" color={COLORS.info} size={20} />
                     </TouchableOpacity>
                     <Text onPress={() => console.log(item)}>Caja {item?.caja}</Text>
                     <TouchableOpacity
@@ -594,11 +543,7 @@ export default function ReporteVentasScreen() {
                       <Icon
                         name="receipt"
                         type="material"
-                        color={
-                          !item.folioFactura && !item.facturacionMovil
-                            ? COLORS.muted
-                            : COLORS.success
-                        }
+                        color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
                         size={20}
                       />
                     </TouchableOpacity>

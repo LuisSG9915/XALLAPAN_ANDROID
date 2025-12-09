@@ -1,6 +1,6 @@
-import Realm, { UpdateMode } from 'realm';
-import { SyncTask, SyncTaskResult } from '../SyncTask';
-import { VentaSchema } from '../../RealmSchemas';
+import Realm, { UpdateMode } from "realm";
+import { SyncTask, SyncTaskResult } from "../SyncTask";
+import { VentaSchema } from "../../RealmSchemas";
 
 /**
  * Tarea de sincronización para la tabla Ventas
@@ -14,11 +14,11 @@ export class VentasSyncTask extends SyncTask {
   }
 
   getTableName(): string {
-    return 'Ventas';
+    return "Ventas";
   }
 
   getEndpoint(): string {
-    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/ventas/full/${this.sucursal}`;
+    return `https://cbinfo.no-ip.info:9011/api/MovilesVentas/ventas/full/${this.sucursal}`;
   }
 
   getPriority(): number {
@@ -26,14 +26,12 @@ export class VentasSyncTask extends SyncTask {
   }
 
   getDependencies(): string[] {
-    return ['Usuarios', 'Clientes', 'Productos']; // Depende de usuarios, clientes y productos
+    return ["Usuarios", "Clientes", "Productos"]; // Depende de usuarios, clientes y productos
   }
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log(
-        `[VentasSyncTask] Obteniendo ventas para sucursal ${this.sucursal}...`,
-      );
+      console.log(`[VentasSyncTask] Obteniendo ventas para sucursal ${this.sucursal}...`);
 
       const response = await fetch(this.getEndpoint());
       if (!response.ok) {
@@ -52,10 +50,7 @@ export class VentasSyncTask extends SyncTask {
         for (const venta of ventas) {
           const idMovil = venta.idMovil ?? null;
 
-          const localVentas =
-            idMovil === null
-              ? []
-              : this.realm.objects('Venta').filtered('idMovil >= $0', idMovil);
+          const localVentas = idMovil === null ? [] : this.realm.objects("Venta").filtered("idMovil >= $0", idMovil);
           console.log(localVentas);
           if (localVentas.length > 0) {
             // Actualizar solo los campos específicos en cada registro encontrado
@@ -66,14 +61,12 @@ export class VentasSyncTask extends SyncTask {
               (localVenta as any).importe = venta.importe;
               (localVenta as any).folioFactura = venta.folioFactura;
               (localVenta as any).facturacionMovil = venta.facturacionMovil;
-              (localVenta as any).syncedAt = venta.fechaLog
-                ? new Date(venta.fechaLog)
-                : nowMexico;
+              (localVenta as any).syncedAt = venta.fechaLog ? new Date(venta.fechaLog) : nowMexico;
               registrosActualizados++;
             }
           } else {
             // Insertar nuevo registro de venta desde servidor
-            this.realm.create('Venta', {
+            this.realm.create("Venta", {
               id: venta.id,
               idMovil: venta.idMovil ?? null,
               sucursal: venta.sucursal ?? null,
@@ -99,17 +92,13 @@ export class VentasSyncTask extends SyncTask {
         }
 
         // Actualizar syncedAr en TODOS los registros locales con id > 1700000000
-        const allLocalVentas = this.realm
-          .objects('Venta')
-          .filtered('id > 1700000000');
+        const allLocalVentas = this.realm.objects("Venta").filtered("id > 1700000000");
         for (const localVenta of allLocalVentas) {
           (localVenta as any).syncedAr = nowMexico;
         }
       });
 
-      console.log(
-        `[VentasSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`,
-      );
+      console.log(`[VentasSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
       console.log(ventas);
       return {
         success: true,
@@ -122,10 +111,10 @@ export class VentasSyncTask extends SyncTask {
         },
       };
     } catch (error) {
-      console.error('[VentasSyncTask] Error:', error);
+      console.error("[VentasSyncTask] Error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Error desconocido',
+        error: error instanceof Error ? error.message : "Error desconocido",
       };
     }
   }

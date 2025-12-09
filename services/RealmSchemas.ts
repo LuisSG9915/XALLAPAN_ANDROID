@@ -128,6 +128,7 @@ export const ClienteFullSchema = {
     idGrupo: "int?",
     credito: "bool?",
     facturacionMovil: "bool?",
+    listaPrecio: "int?",
     fechaAct: "date?",
     syncedAt: "date",
     syncedAr: "date?",

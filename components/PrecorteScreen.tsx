@@ -1,18 +1,10 @@
 import React, { useMemo, useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-  Alert,
-  ScrollView,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert, ScrollView } from "react-native";
 import { Icon } from "react-native-elements";
 import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
+import AuthService from "../services/AuthService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type PrecorteItem = {
@@ -22,14 +14,22 @@ type PrecorteItem = {
   entradas: number;
   salidas: number;
   ifValue: number;
+  esKit?: boolean;
 };
 
 export default function PrecorteScreen() {
   const today = useMemo(() => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
+    const now = new Date();
+    // Convertir a hora de México (UTC-6)
+    const mexicoOffset = -6 * 60; // -6 horas en minutos
+    const localOffset = now.getTimezoneOffset(); // offset actual en minutos
+    const diffMinutes = localOffset - mexicoOffset;
+    const mexicoDate = new Date(now.getTime() - diffMinutes * 60 * 1000);
+
+    const yyyy = mexicoDate.getFullYear();
+    const mm = String(mexicoDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(mexicoDate.getDate()).padStart(2, "0");
+    console.log("Fecha actual en horario México:", yyyy, mm, dd);
     return `${yyyy}-${mm}-${dd}`;
   }, []);
 
@@ -53,54 +53,118 @@ export default function PrecorteScreen() {
 
       await FullSyncService.initialize();
       const inventario = FullSyncService.getInventario(500) || [];
+      const productos = FullSyncService.getProductos(1000) || [];
+      const kitsData = FullSyncService.getKits(5000) || [];
+      const currentUser = AuthService.currentUser;
+      const sucursalUsuario = currentUser?.sucursal_origen || currentUser?.sucursal;
+      console.log("Inventario", inventario, "Sucursal usuario:", sucursalUsuario);
 
-      // Filtrar por fechaArrastre dentro del día seleccionado
+      // Filtrar por fechaArrastre dentro del día seleccionado Y por sucursal
       const inventarioFiltrado = inventario.filter((inv: any) => {
         const fa = inv.fechaArrastre;
         if (!fa) return false;
         const d = fa instanceof Date ? fa : new Date(fa);
-        return d >= startOfDay && d <= endOfDay;
+        const inDateRange = d >= startOfDay && d <= endOfDay;
+        const inSucursal = sucursalUsuario === undefined || inv.sucursal === sucursalUsuario;
+        return inDateRange && inSucursal;
       });
 
-      // Agrupar por claveProd y sumar saldos
-      const groupedByClave = inventarioFiltrado.reduce((acc: any, inv: any) => {
-        const clave = String(inv.claveProd ?? "");
-        const saldo = inv.saldo ?? 0;
+      // Mapa de productos por claveProd para saber si es kit
+      const productosPorClave = new Map<number, any>();
+      productos.forEach((p: any) => {
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        if (!Number.isNaN(clave)) {
+          productosPorClave.set(clave, p);
+        }
+      });
 
-        if (!acc[clave]) {
-          acc[clave] = {
-            clave_prod: clave,
-            descripcion: (inv.descripcion as string | undefined) ?? clave,
-            saldoTotal: 0,
-            count: 0,
-          };
+      // Inventario por claveProd para calcular existencia de kits
+      const inventarioPorClave = new Map<number, number>();
+      inventarioFiltrado.forEach((i: any) => {
+        const clave = i.claveProd;
+        if (clave === null || clave === undefined) return;
+        const saldoActual = inventarioPorClave.get(clave) || 0;
+        inventarioPorClave.set(clave, saldoActual + (i.saldo || 0));
+      });
+
+      // Kits por idProducto
+      const kitsPorProducto = new Map<number, any[]>();
+      kitsData.forEach((k: any) => {
+        if (k.idProducto === null || k.idProducto === undefined) return;
+        const arr = kitsPorProducto.get(k.idProducto) || [];
+        arr.push(k);
+        kitsPorProducto.set(k.idProducto, arr);
+      });
+
+      // Función para calcular existencia de kits
+      const calcularExistenciaKit = (productoId: number): number => {
+        const componentes = kitsPorProducto.get(productoId) || [];
+        if (!componentes.length) return 0;
+        let minimo = Infinity;
+
+        for (const comp of componentes) {
+          const cantidadInsumo = comp.cantidad ? Number(comp.cantidad) : 0;
+          if (cantidadInsumo <= 0) {
+            minimo = 0;
+            break;
+          }
+          const claveInsumo = comp.idInsumo;
+          if (claveInsumo === null || claveInsumo === undefined) {
+            minimo = 0;
+            break;
+          }
+          const saldo = inventarioPorClave.get(claveInsumo) || 0;
+          const posible = Math.floor(saldo / cantidadInsumo);
+          minimo = Math.min(minimo, posible);
         }
 
-        acc[clave].saldoTotal += saldo;
-        acc[clave].count++;
+        return minimo === Infinity ? 0 : minimo;
+      };
 
-        return acc;
-      }, {});
+      // Mapear inventario normal
+      const mapped: PrecorteItem[] = inventarioFiltrado.map((inv: any, index: number) => {
+        const clave = inv.claveProd;
+        const producto = productosPorClave.get(clave);
+        const esKit = Boolean(producto?.esKit);
 
-      console.log(
-        "📊 Inventario agrupado por clave:",
-        Object.keys(groupedByClave).length,
-        "productos únicos"
-      );
+        return {
+          id: inv.id ?? index,
+          clave_prod: String(inv.claveProd ?? ""),
+          descripcion: (inv.descripcion as string | undefined) ?? String(inv.claveProd ?? ""),
+          entradas: 0,
+          salidas: 0,
+          ifValue: inv.saldo ?? 0,
+          esKit,
+        };
+      });
 
-      const mapped: PrecorteItem[] = Object.values(groupedByClave).map((item: any) => ({
-        id: parseInt(item.clave_prod), // Usar claveProd como ID
-        clave_prod: item.clave_prod,
-        descripcion: item.descripcion,
-        entradas: 0,
-        salidas: 0,
-        ifValue: item.saldoTotal, // Saldo sumado y ajustado
-      }));
+      // Agregar kits con su existencia calculada
+      const kitsAgregados = new Set<number>();
+      productos
+        .filter((p: any) => p.esKit)
+        .forEach((p: any) => {
+          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+          if (Number.isNaN(clave) || kitsAgregados.has(p.id)) return;
+
+          const existenciaKit = calcularExistenciaKit(p.id);
+          if (existenciaKit > 0) {
+            mapped.push({
+              id: p.id + 100000, // ID único para evitar colisiones
+              clave_prod: String(clave),
+              descripcion: p.descripcion || String(clave),
+              entradas: 0,
+              salidas: 0,
+              ifValue: existenciaKit,
+              esKit: true,
+            });
+            kitsAgregados.add(p.id);
+          }
+        });
 
       setItems(mapped);
 
-      // Calcular total efectivo desde ventas (tipoPago 1) para la fecha seleccionada
-      const totalEf = FullSyncService.getVentasTotalEfectivoForDate(startOfDay);
+      // Calcular total efectivo desde ventas (tipoPago 1) para la fecha seleccionada y sucursal actual
+      const totalEf = FullSyncService.getVentasTotalEfectivoForDate(startOfDay, sucursalUsuario ?? undefined);
       setTotalEfectivo(totalEf);
     } catch (error) {
       console.error("Error al cargar inventario para precorte:", error);
@@ -150,13 +214,7 @@ export default function PrecorteScreen() {
         <Text style={styles.title}>Precorte</Text>
         {printerConnected && (
           <View style={styles.printerBadge}>
-            <Icon
-              name="print"
-              type="material"
-              size={14}
-              color="#fff"
-              style={{ marginRight: 4 }}
-            />
+            <Icon name="print" type="material" size={14} color="#fff" style={{ marginRight: 4 }} />
             <Text style={styles.printerBadgeText}>{printerName || "Conectada"}</Text>
           </View>
         )}
@@ -166,8 +224,7 @@ export default function PrecorteScreen() {
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay impresora configurada. Ve a Configuración de Impresora para conectar
-            una.
+            No hay impresora configurada. Ve a Configuración de Impresora para conectar una.
           </Text>
         </View>
       )}
@@ -211,10 +268,12 @@ export default function PrecorteScreen() {
               scrollEnabled={false}
               renderItem={({ item }) => (
                 <View style={styles.tr}>
-                  <Text style={[styles.td, { flex: 2 }]}>{item.descripcion}</Text>
-                  <Text style={[styles.tdRight, item.ifValue < 0 && styles.negative]}>
-                    {item.ifValue.toFixed(2)}
+                  <Text style={[styles.td, { flex: 2 }]}>
+                    {item.clave_prod + " "}
+                    {item.descripcion}
+                    {item.esKit ? " 📦" : ""}
                   </Text>
+                  <Text style={[styles.tdRight, item.ifValue < 0 && styles.negative]}>{item.ifValue.toFixed(2)}</Text>
                 </View>
               )}
             />
@@ -227,13 +286,7 @@ export default function PrecorteScreen() {
         </View>
 
         <TouchableOpacity style={styles.primaryBtn} onPress={imprimir}>
-          <Icon
-            name="print"
-            type="material"
-            color="#fff"
-            size={20}
-            style={{ marginRight: 8 }}
-          />
+          <Icon name="print" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
           <Text style={styles.primaryBtnText}>Imprimir Reporte</Text>
         </TouchableOpacity>
       </View>
