@@ -273,6 +273,14 @@ export default function TraspasoRecepcionScreen() {
         throw new Error(msg);
       }
 
+      await FullSyncService.updateInventarioAfterReception(
+        detalles.map((item) => ({
+          sucursal,
+          claveProd: item.idProducto || 0,
+          cantidad: item.cantidad,
+        }))
+      );
+
       // await FullSyncService.syncInventario(sucursal, selected.fecha);
       await loadTraspasos();
       setModalOpen(false);

@@ -866,13 +866,16 @@ class FullSyncService {
 
   /**
    * Actualiza el inventario restando las cantidades vendidas.
-   * Busca el registro existente por sucursal y claveProd y actualiza el saldo.
+   * Si el producto es un kit, descuenta los insumos según la tabla Kit.
+   * Si no es kit, descuenta el producto directamente.
    */
   async updateInventarioAfterSale(
     items: {
       sucursal: number;
       claveProd: number;
       cantidad: number;
+      esKit?: boolean;
+      idProducto?: number;
     }[]
   ): Promise<void> {
     if (!items.length) return;
@@ -884,28 +887,69 @@ class FullSyncService {
 
     this.realm.write(() => {
       items.forEach((item) => {
-        // Buscar el registro de inventario existente
-        const inventario = this.realm!.objects("Inventario").filtered(
-          "sucursal == $0 AND claveProd == $1",
-          item.sucursal,
-          item.claveProd
-        )[0] as any;
-
-        if (inventario) {
-          // Actualizar el saldo restando la cantidad vendida
-          inventario.saldo = (inventario.saldo || 0) - item.cantidad;
-          inventario.fechaArrastre = new Date();
-          // console.log(
-          //   `[FullSync] Inventario actualizado: Producto ${
-          //     item.claveProd
-          //   }, Saldo anterior: ${
-          //     (inventario.saldo || 0) + item.cantidad
-          //   }, Nuevo saldo: ${inventario.saldo}`,
-          // );
-        } else {
-          console.warn(
-            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+        if (item.esKit && item.idProducto) {
+          // Es un kit: descontar los insumos según la tabla Kit
+          const componentes = this.realm!.objects("Kit").filtered(
+            "idProducto == $0",
+            item.idProducto
           );
+
+          console.log(
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
+          );
+
+          componentes.forEach((comp: any) => {
+            const idInsumo = comp.idInsumo;
+            const cantidadInsumo = comp.cantidad || 0;
+            const cantidadTotal = cantidadInsumo * item.cantidad;
+
+            if (!idInsumo || cantidadInsumo <= 0) {
+              console.warn(
+                `[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`
+              );
+              return;
+            }
+
+            // Buscar el inventario del insumo por idInsumo (que es claveProd)
+            const inventario = this.realm!.objects("Inventario").filtered(
+              "sucursal == $0 AND claveProd == $1",
+              item.sucursal,
+              idInsumo
+            )[0] as any;
+
+            if (inventario) {
+              const saldoAnterior = inventario.saldo || 0;
+              inventario.saldo = saldoAnterior - cantidadTotal;
+              inventario.fechaArrastre = new Date();
+              console.log(
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+              );
+            } else {
+              console.warn(
+                `[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`
+              );
+            }
+          });
+        } else {
+          // No es kit: descontar el producto directamente
+          const inventario = this.realm!.objects("Inventario").filtered(
+            "sucursal == $0 AND claveProd == $1",
+            item.sucursal,
+            item.claveProd
+          )[0] as any;
+
+          if (inventario) {
+            const saldoAnterior = inventario.saldo || 0;
+            inventario.saldo = saldoAnterior - item.cantidad;
+            inventario.fechaArrastre = new Date();
+            console.log(
+              `[FullSync] Producto ${item.claveProd} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+            );
+          } else {
+            console.warn(
+              `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+            );
+          }
         }
       });
     });

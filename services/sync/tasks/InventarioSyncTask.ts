@@ -44,6 +44,8 @@ export class InventarioSyncTask extends SyncTask {
       }
 
       const inventario = await response.json();
+      console.log({inventario});
+      console.log({inventarioLength: inventario.length});
       const registrosLeidos = inventario.length;
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
@@ -52,7 +54,9 @@ export class InventarioSyncTask extends SyncTask {
       console.log(`[InventarioSyncTask] Leídos ${registrosLeidos} registros de inventario`);
 
       // Sincronizar con Realm
+      let registrosEliminados = 0;
       this.realm.write(() => {
+        // 1. Crear/actualizar registros del servidor
         for (const item of inventario) {
           const existing = this.realm.objectForPrimaryKey("Inventario", item.id);
 
@@ -70,9 +74,34 @@ export class InventarioSyncTask extends SyncTask {
             registrosGuardados++;
           }
         }
+
+        // 2. Eliminar registros que ya no existen en el servidor
+        // Obtener todos los registros locales de esta sucursal
+        const inventarioLocal = this.realm.objects("Inventario").filtered("sucursal == $0", this.sucursal);
+        
+        // Crear Set con los IDs del servidor para búsqueda rápida
+        const idsServidor = new Set(inventario.map((item: any) => item.id));
+        
+        // Encontrar y eliminar registros que no están en el servidor
+        const registrosAEliminar: any[] = [];
+        inventarioLocal.forEach((item: any) => {
+          if (!idsServidor.has(item.id)) {
+            registrosAEliminar.push(item);
+          }
+        });
+
+        registrosAEliminar.forEach((item) => {
+          console.log(
+            `[InventarioSyncTask] Eliminando registro obsoleto: id=${item.id}, claveProd=${item.claveProd}, descripcion=${item.descripcion}`
+          );
+          this.realm.delete(item);
+          registrosEliminados++;
+        });
       });
 
-      console.log(`[InventarioSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
+      console.log(
+        `[InventarioSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}, Eliminados: ${registrosEliminados}`
+      );
 
       return {
         success: true,
