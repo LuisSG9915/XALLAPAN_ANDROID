@@ -295,9 +295,7 @@ export default function SalesScreen() {
         inventarioData,
         kitsData
       ).filter((p) => p.existencia > 0);
-      console.log({ productosFormateados });
-      console.log(inventarioData);
-      console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal));
+
       setProductos(productosFormateados);
       setFilteredProductos(productosFormateados);
     } catch (error) {
@@ -527,13 +525,14 @@ export default function SalesScreen() {
         rows: cart.length,
         saleIdMovil,
       });
+      console.log({ cart });
       await FullSyncService.createLocalVentas(
         cart.map((item, index) => ({
           id: saleIdMovil + index,
           sucursal,
           noVenta: saleIdMovil,
           idMovil: saleIdMovil,
-          claveProd: parseInt(item.claveProd || "0", 10) || null,
+          claveProd: item.id, // Usar el id del producto, no claveProd
           nombreProducto: item.descripcion,
           cantProducto: item.cantidad,
           precio: parseFloat(item.precio.toString()) || 0,
@@ -557,10 +556,10 @@ export default function SalesScreen() {
       await FullSyncService.updateInventarioAfterSale(
         cart.map((item) => ({
           sucursal,
-          claveProd: parseInt(item.claveProd || "0", 10),
+          claveProd: parseInt(item.claveProd || "0", 10), // Código del producto para buscar en inventario
           cantidad: item.cantidad,
           esKit: item.esKit || false,
-          idProducto: item.id,
+          idProducto: item.id, // ID del producto para buscar componentes de kits
         }))
       );
       console.log("[Sales] Inventory updated successfully");
