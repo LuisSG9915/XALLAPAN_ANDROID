@@ -224,12 +224,12 @@ function AppContent({ navigation }: { navigation: any }) {
     },
     {
       id: "precorte",
-      title: "Precorte",
+      title: "Inventario",
       icon: "assignment",
       type: "material",
       color: COLORS.cards.precorte,
       screen: "Precorte",
-      description: "Revisa el corte",
+      description: "Revisa el inventario",
     },
     {
       id: "traspaso",

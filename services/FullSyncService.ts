@@ -878,21 +878,45 @@ class FullSyncService {
       idProducto?: number;
     }[]
   ): Promise<void> {
-    if (!items.length) return;
+    console.log("[FullSync] updateInventarioAfterSale called with", {
+      itemsCount: items.length,
+      items: items.map((i) => ({
+        sucursal: i.sucursal,
+        claveProd: i.claveProd,
+        cantidad: i.cantidad,
+        esKit: i.esKit,
+        idProducto: i.idProducto,
+      })),
+    });
+
+    if (!items.length) {
+      console.log("[FullSync] updateInventarioAfterSale: No items to process");
+      return;
+    }
 
     if (!this.isInitialized || !this.realm) {
+      console.log("[FullSync] updateInventarioAfterSale: Initializing realm...");
       await this.initialize();
     }
-    if (!this.realm) return;
+    if (!this.realm) {
+      console.error("[FullSync] updateInventarioAfterSale: Realm not available after init!");
+      return;
+    }
 
+    console.log("[FullSync] updateInventarioAfterSale: Starting realm.write()");
     this.realm.write(() => {
-      items.forEach((item) => {
+      items.forEach((item, index) => {
+        console.log(`[FullSync] Processing item ${index + 1}/${items.length}:`, {
+          sucursal: item.sucursal,
+          claveProd: item.claveProd,
+          cantidad: item.cantidad,
+          esKit: item.esKit,
+          idProducto: item.idProducto,
+        });
+
         if (item.esKit && item.idProducto) {
           // Es un kit: descontar los insumos según la tabla Kit
-          const componentes = this.realm!.objects("Kit").filtered(
-            "idProducto == $0",
-            item.idProducto
-          );
+          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
 
           console.log(
             `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
@@ -904,9 +928,7 @@ class FullSyncService {
             const cantidadTotal = cantidadInsumo * item.cantidad;
 
             if (!idInsumo || cantidadInsumo <= 0) {
-              console.warn(
-                `[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`
-              );
+              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
               return;
             }
 
@@ -925,34 +947,40 @@ class FullSyncService {
                 `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
               );
             } else {
-              console.warn(
-                `[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`
-              );
+              console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
             }
           });
         } else {
-          // No es kit: descontar el producto directamente
-          const inventario = this.realm!.objects("Inventario").filtered(
+          // No es kit: descontar el producto directamente usando idProducto (id del producto)
+          const idProductoBuscar = item.idProducto ?? item.claveProd;
+
+          const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND claveProd == $1",
             item.sucursal,
-            item.claveProd
-          )[0] as any;
+            idProductoBuscar
+          );
+          console.log(
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`
+          );
+
+          const inventario = inventarioResults[0] as any;
 
           if (inventario) {
             const saldoAnterior = inventario.saldo || 0;
             inventario.saldo = saldoAnterior - item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Producto ${item.claveProd} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`
             );
           }
         }
       });
     });
+    console.log("[FullSync] updateInventarioAfterSale: realm.write() completed successfully");
   }
 
   /**
@@ -1148,11 +1176,7 @@ class FullSyncService {
    */
   getKitsPaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm) return [];
-    return Array.from(
-      this.realm
-        .objects("Kit")
-        .slice(offset, offset + limit)
-    );
+    return Array.from(this.realm.objects("Kit").slice(offset, offset + limit));
   }
 
   /**
@@ -1160,9 +1184,7 @@ class FullSyncService {
    */
   getKitsByProducto(idProducto: number): any[] {
     if (!this.isInitialized || !this.realm) return [];
-    return Array.from(
-      this.realm.objects("Kit").filtered("idProducto == $0", idProducto)
-    );
+    return Array.from(this.realm.objects("Kit").filtered("idProducto == $0", idProducto));
   }
 
   /**
@@ -1170,9 +1192,7 @@ class FullSyncService {
    */
   getKitsByInsumo(idInsumo: number): any[] {
     if (!this.isInitialized || !this.realm) return [];
-    return Array.from(
-      this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo)
-    );
+    return Array.from(this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo));
   }
 
   /**
