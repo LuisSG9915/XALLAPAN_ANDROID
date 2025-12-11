@@ -117,12 +117,8 @@ function App() {
           />
           <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
           <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
-          <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Precorte" }} />
-          <Stack.Screen
-            name="Traspaso"
-            component={TraspasoRecepcionScreen}
-            options={{ title: " Recepción de Traspasos" }}
-          />
+          <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Inventario" }} />
+          <Stack.Screen name="Traspaso" component={TraspasoRecepcionScreen} options={{ title: " Cargas" }} />
           <Stack.Screen
             name="ReporteVentas"
             component={ReporteVentasScreen}
@@ -157,7 +153,8 @@ function AppContent({ navigation }: { navigation: any }) {
     const loadUserInfo = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        setUserName(user.claveEmpleado || "Usuario");
+        console.log(user);
+        setUserName(user.claveEmpleado + " - " + user.nombre || "Usuario");
         setSucursalName(user.sucursal_origen || user.sucursal || "Sucursal");
         dsetSucursalName(user.dSucursal || "Sucursal");
       }
@@ -233,7 +230,7 @@ function AppContent({ navigation }: { navigation: any }) {
     },
     {
       id: "traspaso",
-      title: "Traspasos",
+      title: "Cargas",
       icon: "local-shipping",
       type: "material",
       color: COLORS.cards.traspaso,

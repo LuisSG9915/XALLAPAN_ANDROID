@@ -67,9 +67,7 @@ export default function TraspasoRecepcionScreen() {
       if (user) {
         setCurrentUser(user);
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ??
-          (user.sucursal as number | null | undefined) ??
-          1;
+          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
         setCurrentSucursal(sucursal);
         setFormFiltro({
           sucursal,
@@ -189,8 +187,7 @@ export default function TraspasoRecepcionScreen() {
       setLoadingDetalle(true);
       setDetalles([]);
 
-      const sucursalOrigen =
-        (currentUser.sucursal_origen as number | null | undefined) ?? 0;
+      const sucursalOrigen = (currentUser.sucursal_origen as number | null | undefined) ?? 0;
       const vendedorId = (currentUser as any).id ?? 0;
       const almacenDestino = traspaso.almacenDestino ?? 0;
       const almacenOrigen = traspaso.almacenOrigen ?? 0;
@@ -240,10 +237,7 @@ export default function TraspasoRecepcionScreen() {
     if (!selected || !currentUser) return;
 
     try {
-      const sucursal =
-        (currentUser.sucursal_origen as number | null | undefined) ??
-        currentSucursal ??
-        0;
+      const sucursal = (currentUser.sucursal_origen as number | null | undefined) ?? currentSucursal ?? 0;
       const vendedorId = (currentUser as any).id ?? 0;
       const almacenDestino = selected.almacenDestino ?? 0;
       const almacenOrigen = selected.almacenOrigen ?? 0;
@@ -268,8 +262,7 @@ export default function TraspasoRecepcionScreen() {
       } catch (e) {}
 
       if (!response.ok) {
-        const msg =
-          (data && (data.mensaje || data.mensaje1)) || `HTTP ${response.status}`;
+        const msg = (data && (data.mensaje || data.mensaje1)) || `HTTP ${response.status}`;
         throw new Error(msg);
       }
 
@@ -285,9 +278,7 @@ export default function TraspasoRecepcionScreen() {
       await loadTraspasos();
       setModalOpen(false);
 
-      const msg =
-        (data && (data.mensaje1 || data.mensaje)) ||
-        "El traspaso ha sido recibido y sincronizado.";
+      const msg = (data && (data.mensaje1 || data.mensaje)) || "El traspaso ha sido recibido y sincronizado.";
       Alert.alert("Recibido", msg);
     } catch (error: any) {
       console.error("Error al recibir traspaso:", error);
@@ -296,9 +287,7 @@ export default function TraspasoRecepcionScreen() {
   };
 
   const filteredTraspasos = useMemo(() => {
-    return traspasos.filter((t) =>
-      formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true
-    );
+    return traspasos.filter((t) => (formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true));
   }, [traspasos, formFiltro]);
 
   const onConsultar = () => {
@@ -307,7 +296,7 @@ export default function TraspasoRecepcionScreen() {
 
   const onRecibir = () => {
     if (!selected) return;
-    Alert.alert("Confirmación", "¿Está seguro de recibir este traspaso?", [
+    Alert.alert("Confirmación", "¿Está seguro de recibir esta carga?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Sí, recibir",
@@ -320,18 +309,14 @@ export default function TraspasoRecepcionScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Traspasos</Text>
+      <Text style={styles.title}>Cargas</Text>
 
       <View style={styles.card}>
         <View style={styles.row}>
           <Icon name="person" type="material" color={COLORS.primary} size={24} />
           <Text style={styles.cardTitle}>Vendedor</Text>
         </View>
-        <TextInput
-          value={"Usuario Actual"}
-          editable={false}
-          style={[styles.input, styles.disabledInput]}
-        />
+        <TextInput value={"Usuario Actual"} editable={false} style={[styles.input, styles.disabledInput]} />
 
         <View style={styles.row}>
           <Icon name="filter-list" type="material" color={COLORS.primary} size={24} />
@@ -341,33 +326,15 @@ export default function TraspasoRecepcionScreen() {
         <View style={styles.dateRow}>
           <View style={styles.col}>
             <Text style={styles.smallLabel}>Desde</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker1(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.smallLabel}>Hasta</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker2(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -389,13 +356,9 @@ export default function TraspasoRecepcionScreen() {
           />
         )}
 
-        <Text style={styles.smallLabel}>Sucursal destino</Text>
+        <Text style={styles.smallLabel}>Ruta destino</Text>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginBottom: SPACING.s }}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.s }}>
           <View style={styles.rowWrap}>
             {/* <TouchableOpacity
               style={[styles.pill, formFiltro.sucursal === 0 && styles.pillOn]}
@@ -406,20 +369,10 @@ export default function TraspasoRecepcionScreen() {
               .map((s) => (
                 <TouchableOpacity
                   key={s.id_sucursal}
-                  style={[
-                    styles.pill,
-                    formFiltro.sucursal === s.id_sucursal && styles.pillOn,
-                  ]}
-                  onPress={() =>
-                    setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })
-                  }
+                  style={[styles.pill, formFiltro.sucursal === s.id_sucursal && styles.pillOn]}
+                  onPress={() => setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })}
                 >
-                  <Text
-                    style={[
-                      styles.pillText,
-                      formFiltro.sucursal === s.id_sucursal && styles.pillTextOn,
-                    ]}
-                  >
+                  <Text style={[styles.pillText, formFiltro.sucursal === s.id_sucursal && styles.pillTextOn]}>
                     {s.nombre}
                   </Text>
                 </TouchableOpacity>
@@ -434,7 +387,7 @@ export default function TraspasoRecepcionScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Resultados</Text>
         {loading ? (
-          <Text style={styles.muted}>Cargando traspasos...</Text>
+          <Text style={styles.muted}>Cargando cargas...</Text>
         ) : filteredTraspasos.length === 0 ? (
           <Text style={styles.muted}>Sin resultados</Text>
         ) : (
@@ -482,17 +435,9 @@ export default function TraspasoRecepcionScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Visor de Traspaso</Text>
-              <TouchableOpacity
-                onPress={() => setModalOpen(false)}
-                style={styles.closeBtn}
-              >
-                <Icon
-                  name="close"
-                  type="material"
-                  size={24}
-                  color={COLORS.textSecondary}
-                />
+              <Text style={styles.modalTitle}>Visor de Cargas</Text>
+              <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.closeBtn}>
+                <Icon name="close" type="material" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -506,9 +451,7 @@ export default function TraspasoRecepcionScreen() {
                 <Text
                   style={[
                     styles.statusValue,
-                    selected?.estatus === "Pendiente"
-                      ? { color: COLORS.warning }
-                      : { color: COLORS.success },
+                    selected?.estatus === "Pendiente" ? { color: COLORS.warning } : { color: COLORS.success },
                   ]}
                 >
                   {selected?.estatus}
@@ -516,15 +459,11 @@ export default function TraspasoRecepcionScreen() {
               </View>
               <View style={styles.divider} />
               <Text style={styles.infoText}>
-                <Text style={{ fontWeight: "bold" }}>Origen:</Text>{" "}
-                {selected?.sucursalOrigen}
+                <Text style={{ fontWeight: "bold" }}>Origen:</Text> {selected?.sucursalOrigen}
               </Text>
               <Text style={styles.infoText}>
                 <Text style={{ fontWeight: "bold" }}>Destino:</Text>{" "}
-                {selected
-                  ? sucursales.find((s) => s.id_sucursal === selected.sucursalDestino)
-                      ?.nombre
-                  : "-"}
+                {selected ? sucursales.find((s) => s.id_sucursal === selected.sucursalDestino)?.nombre : "-"}
               </Text>
             </View>
 
@@ -550,22 +489,12 @@ export default function TraspasoRecepcionScreen() {
             <TouchableOpacity
               style={[
                 styles.primaryBtn,
-                (selected?.estatus === "Finalizado" ||
-                  selected?.estatus === "Cancelado") &&
-                  styles.primaryBtnDisabled,
+                (selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado") && styles.primaryBtnDisabled,
               ]}
               onPress={onRecibir}
-              disabled={
-                selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado"
-              }
+              disabled={selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado"}
             >
-              <Icon
-                name="inventory"
-                type="material"
-                color="#fff"
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+              <Icon name="inventory" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
               <Text style={styles.primaryBtnText}>Confirmar Recepción</Text>
             </TouchableOpacity>
           </View>

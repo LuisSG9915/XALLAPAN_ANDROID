@@ -143,29 +143,29 @@ export default function PrecorteScreen() {
         };
       });
 
-      // Agregar kits con su existencia calculada
-      console.log({ productos });
-      const kitsAgregados = new Set<number>();
-      productos
-        .filter((p: any) => p.esKit)
-        .forEach((p: any) => {
-          const clave = p.id !== undefined && p.id !== null ? parseInt(p.id, 10) : NaN;
-          if (Number.isNaN(clave) || kitsAgregados.has(p.id)) return;
+      // // Agregar kits con su existencia calculada
+      // console.log({ productos });
+      // const kitsAgregados = new Set<number>();
+      // productos
+      //   .filter((p: any) => p.esKit)
+      //   .forEach((p: any) => {
+      //     const clave = p.id !== undefined && p.id !== null ? parseInt(p.id, 10) : NaN;
+      //     if (Number.isNaN(clave) || kitsAgregados.has(p.id)) return;
 
-          const existenciaKit = calcularExistenciaKit(p.id);
-          if (existenciaKit > 0) {
-            mapped.push({
-              id: p.id + 100000, // ID único para evitar colisiones
-              clave_prod: String(clave),
-              descripcion: p.descripcion || String(clave),
-              entradas: 0,
-              salidas: 0,
-              ifValue: existenciaKit,
-              esKit: true,
-            });
-            kitsAgregados.add(p.id);
-          }
-        });
+      //     const existenciaKit = calcularExistenciaKit(p.id);
+      //     if (existenciaKit > 0) {
+      //       mapped.push({
+      //         id: p.id + 100000, // ID único para evitar colisiones
+      //         clave_prod: String(clave),
+      //         descripcion: p.descripcion || String(clave),
+      //         entradas: 0,
+      //         salidas: 0,
+      //         ifValue: existenciaKit,
+      //         esKit: true,
+      //       });
+      //       kitsAgregados.add(p.id);
+      //     }
+      //   });
 
       setItems(mapped);
 
