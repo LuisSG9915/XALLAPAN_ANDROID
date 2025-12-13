@@ -188,6 +188,10 @@ export const SyncTableLogSchema = {
     duracionMs: "int?", // Duración en milisegundos
     endpoint: "string?", // Endpoint específico de esta tabla
     detalles: "string?", // JSON con detalles adicionales
+    tipoConexion: "string?", // 'wifi', 'cellular', 'none', 'unknown'
+    intensidadSenal: "int?", // Intensidad de señal (0-4 para cellular, 0-100 para wifi)
+    velocidadDescarga: "double?", // Velocidad de descarga en Mbps
+    velocidadSubida: "double?", // Velocidad de subida en Mbps
   },
   primaryKey: "id",
 };

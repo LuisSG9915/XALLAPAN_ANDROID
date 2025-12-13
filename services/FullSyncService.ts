@@ -84,6 +84,59 @@ class FullSyncService {
   }
 
   /**
+   * Envía ventas locales pendientes al servidor (arrastre).
+   * Se ejecuta automáticamente antes de sincronizaciones para subir ventas offline.
+   * Wrapper del método público sendPendingVentasToServer.
+   */
+  private async sendPendingVentasArrastre(
+    sucursal: number,
+    idUsuario: number
+  ): Promise<{ success: boolean; sent: number }> {
+    console.log("[FullSync] Llamando a sendPendingVentasToServer desde sincronización periódica");
+    const result = await this.sendPendingVentasToServer(sucursal, idUsuario);
+    return { success: result.success, sent: result.sent };
+  }
+
+  /**
+   * Envía ventas pendientes con timeout de 3 segundos.
+   * Usado desde SalesScreen para no bloquear el proceso de venta.
+   * Si tarda más de 3 segundos, se omite y se enviará en la próxima sincronización.
+   */
+  async sendPendingVentasWithTimeout(
+    sucursal: number,
+    idUsuario: number,
+    timeoutMs: number = 3000
+  ): Promise<{ success: boolean; sent: number; timedOut?: boolean; error?: string }> {
+    console.log(`[FullSync] Enviando ventas con timeout de ${timeoutMs}ms`);
+    
+    const timeoutPromise = new Promise<{ success: boolean; sent: number; timedOut: boolean }>((resolve) => {
+      setTimeout(() => {
+        console.log("[FullSync] ⏱️ Timeout alcanzado, omitiendo arrastre");
+        resolve({ success: true, sent: 0, timedOut: true });
+      }, timeoutMs);
+    });
+
+    const sendPromise = this.sendPendingVentasToServer(sucursal, idUsuario).then(result => ({
+      ...result,
+      timedOut: false,
+    }));
+
+    try {
+      const result = await Promise.race([sendPromise, timeoutPromise]);
+      
+      if (result.timedOut) {
+        console.log("[FullSync] Arrastre omitido por timeout, se enviará en próxima sincronización");
+      }
+      
+      return result;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSync] Error en arrastre con timeout:", error);
+      return { success: false, sent: 0, error: errorMsg };
+    }
+  }
+
+  /**
    * Sincronización INCREMENTAL para background (cada 3 minutos).
    *
    * Usa los nuevos endpoints basados en fechaInicial, tomando como referencia
@@ -97,7 +150,8 @@ class FullSyncService {
    */
   async syncIncremental(
     sucursal: number = 1,
-    onProgress?: SyncProgressCallback
+    onProgress?: SyncProgressCallback,
+    idUsuario?: number
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -105,6 +159,17 @@ class FullSyncService {
 
     if (!this.realm) {
       throw new Error("Realm no inicializado");
+    }
+
+    // PASO 1: Enviar ventas pendientes al servidor antes de sincronizar
+    if (idUsuario) {
+      console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
+      const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
+      if (ventasResult.success && ventasResult.sent > 0) {
+        console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
+      } else if (!ventasResult.success) {
+        console.warn("[FullSync] ⚠️ No se pudieron enviar ventas pendientes, continuando con sincronización");
+      }
     }
 
     // Crear SyncLog principal específico para incremental
@@ -983,6 +1048,120 @@ class FullSyncService {
 
             if (inventario) {
               const saldoAnterior = inventario.saldo || 0;
+              inventario.saldo = saldoAnterior + cantidadTotal;
+              inventario.fechaArrastre = new Date();
+              console.log(
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+              );
+            } else {
+              console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
+            }
+          });
+        } else {
+          // No es kit: descontar el producto directamente usando idProducto (id del producto)
+          const idProductoBuscar = item.idProducto ?? item.claveProd;
+
+          const inventarioResults = this.realm!.objects("Inventario").filtered(
+            "sucursal == $0 AND claveProd == $1",
+            item.sucursal,
+            idProductoBuscar
+          );
+          console.log(
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`
+          );
+
+          const inventario = inventarioResults[0] as any;
+
+          if (inventario) {
+            const saldoAnterior = inventario.saldo || 0;
+            inventario.saldo = saldoAnterior + item.cantidad;
+            inventario.fechaArrastre = new Date();
+            console.log(
+              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+            );
+          } else {
+            console.warn(
+              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`
+            );
+          }
+        }
+      });
+    });
+    console.log("[FullSync] updateInventarioAfterSale: realm.write() completed successfully");
+  }
+
+  async updateInventarioAfterSaleScreen(
+    items: {
+      sucursal: number;
+      claveProd: number;
+      cantidad: number;
+      esKit?: boolean;
+      idProducto?: number;
+    }[]
+  ): Promise<void> {
+    console.log("[FullSync] updateInventarioAfterSaleScreen called with", {
+      itemsCount: items.length,
+      items: items.map((i) => ({
+        sucursal: i.sucursal,
+        claveProd: i.claveProd,
+        cantidad: i.cantidad,
+        esKit: i.esKit,
+        idProducto: i.idProducto,
+      })),
+    });
+
+    if (!items.length) {
+      console.log("[FullSync] updateInventarioAfterSaleScreen: No items to process");
+      return;
+    }
+
+    if (!this.isInitialized || !this.realm) {
+      console.log("[FullSync] updateInventarioAfterSaleScreen: Initializing realm...");
+      await this.initialize();
+    }
+    if (!this.realm) {
+      console.error("[FullSync] updateInventarioAfterSaleScreen: Realm not available after init!");
+      return;
+    }
+
+    console.log("[FullSync] updateInventarioAfterSaleScreen: Starting realm.write()");
+    this.realm.write(() => {
+      items.forEach((item, index) => {
+        console.log(`[FullSync] Processing item ${index + 1}/${items.length}:`, {
+          sucursal: item.sucursal,
+          claveProd: item.claveProd,
+          cantidad: item.cantidad,
+          esKit: item.esKit,
+          idProducto: item.idProducto,
+        });
+
+        if (item.esKit && item.idProducto) {
+          // Es un kit: descontar los insumos según la tabla Kit
+          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
+
+          console.log(
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
+          );
+
+          componentes.forEach((comp: any) => {
+            const idInsumo = comp.idInsumo;
+            const cantidadInsumo = comp.cantidad || 0;
+            const cantidadTotal = cantidadInsumo * item.cantidad;
+
+            if (!idInsumo || cantidadInsumo <= 0) {
+              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
+              return;
+            }
+
+            // Buscar el inventario del insumo por idInsumo (que es claveProd)
+            const inventario = this.realm!.objects("Inventario").filtered(
+              "sucursal == $0 AND claveProd == $1",
+              item.sucursal,
+              idInsumo
+            )[0] as any;
+
+            if (inventario) {
+              const saldoAnterior = inventario.saldo || 0;
               inventario.saldo = saldoAnterior - cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
@@ -1022,8 +1201,9 @@ class FullSyncService {
         }
       });
     });
-    console.log("[FullSync] updateInventarioAfterSale: realm.write() completed successfully");
+    console.log("[FullSync] updateInventarioAfterSaleScreen: realm.write() completed successfully");
   }
+
 
   /**
    * Actualiza el inventario sumando las cantidades recibidas en un traspaso.
@@ -1432,16 +1612,10 @@ class FullSyncService {
         };
       });
 
-      console.log("[FullSyncService] Payload to send:", payload);
+      console.log("[FullSyncService] 📦 Payload ventas:", payload.length, "registros");
 
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasArrastreJSON?sucursal=${encodeURIComponent(
-        String(sucursal)
-      )}&idUsuario=${encodeURIComponent(String(idUsuario))}`;
-
-      console.log("[FullSyncService] Sending ventas arrastre", {
-        url,
-        rows: payload.length,
-      });
+      // Usar el mismo endpoint que el sincronizador periódico (que funciona correctamente)
+      const url = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
 
       const response = await fetch(url, {
         method: "POST",
@@ -1454,7 +1628,7 @@ class FullSyncService {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
-        console.error("[FullSyncService] Error sending ventas arrastre", response.status, errorText);
+        console.error("[FullSyncService] ❌ Error arrastre ventas", response.status, errorText);
         return {
           success: false,
           sent: 0,
@@ -1462,7 +1636,8 @@ class FullSyncService {
         };
       }
 
-      console.log("[FullSyncService] Ventas arrastre sent successfully", response.status);
+      console.log(`[FullSyncService] ✅ Arrastre ventas exitoso: ${payload.length} registros`);
+
       return { success: true, sent: payload.length };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";

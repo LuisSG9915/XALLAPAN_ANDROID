@@ -36,6 +36,8 @@ type TraspasoDetalle = {
   descripcion: string;
   cantidad: number;
   idProducto?: number;
+  claveProd?: string;
+  esKit?: boolean;
 };
 
 export default function TraspasoRecepcionScreen() {
@@ -67,7 +69,9 @@ export default function TraspasoRecepcionScreen() {
       if (user) {
         setCurrentUser(user);
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
+          (user.sucursal_origen as number | null | undefined) ??
+          (user.sucursal as number | null | undefined) ??
+          1;
         setCurrentSucursal(sucursal);
         setFormFiltro({
           sucursal,
@@ -187,7 +191,8 @@ export default function TraspasoRecepcionScreen() {
       setLoadingDetalle(true);
       setDetalles([]);
 
-      const sucursalOrigen = (currentUser.sucursal_origen as number | null | undefined) ?? 0;
+      const sucursalOrigen =
+        (currentUser.sucursal_origen as number | null | undefined) ?? 0;
       const vendedorId = (currentUser as any).id ?? 0;
       const almacenDestino = traspaso.almacenDestino ?? 0;
       const almacenOrigen = traspaso.almacenOrigen ?? 0;
@@ -215,13 +220,49 @@ export default function TraspasoRecepcionScreen() {
         throw new Error("Respuesta inválida del servidor");
       }
 
-      setDetalles(
-        data.map((d: any) => ({
+      console.log("[TraspasoRecepcion] DEBUG - Datos recibidos del servidor:", data);
+
+      const productosLocales = FullSyncService.getProductos(10000);
+      console.log(
+        "[TraspasoRecepcion] DEBUG - Total productos en base local:",
+        productosLocales.length
+      );
+
+      const detallesMapeados = data.map((d: any) => {
+        // El servidor envía "claveProd" pero en realidad es el ID del producto
+        const idProductoDelServidor = d.claveProd ? parseInt(d.claveProd, 10) : null;
+
+        // Buscar información del producto en la base local usando el ID
+        const producto = idProductoDelServidor
+          ? productosLocales.find((p: any) => p.id === idProductoDelServidor)
+          : null;
+
+        const detalle = {
           descripcion: d.descripcion || "",
           cantidad: d.cantidad ?? 0,
-          idProducto: d.idProducto,
-        }))
-      );
+          idProducto: idProductoDelServidor || 0,
+          claveProd:
+            producto?.claveProd?.toString() || idProductoDelServidor?.toString() || "0",
+          esKit: producto?.esKit || false,
+        };
+
+        console.log(`[TraspasoRecepcion] DEBUG - Producto mapeado:`, {
+          claveProdDelServidor: d.claveProd,
+          idProductoDelServidor,
+          descripcion: d.descripcion,
+          cantidad: d.cantidad,
+          productoEncontrado: !!producto,
+          claveProdReal: detalle.claveProd,
+          esKit: detalle.esKit,
+          productoData: producto
+            ? { id: producto.id, claveProd: producto.claveProd, esKit: producto.esKit }
+            : null,
+        });
+
+        return detalle;
+      });
+
+      setDetalles(detallesMapeados);
 
       setSelected(traspaso);
       setModalOpen(true);
@@ -234,15 +275,36 @@ export default function TraspasoRecepcionScreen() {
   };
 
   const receiveTraspaso = async () => {
-    if (!selected || !currentUser) return;
+    console.log("[TraspasoRecepcion] ========== INICIO receiveTraspaso ==========");
+    console.log("[TraspasoRecepcion] Selected:", selected);
+    console.log("[TraspasoRecepcion] CurrentUser:", currentUser);
+    console.log("[TraspasoRecepcion] Detalles:", detalles);
+
+    if (!selected || !currentUser) {
+      console.log("[TraspasoRecepcion] ERROR - Falta selected o currentUser");
+      return;
+    }
 
     try {
-      const sucursal = (currentUser.sucursal_origen as number | null | undefined) ?? currentSucursal ?? 0;
+      const sucursal =
+        (currentUser.sucursal_origen as number | null | undefined) ??
+        currentSucursal ??
+        0;
       const vendedorId = (currentUser as any).id ?? 0;
       const almacenDestino = selected.almacenDestino ?? 0;
       const almacenOrigen = selected.almacenOrigen ?? 0;
       const sucOrigen = selected.sucOrigen ?? 0;
       const sucDestino = selected.sucDestino ?? 0;
+
+      console.log("[TraspasoRecepcion] DEBUG - Parámetros de recepción:", {
+        sucursal,
+        vendedorId,
+        almacenDestino,
+        almacenOrigen,
+        sucOrigen,
+        sucDestino,
+        folio: selected.folio,
+      });
 
       const url =
         `${API_BASE_URL}/api/DetalleTraspasos/sp_traspasoBusquedaFolioRecepecion` +
@@ -255,39 +317,86 @@ export default function TraspasoRecepcionScreen() {
         `&sucDestino=${sucDestino}` +
         `&cambio=true&tipoCambio=1&usuario=${vendedorId}&usuarioEjecuta=${vendedorId}&ip=12&dispositivo=12`;
 
+      console.log("[TraspasoRecepcion] DEBUG - URL de recepción:", url);
+
       const response = await fetch(url);
+      console.log("[TraspasoRecepcion] DEBUG - Response status:", response.status);
+
       let data: any = null;
       try {
         data = await response.json();
-      } catch (e) {}
+        console.log("[TraspasoRecepcion] DEBUG - Response data:", data);
+      } catch (e) {
+        console.log("[TraspasoRecepcion] ERROR - No se pudo parsear JSON:", e);
+      }
 
       if (!response.ok) {
-        const msg = (data && (data.mensaje || data.mensaje1)) || `HTTP ${response.status}`;
+        const msg =
+          (data && (data.mensaje || data.mensaje1)) || `HTTP ${response.status}`;
+        console.log("[TraspasoRecepcion] ERROR - Response no OK:", msg);
         throw new Error(msg);
       }
 
-      await FullSyncService.updateInventarioAfterReception(
-        detalles.map((item) => ({
-          sucursal,
-          claveProd: item.idProducto || 0,
-          cantidad: item.cantidad,
-        }))
+      console.log("[TraspasoRecepcion] DEBUG - Recepción exitosa en servidor");
+
+      // Actualizar inventario usando la misma lógica que SalesScreen (maneja kits correctamente)
+      console.log("[TraspasoRecepcion] DEBUG - Preparando actualización de inventario");
+      console.log(
+        "[TraspasoRecepcion] DEBUG - Detalles actuales:",
+        JSON.stringify(detalles, null, 2)
       );
 
+      const inventarioUpdateItems = detalles.map((item, index) => {
+        const updateItem = {
+          sucursal,
+          claveProd: parseInt(item.claveProd || "0", 10),
+          cantidad: item.cantidad,
+          esKit: item.esKit || false,
+          idProducto: item.idProducto || 0,
+        };
+        console.log(
+          `[TraspasoRecepcion] DEBUG - Item ${index + 1}/${detalles.length}:`,
+          updateItem
+        );
+        return updateItem;
+      });
+
+      console.log("[TraspasoRecepcion] DEBUG - Items para actualizar inventario:", {
+        totalItems: inventarioUpdateItems.length,
+        sucursal,
+        items: inventarioUpdateItems,
+      });
+
+      console.log("[TraspasoRecepcion] DEBUG - Llamando a updateInventarioAfterSale...");
+      await FullSyncService.updateInventarioAfterSale(inventarioUpdateItems);
+      console.log("[TraspasoRecepcion] ✅ Inventory updated successfully");
+
       // await FullSyncService.syncInventario(sucursal, selected.fecha);
+      console.log("[TraspasoRecepcion] DEBUG - Recargando traspasos...");
       await loadTraspasos();
+
+      console.log("[TraspasoRecepcion] DEBUG - Cerrando modal");
       setModalOpen(false);
 
-      const msg = (data && (data.mensaje1 || data.mensaje)) || "El traspaso ha sido recibido y sincronizado.";
+      const msg =
+        (data && (data.mensaje1 || data.mensaje)) ||
+        "El traspaso ha sido recibido y sincronizado.";
+      console.log(
+        "[TraspasoRecepcion] ========== FIN receiveTraspaso (ÉXITO) =========="
+      );
       Alert.alert("Recibido", msg);
     } catch (error: any) {
-      console.error("Error al recibir traspaso:", error);
+      console.error("[TraspasoRecepcion] ========== ERROR en receiveTraspaso ==========");
+      console.error("[TraspasoRecepcion] Error completo:", error);
+      console.error("[TraspasoRecepcion] Error stack:", error?.stack);
       Alert.alert("Error", error?.message || "No se pudo recibir el traspaso");
     }
   };
 
   const filteredTraspasos = useMemo(() => {
-    return traspasos.filter((t) => (formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true));
+    return traspasos.filter((t) =>
+      formFiltro.sucursal ? t.sucursalDestino === formFiltro.sucursal : true
+    );
   }, [traspasos, formFiltro]);
 
   const onConsultar = () => {
@@ -316,7 +425,11 @@ export default function TraspasoRecepcionScreen() {
           <Icon name="person" type="material" color={COLORS.primary} size={24} />
           <Text style={styles.cardTitle}>Vendedor</Text>
         </View>
-        <TextInput value={"Usuario Actual"} editable={false} style={[styles.input, styles.disabledInput]} />
+        <TextInput
+          value={"Usuario Actual"}
+          editable={false}
+          style={[styles.input, styles.disabledInput]}
+        />
 
         <View style={styles.row}>
           <Icon name="filter-list" type="material" color={COLORS.primary} size={24} />
@@ -326,15 +439,33 @@ export default function TraspasoRecepcionScreen() {
         <View style={styles.dateRow}>
           <View style={styles.col}>
             <Text style={styles.smallLabel}>Desde</Text>
-            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
-              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowPicker1(true)}
+            >
+              <Icon
+                name="event"
+                type="material"
+                color={COLORS.primary}
+                size={20}
+                style={{ marginRight: 8 }}
+              />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.smallLabel}>Hasta</Text>
-            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
-              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowPicker2(true)}
+            >
+              <Icon
+                name="event"
+                type="material"
+                color={COLORS.primary}
+                size={20}
+                style={{ marginRight: 8 }}
+              />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -358,7 +489,11 @@ export default function TraspasoRecepcionScreen() {
 
         <Text style={styles.smallLabel}>Ruta destino</Text>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.s }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginBottom: SPACING.s }}
+        >
           <View style={styles.rowWrap}>
             {/* <TouchableOpacity
               style={[styles.pill, formFiltro.sucursal === 0 && styles.pillOn]}
@@ -369,10 +504,20 @@ export default function TraspasoRecepcionScreen() {
               .map((s) => (
                 <TouchableOpacity
                   key={s.id_sucursal}
-                  style={[styles.pill, formFiltro.sucursal === s.id_sucursal && styles.pillOn]}
-                  onPress={() => setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })}
+                  style={[
+                    styles.pill,
+                    formFiltro.sucursal === s.id_sucursal && styles.pillOn,
+                  ]}
+                  onPress={() =>
+                    setFormFiltro({ ...formFiltro, sucursal: s.id_sucursal })
+                  }
                 >
-                  <Text style={[styles.pillText, formFiltro.sucursal === s.id_sucursal && styles.pillTextOn]}>
+                  <Text
+                    style={[
+                      styles.pillText,
+                      formFiltro.sucursal === s.id_sucursal && styles.pillTextOn,
+                    ]}
+                  >
                     {s.nombre}
                   </Text>
                 </TouchableOpacity>
@@ -436,8 +581,16 @@ export default function TraspasoRecepcionScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Visor de Cargas</Text>
-              <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.closeBtn}>
-                <Icon name="close" type="material" size={24} color={COLORS.textSecondary} />
+              <TouchableOpacity
+                onPress={() => setModalOpen(false)}
+                style={styles.closeBtn}
+              >
+                <Icon
+                  name="close"
+                  type="material"
+                  size={24}
+                  color={COLORS.textSecondary}
+                />
               </TouchableOpacity>
             </View>
 
@@ -451,7 +604,9 @@ export default function TraspasoRecepcionScreen() {
                 <Text
                   style={[
                     styles.statusValue,
-                    selected?.estatus === "Pendiente" ? { color: COLORS.warning } : { color: COLORS.success },
+                    selected?.estatus === "Pendiente"
+                      ? { color: COLORS.warning }
+                      : { color: COLORS.success },
                   ]}
                 >
                   {selected?.estatus}
@@ -459,11 +614,15 @@ export default function TraspasoRecepcionScreen() {
               </View>
               <View style={styles.divider} />
               <Text style={styles.infoText}>
-                <Text style={{ fontWeight: "bold" }}>Origen:</Text> {selected?.sucursalOrigen}
+                <Text style={{ fontWeight: "bold" }}>Origen:</Text>{" "}
+                {selected?.sucursalOrigen}
               </Text>
               <Text style={styles.infoText}>
                 <Text style={{ fontWeight: "bold" }}>Destino:</Text>{" "}
-                {selected ? sucursales.find((s) => s.id_sucursal === selected.sucursalDestino)?.nombre : "-"}
+                {selected
+                  ? sucursales.find((s) => s.id_sucursal === selected.sucursalDestino)
+                      ?.nombre
+                  : "-"}
               </Text>
             </View>
 
@@ -489,12 +648,22 @@ export default function TraspasoRecepcionScreen() {
             <TouchableOpacity
               style={[
                 styles.primaryBtn,
-                (selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado") && styles.primaryBtnDisabled,
+                (selected?.estatus === "Finalizado" ||
+                  selected?.estatus === "Cancelado") &&
+                  styles.primaryBtnDisabled,
               ]}
               onPress={onRecibir}
-              disabled={selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado"}
+              disabled={
+                selected?.estatus === "Finalizado" || selected?.estatus === "Cancelado"
+              }
             >
-              <Icon name="inventory" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
+              <Icon
+                name="inventory"
+                type="material"
+                color="#fff"
+                size={20}
+                style={{ marginRight: 8 }}
+              />
               <Text style={styles.primaryBtnText}>Confirmar Recepción</Text>
             </TouchableOpacity>
           </View>

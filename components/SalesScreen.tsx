@@ -16,7 +16,14 @@ import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
+import {
+  APP_NAME,
+  COLORS,
+  SPACING,
+  SHADOWS,
+  BORDER_RADIUS,
+  TYPOGRAPHY,
+} from "../theme/theme";
 
 type Cliente = {
   id: number;
@@ -54,7 +61,9 @@ export default function SalesScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
+  const [metodoPago, setMetodoPago] = useState<
+    "efectivo" | "transferencia" | "credito" | "cupon" | null
+  >(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -62,6 +71,7 @@ export default function SalesScreen() {
   const [initializingPrinter, setInitializingPrinter] = useState(true);
   const [kits, setKits] = useState<any[]>([]);
   const [productosBase, setProductosBase] = useState<any[]>([]);
+  const [processingVenta, setProcessingVenta] = useState(false);
 
   const buildProductosFormateados = useCallback(
     (
@@ -74,7 +84,10 @@ export default function SalesScreen() {
       // Mapa de precios por claveProd de la lista del cliente
       const preciosMap = new Map<number, number>();
       preciosSource.forEach((p: any) => {
-        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        const clave =
+          p.claveProd !== undefined && p.claveProd !== null
+            ? parseInt(p.claveProd, 10)
+            : NaN;
         if (Number.isNaN(clave)) return;
         preciosMap.set(clave, p.precio || 0);
       });
@@ -83,7 +96,10 @@ export default function SalesScreen() {
       const preciosDefaultMap = new Map<number, number>();
       if (preciosDefault) {
         preciosDefault.forEach((p: any) => {
-          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+          const clave =
+            p.claveProd !== undefined && p.claveProd !== null
+              ? parseInt(p.claveProd, 10)
+              : NaN;
           if (Number.isNaN(clave)) return;
           preciosDefaultMap.set(clave, p.precio || 0);
         });
@@ -94,7 +110,10 @@ export default function SalesScreen() {
       const productosPorClave = new Map<number, any>();
       productosData.forEach((p: any) => {
         productosPorId.set(p.id, p);
-        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        const clave =
+          p.claveProd !== undefined && p.claveProd !== null
+            ? parseInt(p.claveProd, 10)
+            : NaN;
         if (!Number.isNaN(clave)) {
           productosPorClave.set(clave, p);
         }
@@ -120,7 +139,11 @@ export default function SalesScreen() {
         kitsPorProducto.set(k.idProducto, arr);
       });
 
-      const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
+      const calcularExistencia = (
+        productoId: number | undefined,
+        claveProd: number | undefined,
+        esKit: boolean
+      ) => {
         if (esKit && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
@@ -155,19 +178,26 @@ export default function SalesScreen() {
       // Crear un Set de todas las claves de productos disponibles
       const todasLasClaves = new Set<number>();
       preciosSource.forEach((p: any) => {
-        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        const clave =
+          p.claveProd !== undefined && p.claveProd !== null
+            ? parseInt(p.claveProd, 10)
+            : NaN;
         if (!Number.isNaN(clave)) todasLasClaves.add(clave);
       });
       if (preciosDefault) {
         preciosDefault.forEach((p: any) => {
-          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+          const clave =
+            p.claveProd !== undefined && p.claveProd !== null
+              ? parseInt(p.claveProd, 10)
+              : NaN;
           if (!Number.isNaN(clave)) todasLasClaves.add(clave);
         });
       }
 
       // Mapear todos los productos disponibles
       return Array.from(todasLasClaves).map((claveNum) => {
-        const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
+        const productoBase =
+          productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
         const productoId = productoBase?.id ?? claveNum;
         const descripcion = productoBase?.descripcion || "Sin descripción";
@@ -217,9 +247,14 @@ export default function SalesScreen() {
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
-          const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
+          const vendedor =
+            (user.claveEmpleado as string | undefined) ||
+            (user.nombre as string | undefined) ||
+            "";
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
+            (user.sucursal_origen as number | null | undefined) ??
+            (user.sucursal as number | null | undefined) ??
+            1;
           setCurrentSucursal(sucursal);
         }
 
@@ -283,7 +318,8 @@ export default function SalesScreen() {
 
       const lowerQuery = query.toLowerCase();
       const filtered = clientes.filter(
-        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
+        (c) =>
+          c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query)
       );
 
       setFilteredClientes(filtered);
@@ -345,7 +381,10 @@ export default function SalesScreen() {
     }
   };
 
-  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
+  const total = useMemo(
+    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
+    [cart]
+  );
 
   const addToCart = (p: Producto) => {
     setCart((prev) => {
@@ -361,11 +400,18 @@ export default function SalesScreen() {
   };
 
   const updateQuantity = (id: number, cantidad: number) => {
-    if (cantidad <= 0) return;
+    if (cantidad <= 0) {
+      console.warn(
+        `[Sales] ⚠️ Intento de actualizar cantidad a ${cantidad} para producto ${id}, bloqueado`
+      );
+      return;
+    }
+    console.log(`[Sales] Actualizando cantidad de producto ${id} a ${cantidad}`);
     setCart((prev) => prev.map((ci) => (ci.id === id ? { ...ci, cantidad } : ci)));
   };
 
   const removeFromCart = (id: number) => {
+    console.log(`[Sales] 🗑️ Eliminando producto ${id} del carrito`);
     setCart((prev) => prev.filter((ci) => ci.id !== id));
   };
 
@@ -390,8 +436,14 @@ export default function SalesScreen() {
       const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
       const preciosDefault = FullSyncService.getPreciosByListaPrecio(13); // Lista DOMIC.
 
-      console.log("[DEBUG] Precios encontrados para listaPrecio=" + listaPrecios + ":", preciosCliente.length);
-      console.log("[DEBUG] Precios por defecto (lista 13 - DOMIC.):", preciosDefault.length);
+      console.log(
+        "[DEBUG] Precios encontrados para listaPrecio=" + listaPrecios + ":",
+        preciosCliente.length
+      );
+      console.log(
+        "[DEBUG] Precios por defecto (lista 13 - DOMIC.):",
+        preciosDefault.length
+      );
       if (preciosCliente.length > 0) {
         console.log("[DEBUG] Ejemplo precio:", preciosCliente[0]);
       }
@@ -406,7 +458,9 @@ export default function SalesScreen() {
       }
 
       const inventario = FullSyncService.getInventario();
-      const productosData = productosBase.length ? productosBase : FullSyncService.getProductos(1000);
+      const productosData = productosBase.length
+        ? productosBase
+        : FullSyncService.getProductos(1000);
       const kitsData = kits.length ? kits : FullSyncService.getKits(5000);
 
       console.log("[DEBUG] Datos cargados:", {
@@ -424,21 +478,34 @@ export default function SalesScreen() {
         kitsData,
         preciosDefault
       ).filter((p) => p.existencia > 0);
-      console.log("[DEBUG] Productos formateados (con existencia > 0):", productosFormateados.length);
+      console.log(
+        "[DEBUG] Productos formateados (con existencia > 0):",
+        productosFormateados.length
+      );
       setProductos(productosFormateados);
-      setFilteredProductos(productosFormateados);
+
+      // Aplicar filtro de kits según el estado del botón
+      const productosFiltrados = showOnlyPromotions
+        ? productosFormateados.filter((p) => p.esKit)
+        : productosFormateados.filter((p) => !p.esKit);
+      setFilteredProductos(productosFiltrados);
     }
-  }, [selectedClient, buildProductosFormateados, productosBase, kits]);
+  }, [
+    selectedClient,
+    buildProductosFormateados,
+    productosBase,
+    kits,
+    showOnlyPromotions,
+  ]);
 
   const processSale = async () => {
+    // Protección contra doble-clic
+    if (processingVenta) {
+      console.log("[Sales] ⚠️ Venta ya en proceso, ignorando clic duplicado");
+      return;
+    }
+
     const client = selectedClient;
-    console.log("[Sales] processSale called", {
-      client,
-      cartLength: cart.length,
-      metodoPago,
-      currentSucursal,
-      total,
-    });
     if (!client) {
       Alert.alert("Error", "Selecciona un cliente");
       return;
@@ -452,11 +519,162 @@ export default function SalesScreen() {
       return;
     }
 
+    // Procesar inputs pendientes antes de validar
+    // (en caso de que el usuario no haya salido del campo de cantidad)
+    console.log("[Sales] 🔄 Procesando inputs de cantidad pendientes...");
+    const updatedCart = cart.filter((item) => {
+      const pendingInput = quantityInputs[item.id];
+
+      // Si hay input pendiente, procesarlo
+      if (pendingInput !== undefined) {
+        console.log(
+          `[Sales] Input pendiente para producto ${item.id}: "${pendingInput}"`
+        );
+        if (!pendingInput || pendingInput === "0") {
+          console.log(
+            `[Sales] Eliminando producto ${item.id} por cantidad 0 en input pendiente`
+          );
+          return false; // Eliminar del carrito
+        }
+        const n = parseInt(pendingInput, 10);
+        if (!Number.isNaN(n) && n > 0) {
+          item.cantidad = n; // Actualizar cantidad
+          console.log(
+            `[Sales] Actualizando cantidad de producto ${item.id} a ${n} desde input pendiente`
+          );
+        } else {
+          // Input inválido, eliminar
+          console.warn(
+            `[Sales] Input inválido "${pendingInput}" para producto ${item.id}, eliminando`
+          );
+          return false;
+        }
+      }
+
+      // Verificar cantidad actual del item (con o sin input pendiente)
+      if (item.cantidad <= 0) {
+        console.warn(
+          `[Sales] Eliminando producto ${item.id} con cantidad ${item.cantidad}`
+        );
+        return false;
+      }
+
+      return true; // Mantener en carrito
+    });
+
+    if (updatedCart.length === 0) {
+      Alert.alert("Error", "No hay productos en el carrito");
+      return;
+    }
+
+    // Validar datos del carrito
+    console.log(
+      "[Sales] 🔍 Validando carrito antes de procesar:",
+      updatedCart.map((i) => ({
+        id: i.id,
+        descripcion: i.descripcion,
+        cantidad: i.cantidad,
+        precio: i.precio,
+      }))
+    );
+
+    const invalidItems = updatedCart.filter(
+      (item) => !item.id || item.cantidad <= 0 || item.precio < 0 || !item.descripcion
+    );
+    if (invalidItems.length > 0) {
+      console.error(
+        "[Sales] ❌ Items inválidos en carrito:",
+        invalidItems.map((i) => ({
+          id: i.id,
+          descripcion: i.descripcion,
+          cantidad: i.cantidad,
+          precio: i.precio,
+          razon: !i.id
+            ? "sin id"
+            : i.cantidad <= 0
+            ? "cantidad <= 0"
+            : i.precio < 0
+            ? "precio negativo"
+            : "sin descripción",
+        }))
+      );
+      Alert.alert(
+        "Error",
+        `Hay productos con datos inválidos en el carrito:\n${invalidItems
+          .map(
+            (i) =>
+              `- ${i.descripcion || "Sin nombre"}: cantidad=${i.cantidad}, precio=${
+                i.precio
+              }`
+          )
+          .join("\n")}`
+      );
+      return;
+    }
+
+    // Validar inventario suficiente
+    const insufficientStock = updatedCart.filter(
+      (item) => item.existencia < item.cantidad
+    );
+    if (insufficientStock.length > 0) {
+      console.warn("[Sales] ⚠️ Inventario insuficiente:", insufficientStock);
+      Alert.alert(
+        "Inventario Insuficiente",
+        `Los siguientes productos no tienen suficiente inventario:\n${insufficientStock
+          .map(
+            (i) =>
+              `- ${i.descripcion} (disponible: ${i.existencia}, solicitado: ${i.cantidad})`
+          )
+          .join("\n")}`
+      );
+      return;
+    }
+
+    // Bloquear botón y mostrar loading
+    setProcessingVenta(true);
+
+    // Actualizar el carrito con los cambios procesados
+    if (updatedCart.length !== cart.length) {
+      console.log(
+        `[Sales] ⚠️ Se eliminaron ${
+          cart.length - updatedCart.length
+        } productos con cantidad 0 desde inputs pendientes`
+      );
+      setCart(updatedCart);
+    }
+
+    // Limpiar inputs pendientes
+    setQuantityInputs({});
+
+    // Recalcular total con el carrito actualizado
+    const updatedTotal = updatedCart.reduce(
+      (acc, item) => acc + item.precio * item.cantidad,
+      0
+    );
+
+    console.log("[Sales] 🚀 Iniciando proceso de venta", {
+      cliente: client.nombre,
+      items: updatedCart.length,
+      totalOriginal: total,
+      totalActualizado: updatedTotal,
+      metodoPago,
+    });
+
+    let ventasCreadas = false;
+    let inventarioActualizado = false;
+
     try {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago == "cupon" ? 4 : metodoPago === "credito" ? 3 : 2; // transferencia
+      const tipoPagoCode =
+        metodoPago === "efectivo"
+          ? 1
+          : metodoPago == "cupon"
+          ? 4
+          : metodoPago === "credito"
+          ? 3
+          : 2; // transferencia
       const descripcionMedioPago =
         metodoPago === "efectivo"
           ? "Efectivo"
@@ -466,31 +684,59 @@ export default function SalesScreen() {
           ? "Credito"
           : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
+        (currentUser?.claveEmpleado as string | undefined) ||
+        (currentUser?.nombre as string | undefined) ||
+        "";
       const now = new Date();
 
-      await TicketPrinter.printSaleTicket({
-        clientName: client.nombre,
-        paymentMethod: metodoPago,
-        items: cart.map((item) => ({
-          description: item.descripcion,
-          quantity: item.cantidad,
-          price: item.precio,
-          total: item.precio * item.cantidad,
-        })),
-        total: total,
-        businessName: APP_NAME,
-        date: now,
-        ticketNumber: String(saleIdMovil),
-        sellerName: vendedor,
-        branch: sucursal,
-      });
+      // Filtrar productos con cantidad válida (última línea de defensa)
+      const validCart = updatedCart.filter((item) => item.cantidad > 0);
+      if (validCart.length !== updatedCart.length) {
+        console.error(
+          "[Sales] ⚠️ Se detectaron productos con cantidad 0 que pasaron la validación inicial:",
+          updatedCart.filter((item) => item.cantidad <= 0)
+        );
+      }
 
+      if (validCart.length === 0) {
+        console.error("[Sales] ❌ No hay productos válidos para procesar");
+        Alert.alert("Error", "No hay productos válidos en el carrito");
+        return;
+      }
+
+      // Intentar imprimir ticket (no crítico si falla)
+      let ticketImpreso = false;
+      try {
+        await TicketPrinter.printSaleTicket({
+          clientName: client.nombre,
+          paymentMethod: metodoPago,
+          items: validCart.map((item) => ({
+            description: item.descripcion,
+            quantity: item.cantidad,
+            price: item.precio,
+            total: item.precio * item.cantidad,
+          })),
+          total: updatedTotal,
+          businessName: APP_NAME,
+          date: now,
+          ticketNumber: String(saleIdMovil),
+          sellerName: vendedor,
+          branch: sucursal,
+        });
+        ticketImpreso = true;
+        console.log("[Sales] ✅ Ticket impreso correctamente");
+      } catch (printError) {
+        console.error("[Sales] ⚠️ Error al imprimir ticket (no crítico):", printError);
+        // Continuar con la venta aunque falle la impresión
+      }
+
+      // Crear ventas locales (operación crítica)
+      console.log("[Sales] 💾 Guardando ventas en base de datos local...");
       await FullSyncService.createLocalVentas(
-        cart.map((item, index) => ({
+        validCart.map((item, index) => ({
           id: saleIdMovil + index,
           sucursal,
-          noVenta: saleIdMovil,
+          noVenta: 0,
           idMovil: saleIdMovil,
           claveProd: item.id, // Usar el id del producto, no claveProd
           nombreProducto: item.descripcion,
@@ -507,10 +753,11 @@ export default function SalesScreen() {
           facturacionMovil: false,
         }))
       );
-      console.log("[Sales] Local ventas created");
+      ventasCreadas = true;
+      console.log("[Sales] ✅ Ventas locales creadas exitosamente");
 
-      // Actualizar inventario restando las cantidades vendidas
-      const inventarioUpdateItems = cart.map((item) => ({
+      // Actualizar inventario restando las cantidades vendidas (operación crítica)
+      const inventarioUpdateItems = validCart.map((item) => ({
         sucursal,
         claveProd: parseInt(item.claveProd || "0", 10), // Código del producto para buscar en inventario
         cantidad: item.cantidad,
@@ -518,7 +765,7 @@ export default function SalesScreen() {
         idProducto: item.id, // ID del producto para buscar componentes de kits
       }));
       console.log("[Sales] DEBUG - Updating inventory after sale", {
-        rows: cart.length,
+        rows: validCart.length,
         sucursal,
         items: inventarioUpdateItems.map((i) => ({
           claveProd: i.claveProd,
@@ -526,7 +773,7 @@ export default function SalesScreen() {
           esKit: i.esKit,
           idProducto: i.idProducto,
         })),
-        cartRaw: cart.map((c) => ({
+        cartRaw: validCart.map((c) => ({
           id: c.id,
           claveProd: c.claveProd,
           claveProdType: typeof c.claveProd,
@@ -534,73 +781,37 @@ export default function SalesScreen() {
           cantidad: c.cantidad,
         })),
       });
-      await FullSyncService.updateInventarioAfterSale(inventarioUpdateItems);
-      console.log("[Sales] Inventory updated successfully");
+      console.log("[Sales] 📦 Actualizando inventario...");
+      await FullSyncService.updateInventarioAfterSaleScreen(inventarioUpdateItems);
+      inventarioActualizado = true;
+      console.log("[Sales] ✅ Inventario actualizado exitosamente");
 
+      // Intentar enviar ventas con timeout de 3 segundos
       try {
-        const rawUserId = (currentUser as any)?.id;
-        const idUsuario = rawUserId !== null && rawUserId !== undefined ? Number(rawUserId) : 0;
+        const idUsuarioRaw =
+          (currentUser as any)?.idUsuario ?? (currentUser as any)?.id ?? 1;
+        const idUsuario = Number.isFinite(Number(idUsuarioRaw))
+          ? Number(idUsuarioRaw)
+          : 1;
 
-        const fecha = now.toISOString();
-        const fechaTransfer = new Date().toISOString();
+        console.log("[Sales] Iniciando arrastre de ventas con timeout de 3s...");
+        const result = await FullSyncService.sendPendingVentasWithTimeout(
+          sucursal,
+          idUsuario,
+          3000 // 3 segundos de timeout
+        );
 
-        const ventasDetalle = FullSyncService.getVentas();
-
-        const movimientos = ventasDetalle.map((venta: any) => ({
-          sucursal: venta.sucursal ?? sucursal,
-          clave_prod: venta.claveProd ?? 0,
-          Cant_producto: venta.cantProducto ?? 0,
-          precio: venta.precio ?? 0,
-          Cve_cliente: venta.cveCliente ?? client.id,
-          fecha: (venta.fecha instanceof Date ? venta.fecha : now).toISOString(),
-          tipo_pago: venta.tipoPago ?? tipoPagoCode,
-          usuario: idUsuario,
-          longitud: 0,
-          latitud: 0,
-          id_movil: venta.idMovil,
-          fechaTransfer,
-        }));
-
-        const apiBaseUrl = "https://cbinfo.no-ip.info:9031";
-        const url = `${apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${encodeURIComponent(
-          String(sucursal)
-        )}&idUsuario=${encodeURIComponent(String(idUsuario))}`;
-
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(movimientos),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(
-            "[Sales] Error HTTP al enviar ventas arrastre",
-            response.status,
-            response.statusText,
-            errorText
+        if (result.timedOut) {
+          console.log(
+            "[Sales] ⏱️ Arrastre omitido por timeout, se enviará en sincronización automática"
           );
+        } else if (result.success) {
+          console.log("[Sales] ✅ Ventas arrastre enviadas:", result.sent);
         } else {
-          let data: any = null;
-          try {
-            data = await response.json();
-          } catch (e) {}
-          console.log("[Sales] Ventas arrastre enviadas correctamente", data);
-
-          // Ejecutar sincronización incremental para traer datos actualizados del servidor
-          try {
-            console.log("[Sales] Iniciando sincronización incremental después de enviar ventas...");
-            // await FullSyncService.syncIncremental();
-            console.log("[Sales] Sincronización incremental completada");
-          } catch (syncIncrementalError) {
-            console.error("[Sales] Error en sincronización incremental", syncIncrementalError);
-          }
+          console.error("[Sales] ❌ Error en arrastre:", result.error);
         }
-      } catch (syncError) {
-        console.error("[Sales] Error al enviar ventas arrastre", syncError);
+      } catch (arrastreError) {
+        console.error("[Sales] Error en arrastre (no crítico):", arrastreError);
       }
 
       // Actualizar estado de impresora
@@ -610,14 +821,16 @@ export default function SalesScreen() {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
-            status.printer?.name
-          }`
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(
+            2
+          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`
         );
       } else {
         Alert.alert(
           "✅ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${total.toFixed(2)}\nPago: ${metodoPago}`
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(
+            2
+          )}\nPago: ${metodoPago}`
         );
       }
 
@@ -625,9 +838,46 @@ export default function SalesScreen() {
       setCart([]);
       setMetodoPago(null);
       setSelectedClient(null);
+
+      console.log("[Sales] ✅ Venta procesada completamente", {
+        ventasCreadas,
+        inventarioActualizado,
+        ticketImpreso,
+      });
     } catch (error) {
-      console.error("[Sales] Error in processSale", error);
-      Alert.alert("Error", "No se pudo procesar la venta");
+      console.error("[Sales] ❌ Error crítico en processSale:", error);
+
+      // Determinar tipo de error
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const isNetworkError = errorMsg.includes("network") || errorMsg.includes("fetch");
+      const isDatabaseError = errorMsg.includes("realm") || errorMsg.includes("database");
+
+      console.error("[Sales] Estado de la operación:", {
+        ventasCreadas,
+        inventarioActualizado,
+        errorType: isNetworkError
+          ? "red"
+          : isDatabaseError
+          ? "base de datos"
+          : "desconocido",
+      });
+
+      // Mensaje de error específico
+      let userMessage = "No se pudo procesar la venta.";
+      if (ventasCreadas && !inventarioActualizado) {
+        userMessage +=
+          "\n\n⚠️ La venta se registró pero el inventario no se actualizó. Contacta al administrador.";
+      } else if (isNetworkError) {
+        userMessage +=
+          "\n\nProblema de conexión. La venta se guardó localmente y se sincronizará automáticamente.";
+      } else if (isDatabaseError) {
+        userMessage += "\n\nError en la base de datos local. Por favor intenta de nuevo.";
+      }
+
+      Alert.alert("Error al Procesar Venta", userMessage);
+    } finally {
+      // Desbloquear botón siempre, incluso si hay error
+      setProcessingVenta(false);
     }
   };
 
@@ -637,7 +887,9 @@ export default function SalesScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
+            <Text style={styles.loadingText}>
+              Preparando conexión con la impresora...
+            </Text>
           </View>
         </ScrollView>
       </View>
@@ -660,7 +912,9 @@ export default function SalesScreen() {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
+            <Text style={styles.warningText}>
+              Sin impresora. Los tickets se compartirán o deberás configurar una.
+            </Text>
           </View>
         )}
 
@@ -668,11 +922,16 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={() => setClienteModalOpen(true)}
+            >
               <Text style={styles.smallBtnText}>Seleccionar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
+          <Text style={styles.valueText}>
+            {selectedClient ? selectedClient.nombre : "Sin seleccionar"}
+          </Text>
         </View>
 
         {/* Productos */}
@@ -681,7 +940,10 @@ export default function SalesScreen() {
             <Text style={styles.cardTitle}>Productos</Text>
             <TouchableOpacity
               style={[styles.smallBtn, !selectedClient && styles.smallBtnDisabled]}
-              onPress={() => selectedClient && setProductoModalOpen(true)}
+              onPress={() => {
+                selectedClient && setProductoModalOpen(true);
+                setShowOnlyPromotions(false);
+              }}
               disabled={!selectedClient}
             >
               <Text style={styles.smallBtnText}>Agregar</Text>
@@ -693,10 +955,21 @@ export default function SalesScreen() {
           ) : (
             <View style={styles.cartList}>
               {cart.map((item) => (
-                <View key={item.id} style={[styles.cartRow, item.usandoPrecioDefault && styles.cartRowPrecioDefault]}>
+                <View
+                  key={item.id}
+                  style={[
+                    styles.cartRow,
+                    item.usandoPrecioDefault && styles.cartRowPrecioDefault,
+                  ]}
+                >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cartTitle}>{item.descripcion}</Text>
-                    <Text style={[styles.muted, item.usandoPrecioDefault && styles.cartPriceDefault]}>
+                    <Text
+                      style={[
+                        styles.muted,
+                        item.usandoPrecioDefault && styles.cartPriceDefault,
+                      ]}
+                    >
                       ${item.precio.toFixed(2)}
                       {item.usandoPrecioDefault && " ⚠️"}
                     </Text>
@@ -717,19 +990,34 @@ export default function SalesScreen() {
                           return;
                         }
                         const n = parseInt(t, 10);
-                        if (Number.isFinite(n) && n >= 0) {
+                        if (!Number.isNaN(n) && n > 0) {
                           updateQuantity(item.id, n);
                         }
                       }}
                       onBlur={() => {
-                        // Al salir del campo, si está vacío o es 0, poner 1
+                        console.log(
+                          `[Sales] 📝 onBlur ejecutado para producto ${item.id}`
+                        );
+                        // Al salir del campo, validar cantidad
                         const currentText = quantityInputs[item.id];
+                        console.log(
+                          `[Sales] Texto actual en input: "${currentText}", cantidad en carrito: ${item.cantidad}`
+                        );
                         if (!currentText || currentText === "0") {
-                          updateQuantity(item.id, 1);
+                          // Si está vacío o es 0, eliminar del carrito
+                          console.log(
+                            `[Sales] Eliminando producto ${item.id} del carrito (cantidad 0)`
+                          );
+                          removeFromCart(item.id);
                         } else {
                           const n = parseInt(currentText, 10);
-                          if (Number.isFinite(n) && n > 0) {
+                          if (!Number.isNaN(n) && n > 0) {
                             updateQuantity(item.id, n);
+                          } else {
+                            // Número inválido, restaurar cantidad anterior
+                            console.warn(
+                              `[Sales] Cantidad inválida: ${currentText}, restaurando a ${item.cantidad}`
+                            );
                           }
                         }
                         setQuantityInputs((prev) => {
@@ -740,8 +1028,13 @@ export default function SalesScreen() {
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
-                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
+                  <Text style={styles.lineTotal}>
+                    ${(item.precio * item.cantidad).toFixed(2)}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.removeBtn}
+                    onPress={() => removeFromCart(item.id)}
+                  >
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -754,7 +1047,11 @@ export default function SalesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
+            <PayChip
+              label="Efectivo"
+              selected={metodoPago === "efectivo"}
+              onPress={() => setMetodoPago("efectivo")}
+            />
             <PayChip
               label="Transferencia"
               selected={metodoPago === "transferencia"}
@@ -766,7 +1063,11 @@ export default function SalesScreen() {
               onPress={() => setMetodoPago("credito")}
               disabled={selectedClient ? !selectedClient.credito : true}
             />
-            <PayChip label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
+            <PayChip
+              label="Cupon"
+              selected={metodoPago === "cupon"}
+              onPress={() => setMetodoPago("cupon")}
+            />
           </View>
 
           <View style={styles.totalRow}>
@@ -775,11 +1076,22 @@ export default function SalesScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, (!selectedClient || !cart.length || !metodoPago) && styles.primaryBtnDisabled]}
+            style={[
+              styles.primaryBtn,
+              (!selectedClient || !cart.length || !metodoPago || processingVenta) &&
+                styles.primaryBtnDisabled,
+            ]}
             onPress={processSale}
-            disabled={!selectedClient || !cart.length || !metodoPago}
+            disabled={!selectedClient || !cart.length || !metodoPago || processingVenta}
           >
-            <Text style={styles.primaryBtnText}>Procesar Venta</Text>
+            {processingVenta ? (
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <ActivityIndicator color="#fff" size="small" style={{ marginRight: 8 }} />
+                <Text style={styles.primaryBtnText}>Procesando...</Text>
+              </View>
+            ) : (
+              <Text style={styles.primaryBtnText}>Procesar Venta</Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -803,7 +1115,10 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
+                  <TouchableOpacity
+                    onPress={() => handleSearchCliente("")}
+                    style={styles.clearButton}
+                  >
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -879,7 +1194,10 @@ export default function SalesScreen() {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
+                  <TouchableOpacity
+                    onPress={() => handleSearchProducto("")}
+                    style={styles.clearButton}
+                  >
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -893,7 +1211,10 @@ export default function SalesScreen() {
                   {filteredProductos.length === 1 ? "encontrado" : "encontrados"}
                 </Text>
                 <TouchableOpacity
-                  style={[styles.promotionsBtnSmall, showOnlyPromotions && styles.promotionsBtnSmallActive]}
+                  style={[
+                    styles.promotionsBtnSmall,
+                    showOnlyPromotions && styles.promotionsBtnSmallActive,
+                  ]}
                   onPress={togglePromotions}
                 >
                   <Icon
@@ -904,7 +1225,10 @@ export default function SalesScreen() {
                     style={{ marginRight: 4 }}
                   />
                   <Text
-                    style={[styles.promotionsBtnSmallText, showOnlyPromotions && styles.promotionsBtnSmallTextActive]}
+                    style={[
+                      styles.promotionsBtnSmallText,
+                      showOnlyPromotions && styles.promotionsBtnSmallTextActive,
+                    ]}
                   >
                     {showOnlyPromotions ? "Todo" : "Promociones o combos"}
                   </Text>
@@ -930,16 +1254,25 @@ export default function SalesScreen() {
                       <Text style={styles.listSubtitle}>
                         Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
                       </Text>
-                      {item.usandoPrecioDefault && <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>}
+                      {item.usandoPrecioDefault && (
+                        <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>
+                      )}
                     </View>
-                    <Text style={[styles.productPrice, item.usandoPrecioDefault && styles.productPriceDefault]}>
+                    <Text
+                      style={[
+                        styles.productPrice,
+                        item.usandoPrecioDefault && styles.productPriceDefault,
+                      ]}
+                    >
                       ${item.precio.toFixed(2)}
                     </Text>
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
+                    <Text style={styles.emptySearchText}>
+                      No se encontraron productos
+                    </Text>
                   </View>
                 }
               />
@@ -977,7 +1310,11 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
+      style={[
+        styles.chip,
+        selected && styles.chipSelected,
+        disabled && styles.chipDisabled,
+      ]}
     >
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>
@@ -1092,7 +1429,12 @@ const styles = StyleSheet.create({
   },
   removeBtn: { padding: SPACING.s, marginLeft: SPACING.s },
   removeBtnText: { color: COLORS.error, fontSize: 18, fontWeight: "bold" },
-  payRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.s, marginVertical: SPACING.m },
+  payRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.s,
+    marginVertical: SPACING.m,
+  },
   chip: {
     borderWidth: 1,
     borderColor: COLORS.border,
