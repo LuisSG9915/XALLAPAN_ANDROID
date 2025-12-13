@@ -274,26 +274,26 @@ class TicketPrinter {
       }
 
       // Método alternativo: compartir o mostrar
-      Alert.alert("Impresora No Configurada", "¿Deseas configurar una impresora Bluetooth o compartir el ticket?", [
-        {
-          text: "Compartir",
-          onPress: async () => {
-            if (Platform.OS === "ios" || Platform.OS === "android") {
-              await Share.share({
-                message: text,
-                title: title,
-              });
-            }
-          },
-        },
-        {
-          text: "Configurar Impresora",
-          onPress: () => {
-            Alert.alert("Configuración", 'Ve al menú principal y selecciona "Configuración de Impresora"');
-          },
-        },
-        { text: "Cancelar", style: "cancel" },
-      ]);
+      // Alert.alert("Impresora No Configurada", "¿Deseas configurar una impresora Bluetooth o compartir el ticket?", [
+      //   {
+      //     text: "Compartir",
+      //     onPress: async () => {
+      //       if (Platform.OS === "ios" || Platform.OS === "android") {
+      //         await Share.share({
+      //           message: text,
+      //           title: title,
+      //         });
+      //       }
+      //     },
+      //   },
+      //   {
+      //     text: "Configurar Impresora",
+      //     onPress: () => {
+      //       Alert.alert("Configuración", 'Ve al menú principal y selecciona "Configuración de Impresora"');
+      //     },
+      //   },
+      //   { text: "Cancelar", style: "cancel" },
+      // ]);
     } catch (e: any) {
       Alert.alert("Error de Impresión", e?.message || "No fue posible imprimir el ticket");
     }

@@ -61,7 +61,7 @@ export default function PrecorteScreen() {
       const kitsData = FullSyncService.getKits(5000) || [];
       const currentUser = AuthService.currentUser;
       const sucursalUsuario = currentUser?.sucursal_origen || currentUser?.sucursal;
-      console.log("Inventario", inventario, "Sucursal usuario:", sucursalUsuario);
+      console.log("Inventario", inventario);
 
       // Filtrar por fechaArrastre dentro del día seleccionado Y por sucursal
       const inventarioFiltrado = inventario.filter((inv: any) => {
@@ -167,7 +167,8 @@ export default function PrecorteScreen() {
       //     }
       //   });
 
-      setItems(mapped);
+      const sortedMapped = mapped.sort((a, b) => b.ifValue - a.ifValue);
+      setItems(sortedMapped);
 
       // Calcular total efectivo desde ventas (tipoPago 1) para la fecha seleccionada y sucursal actual
       const totalEf = FullSyncService.getVentasTotalEfectivoForDate(startOfDay, sucursalUsuario ?? undefined);

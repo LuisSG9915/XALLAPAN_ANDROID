@@ -11,6 +11,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import { Icon } from "react-native-elements";
 import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
@@ -44,6 +45,7 @@ export default function SalesScreen() {
   const [filteredProductos, setFilteredProductos] = useState<Producto[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchProductoQuery, setSearchProductoQuery] = useState("");
+  const [showOnlyPromotions, setShowOnlyPromotions] = useState(false);
 
   const [clienteModalOpen, setClienteModalOpen] = useState(false);
   const [productoModalOpen, setProductoModalOpen] = useState(false);
@@ -52,7 +54,7 @@ export default function SalesScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | null>(null);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -293,13 +295,20 @@ export default function SalesScreen() {
     (query: string) => {
       setSearchProductoQuery(query);
 
+      let baseProducts = productos;
+      if (showOnlyPromotions) {
+        baseProducts = productos.filter((p) => p.esKit);
+      } else {
+        baseProducts = productos.filter((p) => !p.esKit);
+      }
+
       if (!query.trim()) {
-        setFilteredProductos(productos);
+        setFilteredProductos(baseProducts);
         return;
       }
 
       const lowerQuery = query.toLowerCase();
-      const filtered = productos.filter((p) => {
+      const filtered = baseProducts.filter((p) => {
         const matchDesc = p.descripcion.toLowerCase().includes(lowerQuery);
         const matchClave = p.claveProd?.toString().toLowerCase().includes(lowerQuery);
         const matchId = p.id.toString().includes(query);
@@ -308,8 +317,33 @@ export default function SalesScreen() {
 
       setFilteredProductos(filtered);
     },
-    [productos]
+    [productos, showOnlyPromotions]
   );
+
+  const togglePromotions = () => {
+    const newValue = !showOnlyPromotions;
+    setShowOnlyPromotions(newValue);
+
+    let baseProducts = productos;
+    if (newValue) {
+      baseProducts = productos.filter((p) => p.esKit);
+    } else {
+      baseProducts = productos.filter((p) => !p.esKit);
+    }
+
+    if (!searchProductoQuery.trim()) {
+      setFilteredProductos(baseProducts);
+    } else {
+      const lowerQuery = searchProductoQuery.toLowerCase();
+      const filtered = baseProducts.filter((p) => {
+        const matchDesc = p.descripcion.toLowerCase().includes(lowerQuery);
+        const matchClave = p.claveProd?.toString().toLowerCase().includes(lowerQuery);
+        const matchId = p.id.toString().includes(searchProductoQuery);
+        return matchDesc || matchClave || matchId;
+      });
+      setFilteredProductos(filtered);
+    }
+  };
 
   const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
@@ -352,8 +386,9 @@ export default function SalesScreen() {
         listaPreciosUsado: listaPrecios,
       });
 
-      const preciosCliente = FullSyncService.getPreciosByCliente(listaPrecios);
-      const preciosDefault = FullSyncService.getPreciosByCliente(13); // Lista DOMIC.
+      // Buscar precios por listaPrecio en lugar de idCliente
+      const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
+      const preciosDefault = FullSyncService.getPreciosByListaPrecio(13); // Lista DOMIC.
 
       console.log("[DEBUG] Precios encontrados para listaPrecio=" + listaPrecios + ":", preciosCliente.length);
       console.log("[DEBUG] Precios por defecto (lista 13 - DOMIC.):", preciosDefault.length);
@@ -365,8 +400,8 @@ export default function SalesScreen() {
       const todosPrecios = FullSyncService.getPrecios(100);
       console.log("[DEBUG] Total precios en Realm (primeros 100):", todosPrecios.length);
       if (todosPrecios.length > 0) {
-        console.log("[DEBUG] Ejemplo de idClientes disponibles:", [
-          ...new Set(todosPrecios.map((p: any) => p.idCliente)),
+        console.log("[DEBUG] Ejemplo de listaPrecio disponibles:", [
+          ...new Set(todosPrecios.map((p: any) => p.listaPrecio)),
         ]);
       }
 
@@ -421,9 +456,15 @@ export default function SalesScreen() {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "credito" ? 3 : 2; // transferencia
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago == "cupon" ? 4 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
-        metodoPago === "efectivo" ? "Efectivo" : metodoPago === "credito" ? "Credito" : "Transferencia";
+        metodoPago === "efectivo"
+          ? "Efectivo"
+          : metodoPago === "cupon"
+          ? "Cupon"
+          : metodoPago === "credito"
+          ? "Credito"
+          : "Transferencia";
       const vendedor =
         (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = new Date();
@@ -520,13 +561,6 @@ export default function SalesScreen() {
           fechaTransfer,
         }));
 
-        console.log("[Sales] Sending ventas arrastre to server", {
-          endpoint: "/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON",
-          sucursal,
-          idUsuario,
-          items: movimientos.length,
-        });
-
         const apiBaseUrl = "https://cbinfo.no-ip.info:9031";
         const url = `${apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${encodeURIComponent(
           String(sucursal)
@@ -555,6 +589,15 @@ export default function SalesScreen() {
             data = await response.json();
           } catch (e) {}
           console.log("[Sales] Ventas arrastre enviadas correctamente", data);
+
+          // Ejecutar sincronización incremental para traer datos actualizados del servidor
+          try {
+            console.log("[Sales] Iniciando sincronización incremental después de enviar ventas...");
+            // await FullSyncService.syncIncremental();
+            console.log("[Sales] Sincronización incremental completada");
+          } catch (syncIncrementalError) {
+            console.error("[Sales] Error en sincronización incremental", syncIncrementalError);
+          }
         }
       } catch (syncError) {
         console.error("[Sales] Error al enviar ventas arrastre", syncError);
@@ -723,6 +766,7 @@ export default function SalesScreen() {
               onPress={() => setMetodoPago("credito")}
               disabled={selectedClient ? !selectedClient.credito : true}
             />
+            <PayChip label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
           </View>
 
           <View style={styles.totalRow}>
@@ -841,12 +885,31 @@ export default function SalesScreen() {
                 )}
               </View>
 
-              {/* Contador de resultados */}
-              <Text style={styles.resultCount}>
-                {filteredProductos.length} producto
-                {filteredProductos.length !== 1 ? "s" : ""}{" "}
-                {filteredProductos.length === 1 ? "encontrado" : "encontrados"}
-              </Text>
+              {/* Contador de resultados con botón de promociones */}
+              <View style={styles.resultCountRow}>
+                <Text style={styles.resultCount}>
+                  {filteredProductos.length} producto
+                  {filteredProductos.length !== 1 ? "s" : ""}{" "}
+                  {filteredProductos.length === 1 ? "encontrado" : "encontrados"}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.promotionsBtnSmall, showOnlyPromotions && styles.promotionsBtnSmallActive]}
+                  onPress={togglePromotions}
+                >
+                  <Icon
+                    name="local-offer"
+                    type="material"
+                    color={showOnlyPromotions ? "#fff" : COLORS.primary}
+                    size={14}
+                    style={{ marginRight: 4 }}
+                  />
+                  <Text
+                    style={[styles.promotionsBtnSmallText, showOnlyPromotions && styles.promotionsBtnSmallTextActive]}
+                  >
+                    {showOnlyPromotions ? "Todo" : "Promociones o combos"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               <FlatList
                 data={filteredProductos}
@@ -864,7 +927,9 @@ export default function SalesScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
                       <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
-                      <Text style={styles.listSubtitle}>Existencia: {item.existencia}</Text>
+                      <Text style={styles.listSubtitle}>
+                        Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
+                      </Text>
                       {item.usandoPrecioDefault && <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>}
                     </View>
                     <Text style={[styles.productPrice, item.usandoPrecioDefault && styles.productPriceDefault]}>
@@ -883,6 +948,7 @@ export default function SalesScreen() {
                 onPress={() => {
                   setProductoModalOpen(false);
                   setSearchProductoQuery("");
+                  setShowOnlyPromotions(false);
                   setFilteredProductos(productos);
                 }}
               >
@@ -1026,7 +1092,7 @@ const styles = StyleSheet.create({
   },
   removeBtn: { padding: SPACING.s, marginLeft: SPACING.s },
   removeBtnText: { color: COLORS.error, fontSize: 18, fontWeight: "bold" },
-  payRow: { flexDirection: "row", gap: SPACING.s, marginVertical: SPACING.m },
+  payRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.s, marginVertical: SPACING.m },
   chip: {
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1159,10 +1225,39 @@ const styles = StyleSheet.create({
     marginTop: SPACING.s,
   },
   resultCount: {
-    fontSize: 12,
-    color: COLORS.muted,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontStyle: "italic",
+    flex: 1,
+  },
+  resultCountRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: SPACING.s,
-    textAlign: "right",
+  },
+  promotionsBtnSmall: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    paddingVertical: 4,
+    paddingHorizontal: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  promotionsBtnSmallActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  promotionsBtnSmallText: {
+    color: COLORS.primary,
+    fontWeight: "600",
+    fontSize: 11,
+  },
+  promotionsBtnSmallTextActive: {
+    color: "#fff",
   },
   emptySearch: {
     paddingVertical: SPACING.xxl,

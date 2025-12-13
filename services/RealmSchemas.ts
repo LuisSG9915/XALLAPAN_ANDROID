@@ -78,6 +78,7 @@ export const PrecioSchema = {
     idCliente: "int?",
     claveProd: "int?",
     precio: "float?",
+    listaPrecio: "int?",
     fechaAct: "date?",
     syncedAt: "date",
     syncedAr: "date?",

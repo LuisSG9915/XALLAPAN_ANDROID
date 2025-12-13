@@ -14,6 +14,7 @@ import {
 import { Icon } from "react-native-elements";
 import AuthService from "../services/AuthService";
 import FullSyncService, { SyncProgress } from "../services/FullSyncService";
+import BackgroundSyncService from "../services/BackgroundSyncService";
 import SyncProgressModal from "./SyncProgressModal";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
@@ -61,6 +62,11 @@ export default function LoginScreen({ navigation }: any) {
 
       // Mantener el modal visible 2 segundos después de terminar
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+
+      // Iniciar sincronización automática en segundo plano después del login
+      BackgroundSyncService.start().catch((err) => {
+        console.log("Error al iniciar sincronización automática:", err);
+      });
 
       setSyncing(false);
       navigation.reset({ index: 0, routes: [{ name: "Home" }] });

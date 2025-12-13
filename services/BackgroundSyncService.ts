@@ -14,16 +14,16 @@
  * - Retry logic con exponential backoff
  */
 
-import FullSyncService from './FullSyncService';
-import { SyncProgress } from './sync/SyncTask';
-import AuthService from './AuthService';
-import BackgroundFetch from 'react-native-background-fetch';
+import FullSyncService from "./FullSyncService";
+import { SyncProgress } from "./sync/SyncTask";
+import AuthService from "./AuthService";
+import BackgroundFetch from "react-native-background-fetch";
 
 export type SyncStatus =
-  | 'idle' // No sincronizando
-  | 'syncing' // Sincronizando activamente
-  | 'success' // Última sincronización exitosa
-  | 'error'; // Error en última sincronización
+  | "idle" // No sincronizando
+  | "syncing" // Sincronizando activamente
+  | "success" // Última sincronización exitosa
+  | "error"; // Error en última sincronización
 
 export interface BackgroundSyncState {
   status: SyncStatus;
@@ -42,13 +42,13 @@ class BackgroundSyncService {
   // Configuración
   private readonly SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutos
   private readonly SYNC_INTERVAL_MINUTES = 3; // Para BackgroundFetch
-  private readonly BACKGROUND_FETCH_TASK_ID = 'com.awesomeproject.sync';
+  private readonly BACKGROUND_FETCH_TASK_ID = "com.awesomeproject.sync";
 
   // Estado interno
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isBackgroundFetchConfigured = false;
   private state: BackgroundSyncState = {
-    status: 'idle',
+    status: "idle",
     lastSyncTime: null,
     nextSyncTime: null,
     currentProgress: null,
@@ -74,18 +74,16 @@ class BackgroundSyncService {
    */
   async start(): Promise<void> {
     if (this.intervalId && this.isBackgroundFetchConfigured) {
-      console.log('[BackgroundSync] Ya está activo');
+      console.log("[BackgroundSync] Ya está activo");
       return;
     }
 
-    console.log(
-      '[BackgroundSync] Iniciando sincronización automática cada 3 minutos',
-    );
+    console.log("[BackgroundSync] Iniciando sincronización automática cada 3 minutos");
 
     // Calcular próxima sincronización
     const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
     this.updateState({
-      status: 'idle',
+      status: "idle",
       nextSyncTime: nextSync,
     });
 
@@ -123,37 +121,37 @@ class BackgroundSyncService {
           forceAlarmManager: true, // Usar AlarmManager para mayor precisión en Android
           requiredNetworkType: BackgroundFetch.NETWORK_TYPE_ANY, // Requiere conexión de red
         },
-        async taskId => {
+        async (taskId) => {
           // Este callback se ejecuta cuando la app está activa
-          console.log('[BackgroundFetch] Tarea recibida (app activa):', taskId);
+          console.log("[BackgroundFetch] Tarea recibida (app activa):", taskId);
 
           try {
             await this.performSync();
           } catch (error) {
-            console.error('[BackgroundFetch] Error en sincronización:', error);
+            console.error("[BackgroundFetch] Error en sincronización:", error);
           }
 
           // IMPORTANTE: Siempre llamar finish() cuando termine
           BackgroundFetch.finish(taskId);
         },
-        async taskId => {
+        async (taskId) => {
           // Callback de timeout - la tarea tomó demasiado tiempo
-          console.warn('[BackgroundFetch] Timeout de tarea:', taskId);
+          console.warn("[BackgroundFetch] Timeout de tarea:", taskId);
           BackgroundFetch.finish(taskId);
-        },
+        }
       );
 
       // Verificar estado de BackgroundFetch
       const statusText = this.getBackgroundFetchStatusText(status);
-      console.log('[BackgroundFetch] Estado:', statusText);
+      console.log("[BackgroundFetch] Estado:", statusText);
 
       // NOTA: HeadlessTask está registrado en index.js, no aquí
       // Esto evita duplicación y asegura que funcione cuando la app está cerrada
 
       this.isBackgroundFetchConfigured = true;
-      console.log('[BackgroundFetch] Configurado exitosamente');
+      console.log("[BackgroundFetch] Configurado exitosamente");
     } catch (error) {
-      console.error('[BackgroundFetch] Error al configurar:', error);
+      console.error("[BackgroundFetch] Error al configurar:", error);
     }
   }
 
@@ -163,13 +161,13 @@ class BackgroundSyncService {
   private getBackgroundFetchStatusText(status: number): string {
     switch (status) {
       case BackgroundFetch.STATUS_RESTRICTED:
-        return 'Restringido (configuración del sistema)';
+        return "Restringido (configuración del sistema)";
       case BackgroundFetch.STATUS_DENIED:
-        return 'Denegado (el usuario debe habilitarlo)';
+        return "Denegado (el usuario debe habilitarlo)";
       case BackgroundFetch.STATUS_AVAILABLE:
-        return 'Disponible';
+        return "Disponible";
       default:
-        return 'Desconocido';
+        return "Desconocido";
     }
   }
 
@@ -180,10 +178,10 @@ class BackgroundSyncService {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log('[BackgroundSync] Sincronización automática detenida');
+      console.log("[BackgroundSync] Sincronización automática detenida");
 
       this.updateState({
-        status: 'idle',
+        status: "idle",
         nextSyncTime: null,
       });
     }
@@ -234,11 +232,11 @@ class BackgroundSyncService {
     };
 
     // Notificar a todos los listeners
-    this.listeners.forEach(listener => {
+    this.listeners.forEach((listener) => {
       try {
         listener(this.getState());
       } catch (error) {
-        console.error('[BackgroundSync] Error en listener:', error);
+        console.error("[BackgroundSync] Error en listener:", error);
       }
     });
   }
@@ -254,57 +252,47 @@ class BackgroundSyncService {
    */
   private async performSync(): Promise<void> {
     // Evitar sincronizaciones concurrentes
-    if (this.state.status === 'syncing') {
-      console.log('[BackgroundSync] Ya hay una sincronización en curso');
+    if (this.state.status === "syncing") {
+      console.log("[BackgroundSync] Ya hay una sincronización en curso");
       return;
     }
 
-    console.log('[BackgroundSync] Iniciando sincronización...');
+    // Verificar si hay usuario logueado ANTES de cambiar estado
+    const user = await AuthService.restoreSession();
+    if (!user) {
+      console.log("[BackgroundSync] No hay usuario logueado, omitiendo sincronización");
+      return;
+    }
+
+    console.log("[BackgroundSync] Iniciando sincronización...");
 
     this.updateState({
-      status: 'syncing',
+      status: "syncing",
       currentProgress: null,
       errorMessage: null,
     });
 
     try {
-      // Obtener usuario y sucursal
-      const user = await AuthService.restoreSession();
-      if (!user) {
-        throw new Error('No hay sesión activa');
-      }
-
-      const sucursal = user.sucursal_origen || user.sucursal || 1;
+      const sucursal = user.sucursal_origen || user.sucursal;
       const idUsuario = user.id || user.idUsuario || 1;
-      console.log('[BackgroundSync] Sincronizando sucursal:', sucursal);
+      console.log("[BackgroundSync] Sincronizando sucursal:", sucursal);
 
       // PRIMERO: Enviar ventas pendientes al servidor (arrastre)
-      const ventasResult = await FullSyncService.sendPendingVentasToServer(
-        sucursal,
-        idUsuario,
-      );
+      const ventasResult = await FullSyncService.sendPendingVentasToServer(sucursal, idUsuario);
       if (ventasResult.success && ventasResult.sent > 0) {
-        console.log(
-          `[BackgroundSync] Ventas pendientes enviadas: ${ventasResult.sent}`,
-        );
+        console.log(`[BackgroundSync] Ventas pendientes enviadas: ${ventasResult.sent}`);
       } else if (!ventasResult.success) {
-        console.error(
-          '[BackgroundSync] Error enviando ventas pendientes:',
-          ventasResult.error,
-        );
+        console.error("[BackgroundSync] Error enviando ventas pendientes:", ventasResult.error);
       }
 
       // DESPUÉS: Ejecutar sincronización INCREMENTAL usando arquitectura escalable
       // FullSyncService.syncIncremental() usa fechaInicial basada en syncedAr
       // por tabla y los nuevos endpoints específicos para background.
-      const result = await FullSyncService.syncIncremental(
-        sucursal,
-        (progress: SyncProgress) => {
-          this.updateState({
-            currentProgress: progress,
-          });
-        },
-      );
+      const result = await FullSyncService.syncIncremental(sucursal, (progress: SyncProgress) => {
+        this.updateState({
+          currentProgress: progress,
+        });
+      });
 
       // Actualizar estado según resultado
       const now = new Date();
@@ -312,38 +300,32 @@ class BackgroundSyncService {
 
       if (result.success) {
         this.updateState({
-          status: 'success',
+          status: "success",
           lastSyncTime: now,
           nextSyncTime: nextSync,
           currentProgress: null,
           errorMessage: null,
           syncCount: this.state.syncCount + 1,
         });
-        console.log('[BackgroundSync] Sincronización completada exitosamente');
+        console.log("[BackgroundSync] Sincronización completada exitosamente");
       } else {
         this.updateState({
-          status: 'error',
+          status: "error",
           lastSyncTime: now,
           nextSyncTime: nextSync,
           currentProgress: null,
-          errorMessage: result.error || 'Error desconocido',
+          errorMessage: result.error || "Error desconocido",
         });
-        console.log(
-          '[BackgroundSync] Sincronización completada con errores:',
-          result.error,
-        );
+        console.log("[BackgroundSync] Sincronización completada con errores:", result.error);
       }
     } catch (error: any) {
-      const errorMsg = error?.message || 'Error desconocido';
-      console.error(
-        '[BackgroundSync] Error crítico en sincronización:',
-        errorMsg,
-      );
+      const errorMsg = error?.message || "Error desconocido";
+      console.error("[BackgroundSync] Error crítico en sincronización:", errorMsg);
 
       const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
 
       this.updateState({
-        status: 'error',
+        status: "error",
         nextSyncTime: nextSync,
         currentProgress: null,
         errorMessage: errorMsg,
@@ -361,7 +343,7 @@ class BackgroundSyncService {
     const next = this.state.nextSyncTime.getTime();
     const diff = next - now;
 
-    if (diff <= 0) return 'Ahora';
+    if (diff <= 0) return "Ahora";
 
     const minutes = Math.floor(diff / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);

@@ -36,6 +36,7 @@ import AuthService from "./services/AuthService";
 import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
+import BackgroundSyncService from "./services/BackgroundSyncService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
@@ -81,6 +82,9 @@ function App() {
     BluetoothPrinterService.connectToSavedPrinter().catch((err) => {
       console.log("No hay impresora guardada o no se pudo conectar:", err);
     });
+
+    // NOTA: BackgroundSyncService.start() se llama después del login en LoginScreen
+    // para evitar iniciar sincronización sin usuario logueado
   }, []);
 
   // useEffect(() => {
@@ -211,13 +215,13 @@ function AppContent({ navigation }: { navigation: any }) {
       description: "Registra ventas",
     },
     {
-      id: "billing",
-      title: "Cobranza",
-      icon: "attach-money",
+      id: "traspaso",
+      title: "Cargas",
+      icon: "local-shipping",
       type: "material",
-      color: COLORS.cards.billing,
-      screen: "Billing",
-      description: "Gestiona pagos",
+      color: COLORS.cards.traspaso,
+      screen: "Traspaso",
+      description: "Recibe mercancía",
     },
     {
       id: "precorte",
@@ -229,15 +233,6 @@ function AppContent({ navigation }: { navigation: any }) {
       description: "Revisa el inventario",
     },
     {
-      id: "traspaso",
-      title: "Cargas",
-      icon: "local-shipping",
-      type: "material",
-      color: COLORS.cards.traspaso,
-      screen: "Traspaso",
-      description: "Recibe mercancía",
-    },
-    {
       id: "reporte",
       title: "Ventas",
       icon: "trending-up",
@@ -245,15 +240,6 @@ function AppContent({ navigation }: { navigation: any }) {
       color: COLORS.cards.report,
       screen: "ReporteVentas",
       description: "Histórico ventas",
-    },
-    {
-      id: "dataview",
-      title: "Datos",
-      icon: "bar-chart",
-      type: "material",
-      color: COLORS.cards.data,
-      screen: "DataView",
-      description: "Datos locales",
     },
     {
       id: "printersettings",
@@ -264,6 +250,25 @@ function AppContent({ navigation }: { navigation: any }) {
       screen: "PrinterSettings",
       description: "Configurar",
     },
+    {
+      id: "dataview",
+      title: "Datos",
+      icon: "bar-chart",
+      type: "material",
+      color: COLORS.cards.data,
+      screen: "DataView",
+      description: "Datos locales",
+    },
+
+    {
+      id: "billing",
+      title: "Cobranza",
+      icon: "attach-money",
+      type: "material",
+      color: COLORS.cards.billing,
+      screen: "Billing",
+      description: "Gestiona pagos",
+    },
   ];
 
   return (
@@ -273,7 +278,7 @@ function AppContent({ navigation }: { navigation: any }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* <SyncStatusPanel /> */}
+        <SyncStatusPanel />
 
         {/* Header */}
         <View style={styles.header}>

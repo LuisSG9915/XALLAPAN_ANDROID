@@ -268,61 +268,61 @@ class FullSyncService {
           };
         },
       },
-      {
-        name: "CarteraIncremental",
-        run: async () => {
-          const tableName = "Cartera";
-          const last = this.getLastSyncedAr(tableName) || new Date(0);
-          const fechaInicial = this.formatDateForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+      // {
+      //   name: "CarteraIncremental",
+      //   run: async () => {
+      //     const tableName = "Cartera";
+      //     const last = this.getLastSyncedAr(tableName) || new Date(0);
+      //     const fechaInicial = this.formatDateForApi(last);
+      //     const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera?fechaInicial=${encodeURIComponent(fechaInicial)}`;
 
-          console.log("[Incremental] Cartera desde", fechaInicial, url);
+      //     console.log("[Incremental] Cartera desde", fechaInicial, url);
 
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} Cartera`);
-          }
+      //     const response = await fetch(url, {
+      //       headers: { accept: "application/octet-stream" },
+      //     });
+      //     if (!response.ok) {
+      //       throw new Error(`HTTP ${response.status} Cartera`);
+      //     }
 
-          const cartera = await response.json();
-          const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
+      //     const cartera = await response.json();
+      //     const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
+      //     let registrosGuardados = 0;
+      //     let registrosActualizados = 0;
 
-          this.realm!.write(() => {
-            for (const item of cartera) {
-              const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
+      //     this.realm!.write(() => {
+      //       for (const item of cartera) {
+      //         const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
 
-              const carteraData: any = {
-                ...item,
-                syncedAt: new Date(),
-                syncedAr: nowMexico,
-              };
+      //         const carteraData: any = {
+      //           ...item,
+      //           syncedAt: new Date(),
+      //           syncedAr: nowMexico,
+      //         };
 
-              if (existing) {
-                this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("Cartera", carteraData);
-                registrosGuardados++;
-              }
-            }
-          });
+      //         if (existing) {
+      //           this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
+      //           registrosActualizados++;
+      //         } else {
+      //           this.realm!.create("Cartera", carteraData);
+      //           registrosGuardados++;
+      //         }
+      //       }
+      //     });
 
-          // console.log(
-          //   `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-          // );
+      //     // console.log(
+      //     //   `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+      //     // );
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
-        },
-      },
+      //     return {
+      //       tabla: tableName,
+      //       endpoint: url,
+      //       registrosLeidos,
+      //       registrosGuardados,
+      //       registrosActualizados,
+      //     };
+      //   },
+      // },
       {
         name: "VentasIncremental",
         run: async () => {
@@ -348,51 +348,93 @@ class FullSyncService {
           let registrosGuardados = 0;
           let registrosActualizados = 0;
 
+          // Encontrar el registro con el ás alto del servidor
+          let maxIdVenta = null;
+          let maxId = 0;
+          for (const venta of ventas) {
+            if (venta.id && venta.id > maxId) {
+              maxId = venta.id;
+              maxIdVenta = venta;
+            }
+          }
+
+          // Obtener el fechaLog del registro con el ID más alto
+          const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
+          console.log(ventas);
+          console.log(`[Incremental] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`);
+
           this.realm!.write(() => {
             for (const venta of ventas) {
-              // Buscar por idMovil: si existe, actualizar; si no, crear registro
-              const localVentas = this.realm!.objects("Venta").filtered("idMovil == $0", venta.idMovil);
+              const idMovil = venta.idMovil ?? null;
 
-              if (localVentas.length > 0) {
-                // Actualizar solo los campos específicos en cada registro encontrado
-                for (const localVenta of localVentas) {
-                  (localVenta as any).noVenta = venta.noVenta;
-                  (localVenta as any).folioFactura = venta.folioFactura;
-                  (localVenta as any).facturacionMovil = venta.facturacionMovil;
-                  (localVenta as any).syncedAt = nowMexico;
-                  registrosActualizados++;
-                }
+              // Primero verificar si existe por ID (primary key)
+              const existingById = this.realm!.objectForPrimaryKey("Venta", venta.id);
+
+              if (existingById) {
+                // Actualizar registro existente por ID
+                (existingById as any).noVenta = venta.noVenta;
+                (existingById as any).cantProducto = venta.cantProducto;
+                (existingById as any).precio = venta.precio;
+                (existingById as any).importe = venta.importe;
+                (existingById as any).folioFactura = venta.folioFactura;
+                (existingById as any).facturacionMovil = venta.facturacionMovil;
+                (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
+                registrosActualizados++;
               } else {
-                // Crear registro porque no existe relación por idMovil en local
-                this.realm!.create("Venta", {
-                  id: venta.id,
-                  idMovil: venta.idMovil ?? null,
-                  sucursal: venta.sucursal ?? null,
-                  noVenta: venta.noVenta ?? null,
-                  claveProd: venta.claveProd ?? null,
-                  nombreProducto: venta.nombreProducto ?? null,
-                  cantProducto: venta.cantProducto ?? null,
-                  precio: venta.precio ?? null,
-                  importe: venta.importe ?? null,
-                  cveCliente: venta.cveCliente ?? null,
-                  nombreCliente: venta.nombreCliente ?? null,
-                  fecha: venta.fecha ? new Date(venta.fecha) : null,
-                  tipoPago: venta.tipoPago ?? null,
-                  descripcionMedioPago: venta.descripcionMedioPago ?? null,
-                  vendedor: venta.vendedor ?? null,
-                  folioFactura: venta.folioFactura ?? false,
-                  facturacionMovil: venta.facturacionMovil ?? false,
-                  syncedAt: nowMexico,
-                  syncedAr: nowMexico,
-                });
-                registrosGuardados++;
+                // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
+                const localVentas =
+                  idMovil === null
+                    ? []
+                    : this.realm!.objects("Venta").filtered(
+                        "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
+                        idMovil,
+                        venta.claveProd
+                      );
+
+                if (localVentas.length > 0) {
+                  // Actualizar solo los campos específicos en cada registro encontrado
+                  for (const localVenta of localVentas) {
+                    (localVenta as any).noVenta = venta.noVenta;
+                    (localVenta as any).cantProducto = venta.cantProducto;
+                    (localVenta as any).precio = venta.precio;
+                    (localVenta as any).importe = venta.importe;
+                    (localVenta as any).folioFactura = venta.folioFactura;
+                    (localVenta as any).facturacionMovil = venta.facturacionMovil;
+                    (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
+                    registrosActualizados++;
+                  }
+                } else {
+                  // Crear registro porque no existe ni por ID ni por idMovil
+                  this.realm!.create("Venta", {
+                    id: venta.id,
+                    idMovil: venta.idMovil ?? null,
+                    sucursal: venta.sucursal ?? null,
+                    noVenta: venta.noVenta ?? null,
+                    claveProd: venta.claveProd ?? null,
+                    nombreProducto: venta.nombreProducto ?? null,
+                    cantProducto: venta.cantProducto ?? null,
+                    precio: venta.precio ?? null,
+                    importe: venta.importe ?? null,
+                    cveCliente: venta.cveCliente ?? null,
+                    nombreCliente: venta.nombreCliente ?? null,
+                    fecha: venta.fecha ? new Date(venta.fecha) : null,
+                    tipoPago: venta.tipoPago ?? null,
+                    descripcionMedioPago: venta.descripcionMedioPago ?? null,
+                    vendedor: venta.vendedor ?? null,
+                    folioFactura: venta.folioFactura ?? false,
+                    facturacionMovil: venta.facturacionMovil ?? false,
+                    syncedAt: venta.fechaLog ?? nowMexico,
+                    syncedAr: syncedArValue,
+                  });
+                  registrosGuardados++;
+                }
               }
             }
 
-            // Actualizar syncedAr en TODOS los registros locales con id > 1700000000
-            const allLocalVentas = this.realm!.objects("Venta").filtered("id > 1700000000");
+            // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
+            const allLocalVentas = this.realm!.objects("Venta");
             for (const localVenta of allLocalVentas) {
-              (localVenta as any).syncedAr = nowMexico;
+              (localVenta as any).syncedAr = syncedArValue;
             }
           });
 
@@ -1312,6 +1354,11 @@ class FullSyncService {
   getPreciosByCliente(idCliente: number): any[] {
     if (!this.isInitialized || !this.realm) return [];
     return Array.from(this.realm.objects("Precio").filtered("idCliente == $0", idCliente));
+  }
+
+  getPreciosByListaPrecio(listaPrecio: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("Precio").filtered("listaPrecio == $0", listaPrecio));
   }
 
   getSyncStatus(entity: string = "all"): any {
