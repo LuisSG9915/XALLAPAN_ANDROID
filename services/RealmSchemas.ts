@@ -20,6 +20,8 @@ export const VentaSchema = {
     vendedor: "string?",
     folioFactura: "bool?",
     facturacionMovil: "bool?",
+    latitud: "double?",
+    longitud: "double?",
     syncedAt: "date",
     syncedAr: "date?",
   },

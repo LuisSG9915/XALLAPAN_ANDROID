@@ -19,7 +19,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 6, // v6: SyncTableLogSchema + syncedAr en tablas de datos
+        schemaVersion: 7, // v7: latitud y longitud en Venta
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {
@@ -108,7 +108,7 @@ class FullSyncService {
     timeoutMs: number = 3000
   ): Promise<{ success: boolean; sent: number; timedOut?: boolean; error?: string }> {
     console.log(`[FullSync] Enviando ventas con timeout de ${timeoutMs}ms`);
-    
+
     const timeoutPromise = new Promise<{ success: boolean; sent: number; timedOut: boolean }>((resolve) => {
       setTimeout(() => {
         console.log("[FullSync] ⏱️ Timeout alcanzado, omitiendo arrastre");
@@ -116,18 +116,18 @@ class FullSyncService {
       }, timeoutMs);
     });
 
-    const sendPromise = this.sendPendingVentasToServer(sucursal, idUsuario).then(result => ({
+    const sendPromise = this.sendPendingVentasToServer(sucursal, idUsuario).then((result) => ({
       ...result,
       timedOut: false,
     }));
 
     try {
       const result = await Promise.race([sendPromise, timeoutPromise]);
-      
+
       if (result.timedOut) {
         console.log("[FullSync] Arrastre omitido por timeout, se enviará en próxima sincronización");
       }
-      
+
       return result;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
@@ -930,6 +930,8 @@ class FullSyncService {
       vendedor?: string | null;
       folioFactura?: boolean | null;
       facturacionMovil?: boolean | null;
+      latitud?: number | null;
+      longitud?: number | null;
     }[]
   ): Promise<void> {
     if (!ventas.length) return;
@@ -959,6 +961,8 @@ class FullSyncService {
           vendedor: v.vendedor ?? null,
           folioFactura: v.folioFactura ?? false,
           facturacionMovil: v.facturacionMovil ?? false,
+          latitud: v.latitud ?? null,
+          longitud: v.longitud ?? null,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -1203,7 +1207,6 @@ class FullSyncService {
     });
     console.log("[FullSync] updateInventarioAfterSaleScreen: realm.write() completed successfully");
   }
-
 
   /**
    * Actualiza el inventario sumando las cantidades recibidas en un traspaso.

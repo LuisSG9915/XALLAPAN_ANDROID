@@ -16,6 +16,8 @@ import {
   ScrollView,
   Alert,
   Dimensions,
+  ActivityIndicator,
+  BackHandler,
 } from "react-native";
 import { Icon } from "react-native-elements";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -37,14 +39,8 @@ import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "./theme/theme";
+import LocationService from "./services/LocationService";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
@@ -65,8 +61,7 @@ if (__DEV__) {
         return;
       }
 
-      const isArrayLike =
-        Array.isArray(value) || typeof (value as any).length === "number";
+      const isArrayLike = Array.isArray(value) || typeof (value as any).length === "number";
 
       const arr = isArrayLike ? Array.from(value as any).slice(0, limit) : [value];
       const plain = JSON.parse(JSON.stringify(arr));
@@ -81,9 +76,37 @@ const Stack = createNativeStackNavigator();
 
 function App() {
   const isDarkMode = useColorScheme() === "dark";
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
+  const [checkingPermissions, setCheckingPermissions] = useState(true);
 
   useEffect(() => {
-    // App initialization
+    // Solicitar permisos de ubicación al inicio
+    const requestLocationPermission = async () => {
+      setCheckingPermissions(true);
+      try {
+        const hasPermission = await LocationService.requestPermission();
+        setLocationPermissionGranted(hasPermission);
+
+        if (!hasPermission) {
+          console.log("[App] ❌ Permisos de ubicación denegados");
+        } else {
+          console.log("[App] ✅ Permisos de ubicación concedidos");
+        }
+      } catch (error) {
+        console.error("[App] Error al solicitar permisos de ubicación:", error);
+        setLocationPermissionGranted(false);
+      } finally {
+        setCheckingPermissions(false);
+      }
+    };
+
+    requestLocationPermission();
+  }, []);
+
+  useEffect(() => {
+    // App initialization - solo si hay permisos de ubicación
+    if (locationPermissionGranted !== true) return;
+
     console.log("App initialized");
 
     // Conectar automáticamente a la última impresora usada
@@ -99,9 +122,7 @@ function App() {
           console.log("[App] Usuario detectado, iniciando sincronización automática");
           await BackgroundSyncService.start();
         } else {
-          console.log(
-            "[App] No hay usuario logueado, sincronización se iniciará después del login"
-          );
+          console.log("[App] No hay usuario logueado, sincronización se iniciará después del login");
         }
       } catch (error) {
         console.error("[App] Error al verificar sesión para sincronización:", error);
@@ -109,14 +130,52 @@ function App() {
     };
 
     initBackgroundSync();
-  }, []);
+  }, [locationPermissionGranted]);
 
-  // useEffect(() => {
-  //   SignalRService.conectar();
-  //   return () => {
-  //     SignalRService.desconectar();
-  //   };
-  // }, []);
+  const handleRetryPermission = async () => {
+    setCheckingPermissions(true);
+    const hasPermission = await LocationService.requestPermission();
+    setLocationPermissionGranted(hasPermission);
+    setCheckingPermissions(false);
+  };
+
+  const handleExitApp = () => {
+    BackHandler.exitApp();
+  };
+
+  // Pantalla de carga mientras se verifican permisos
+  if (checkingPermissions) {
+    return (
+      <SafeAreaProvider>
+        <View style={styles.permissionContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.permissionTitle}>Verificando permisos...</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Pantalla de bloqueo si no hay permisos de ubicación
+  if (!locationPermissionGranted) {
+    return (
+      <SafeAreaProvider>
+        <View style={styles.permissionContainer}>
+          <Icon name="location-off" type="material" size={80} color={COLORS.error} />
+          <Text style={styles.permissionTitle}>Permiso de Ubicación Requerido</Text>
+          <Text style={styles.permissionDescription}>
+            Esta aplicación requiere acceso a la ubicación para registrar las ventas correctamente. Sin este permiso, la
+            aplicación no puede operar.
+          </Text>
+          <TouchableOpacity style={styles.permissionButton} onPress={handleRetryPermission}>
+            <Text style={styles.permissionButtonText}>Otorgar Permiso</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.exitButton} onPress={handleExitApp}>
+            <Text style={styles.exitButtonText}>Salir de la Aplicación</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
@@ -134,11 +193,7 @@ function App() {
             },
           }}
         >
-          <Stack.Screen
-            name="Login"
-            component={LoginScreen}
-            options={{ headerShown: false }}
-          />
+          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <Stack.Screen
             name="Home"
             component={AppContent}
@@ -147,26 +202,10 @@ function App() {
               headerLeft: () => null,
             }}
           />
-          <Stack.Screen
-            name="Sales"
-            component={SalesScreen}
-            options={{ title: " Punto de Venta" }}
-          />
-          <Stack.Screen
-            name="Billing"
-            component={BillingScreen}
-            options={{ title: " Cobranza" }}
-          />
-          <Stack.Screen
-            name="Precorte"
-            component={PrecorteScreen}
-            options={{ title: " Inventario" }}
-          />
-          <Stack.Screen
-            name="Traspaso"
-            component={TraspasoRecepcionScreen}
-            options={{ title: " Cargas" }}
-          />
+          <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
+          <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
+          <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Inventario" }} />
+          <Stack.Screen name="Traspaso" component={TraspasoRecepcionScreen} options={{ title: " Cargas" }} />
           <Stack.Screen
             name="ReporteVentas"
             component={ReporteVentasScreen}
@@ -177,11 +216,7 @@ function App() {
             component={ClienteGruposScreen}
             options={{ title: ' Grupos de Clientes' }}
           /> */}
-          <Stack.Screen
-            name="DataView"
-            component={DataViewScreen}
-            options={{ title: "📊 Datos Sincronizados" }}
-          />
+          <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} />
           <Stack.Screen
             name="PrinterSettings"
             component={PrinterSettingsScreen}
@@ -244,15 +279,9 @@ function AppContent({ navigation }: { navigation: any }) {
 
       // Mantener el modal visible 2 segundos después de terminar
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-      Alert.alert(
-        "✅ Sincronización Completa",
-        "Todos los datos han sido actualizados correctamente."
-      );
+      Alert.alert("✅ Sincronización Completa", "Todos los datos han sido actualizados correctamente.");
     } catch (error: any) {
-      Alert.alert(
-        "❌ Error de Sincronización",
-        error?.message || "No se pudo completar la sincronización"
-      );
+      Alert.alert("❌ Error de Sincronización", error?.message || "No se pudo completar la sincronización");
     } finally {
       setSyncing(false);
     }
@@ -338,9 +367,7 @@ function AppContent({ navigation }: { navigation: any }) {
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View>
-              <TouchableOpacity
-                onPress={async () => console.log(await AuthService.restoreSession())}
-              >
+              <TouchableOpacity onPress={async () => console.log(await AuthService.restoreSession())}>
                 <Text style={styles.welcomeText}>
                   Bienvenido {sucursalName} {"  -   " + dsucursalName}
                 </Text>
@@ -351,11 +378,7 @@ function AppContent({ navigation }: { navigation: any }) {
                 <Text style={styles.userName}>{userName}</Text>
               </View>
             </View>
-            <TouchableOpacity
-              style={styles.logoutButton}
-              onPress={handleLogout}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
               <Icon name="logout" type="material" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -387,16 +410,8 @@ function AppContent({ navigation }: { navigation: any }) {
             disabled={syncing}
             activeOpacity={0.85}
           >
-            <Icon
-              name="sync"
-              type="material"
-              size={24}
-              color="#fff"
-              style={syncing ? styles.spinning : {}}
-            />
-            <Text style={styles.syncButtonText}>
-              {syncing ? "Sincronizando..." : "Sincronizar Datos"}
-            </Text>
+            <Icon name="sync" type="material" size={24} color="#fff" style={syncing ? styles.spinning : {}} />
+            <Text style={styles.syncButtonText}>{syncing ? "Sincronizando..." : "Sincronizar Datos"}</Text>
           </TouchableOpacity>
         </View>
 
@@ -542,6 +557,49 @@ const styles = StyleSheet.create({
   footerText: {
     color: COLORS.muted,
     fontSize: 12,
+  },
+  permissionContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: SPACING.xl,
+  },
+  permissionTitle: {
+    ...TYPOGRAPHY.h2,
+    color: COLORS.text,
+    marginTop: SPACING.l,
+    marginBottom: SPACING.m,
+    textAlign: "center",
+  },
+  permissionDescription: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.muted,
+    textAlign: "center",
+    marginBottom: SPACING.xl,
+    lineHeight: 22,
+  },
+  permissionButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.xl,
+    borderRadius: BORDER_RADIUS.l,
+    marginBottom: SPACING.m,
+    ...SHADOWS.medium,
+  },
+  permissionButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  exitButton: {
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.xl,
+  },
+  exitButtonText: {
+    color: COLORS.error,
+    fontWeight: "bold",
+    fontSize: 14,
   },
 });
 
