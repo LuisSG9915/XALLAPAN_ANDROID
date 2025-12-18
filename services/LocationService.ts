@@ -1,5 +1,7 @@
-import { Platform, PermissionsAndroid, Alert } from "react-native";
+import { Platform, PermissionsAndroid, Alert, Linking } from "react-native";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
+
+export type PermissionStatus = "granted" | "denied" | "blocked";
 
 export type LocationCoordinates = {
   latitude: number;
@@ -11,44 +13,79 @@ class LocationService {
 
   /**
    * Solicita permisos de ubicación al usuario.
-   * Retorna true si los permisos fueron concedidos, false en caso contrario.
+   * Retorna el estado del permiso: 'granted', 'denied', o 'blocked'
    */
-  async requestPermission(): Promise<boolean> {
+  async requestPermission(): Promise<PermissionStatus> {
     if (Platform.OS === "ios") {
       const auth = await Geolocation.requestAuthorization("whenInUse");
       if (auth === "granted" || auth === "restricted") {
         this.hasPermission = true;
-        return true;
+        return "granted";
       }
       this.hasPermission = false;
-      return false;
+      return auth === "denied" ? "blocked" : "denied";
     }
 
     if (Platform.OS === "android") {
       try {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, {
-          title: "Permiso de Ubicación Requerido",
-          message: "Esta aplicación necesita acceso a tu ubicación para registrar las ventas correctamente.",
-          buttonNeutral: "Preguntar después",
-          buttonNegative: "Cancelar",
-          buttonPositive: "Aceptar",
-        });
+        // Primero verificar si ya está denegado permanentemente
+        const alreadyGranted = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+        
+        if (alreadyGranted) {
+          this.hasPermission = true;
+          return "granted";
+        }
+
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Permiso de Ubicación Obligatorio",
+            message:
+              "Esta aplicación REQUIERE acceso a tu ubicación para funcionar. Sin este permiso no podrás usar la aplicación.",
+            buttonNegative: "Denegar",
+            buttonPositive: "Permitir",
+          }
+        );
+
+        console.log("[LocationService] Resultado del permiso:", granted);
 
         if (granted === PermissionsAndroid.RESULTS.GRANTED) {
           this.hasPermission = true;
-          return true;
+          return "granted";
+        }
+
+        if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          this.hasPermission = false;
+          return "blocked";
         }
 
         this.hasPermission = false;
-        return false;
+        return "denied";
       } catch (err) {
         console.error("[LocationService] Error al solicitar permisos:", err);
         this.hasPermission = false;
-        return false;
+        return "denied";
       }
     }
 
-    return false;
+    return "denied";
+  }
+
+  /**
+   * Abre la configuración de la aplicación para que el usuario pueda habilitar permisos manualmente
+   */
+  async openSettings(): Promise<void> {
+    try {
+      if (Platform.OS === "android") {
+        await Linking.openSettings();
+      } else if (Platform.OS === "ios") {
+        await Linking.openURL("app-settings:");
+      }
+    } catch (error) {
+      console.error("[LocationService] No se pudo abrir configuración:", error);
+    }
   }
 
   /**

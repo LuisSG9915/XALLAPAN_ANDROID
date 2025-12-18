@@ -1,5 +1,14 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert, ScrollView } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  TextInput,
+  Alert,
+  ScrollView,
+} from "react-native";
 import { Icon } from "react-native-elements";
 import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
@@ -69,14 +78,18 @@ export default function PrecorteScreen() {
         if (!fa) return false;
         const d = fa instanceof Date ? fa : new Date(fa);
         const inDateRange = d >= startOfDay && d <= endOfDay;
-        const inSucursal = sucursalUsuario === undefined || inv.sucursal === sucursalUsuario;
-        return inDateRange && inSucursal && inv.saldo > 0;
+        const inSucursal =
+          sucursalUsuario === undefined || inv.sucursal === sucursalUsuario;
+        return inDateRange && inSucursal && inv.saldo >= 0;
       });
 
       // Mapa de productos por claveProd para saber si es kit
       const productosPorClave = new Map<number, any>();
       productos.forEach((p: any) => {
-        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+        const clave =
+          p.claveProd !== undefined && p.claveProd !== null
+            ? parseInt(p.claveProd, 10)
+            : NaN;
         if (!Number.isNaN(clave)) {
           productosPorClave.set(clave, p);
         }
@@ -135,7 +148,8 @@ export default function PrecorteScreen() {
         return {
           id: inv.id ?? index,
           clave_prod: String(inv.claveProd ?? ""),
-          descripcion: (inv.descripcion as string | undefined) ?? String(inv.claveProd ?? ""),
+          descripcion:
+            (inv.descripcion as string | undefined) ?? String(inv.claveProd ?? ""),
           entradas: 0,
           salidas: 0,
           ifValue: inv.saldo ?? 0,
@@ -171,7 +185,10 @@ export default function PrecorteScreen() {
       setItems(sortedMapped);
 
       // Calcular total efectivo desde ventas (tipoPago 1) para la fecha seleccionada y sucursal actual
-      const totalEf = FullSyncService.getVentasTotalEfectivoForDate(startOfDay, sucursalUsuario ?? undefined);
+      const totalEf = FullSyncService.getVentasTotalEfectivoForDate(
+        startOfDay,
+        sucursalUsuario ?? undefined
+      );
       setTotalEfectivo(totalEf);
     } catch (error) {
       console.error("Error al cargar inventario para precorte:", error);
@@ -221,7 +238,13 @@ export default function PrecorteScreen() {
         <Text style={styles.title}>Inventario</Text>
         {printerConnected && (
           <View style={styles.printerBadge}>
-            <Icon name="print" type="material" size={14} color="#fff" style={{ marginRight: 4 }} />
+            <Icon
+              name="print"
+              type="material"
+              size={14}
+              color="#fff"
+              style={{ marginRight: 4 }}
+            />
             <Text style={styles.printerBadgeText}>{printerName || "Conectada"}</Text>
           </View>
         )}
@@ -231,7 +254,8 @@ export default function PrecorteScreen() {
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay impresora configurada. Ve a Configuración de Impresora para conectar una.
+            No hay impresora configurada. Ve a Configuración de Impresora para conectar
+            una.
           </Text>
         </View>
       )}
@@ -280,7 +304,9 @@ export default function PrecorteScreen() {
                     {item.descripcion}
                     {item.esKit ? " 📦" : ""}
                   </Text>
-                  <Text style={[styles.tdRight, item.ifValue < 0 && styles.negative]}>{item.ifValue.toFixed(2)}</Text>
+                  <Text style={[styles.tdRight, item.ifValue < 0 && styles.negative]}>
+                    {item.ifValue.toFixed(2)}
+                  </Text>
                 </View>
               )}
             />
@@ -293,7 +319,13 @@ export default function PrecorteScreen() {
         </View>
 
         <TouchableOpacity style={styles.primaryBtn} onPress={imprimir}>
-          <Icon name="print" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
+          <Icon
+            name="print"
+            type="material"
+            color="#fff"
+            size={20}
+            style={{ marginRight: 8 }}
+          />
           <Text style={styles.primaryBtnText}>Imprimir Reporte</Text>
         </TouchableOpacity>
       </View>
