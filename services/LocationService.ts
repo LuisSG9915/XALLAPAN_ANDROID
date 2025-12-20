@@ -29,25 +29,30 @@ class LocationService {
     if (Platform.OS === "android") {
       try {
         // Primero verificar si ya está denegado permanentemente
-        const alreadyGranted = await PermissionsAndroid.check(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-        );
-        
+        const alreadyGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+
         if (alreadyGranted) {
           this.hasPermission = true;
+          console.log("[LocationService] Permiso ya otorgado");
           return "granted";
         }
 
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: "Permiso de Ubicación Obligatorio",
-            message:
-              "Esta aplicación REQUIERE acceso a tu ubicación para funcionar. Sin este permiso no podrás usar la aplicación.",
-            buttonNegative: "Denegar",
-            buttonPositive: "Permitir",
-          }
+        console.log("[LocationService] Solicitando permiso de ubicación...");
+
+        // Usar Promise.race para agregar timeout de 10 segundos
+        const requestPromise = PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, {
+          title: "Permiso de Ubicación Obligatorio",
+          message:
+            "Esta aplicación REQUIERE acceso a tu ubicación para funcionar. Sin este permiso no podrás usar la aplicación.",
+          buttonNegative: "Denegar",
+          buttonPositive: "Permitir",
+        });
+
+        const timeoutPromise = new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout al solicitar permisos")), 10000)
         );
+
+        const granted = (await Promise.race([requestPromise, timeoutPromise])) as string;
 
         console.log("[LocationService] Resultado del permiso:", granted);
 
@@ -58,14 +63,19 @@ class LocationService {
 
         if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
           this.hasPermission = false;
+          console.log("[LocationService] Permiso bloqueado permanentemente");
           return "blocked";
         }
 
         this.hasPermission = false;
+        console.log("[LocationService] Permiso denegado");
         return "denied";
       } catch (err) {
         console.error("[LocationService] Error al solicitar permisos:", err);
+        console.error("[LocationService] Stack trace:", err instanceof Error ? err.stack : "No stack available");
         this.hasPermission = false;
+
+        // Si es timeout o error, asumir que está bloqueado si no se puede verificar
         return "denied";
       }
     }
@@ -90,6 +100,7 @@ class LocationService {
 
   /**
    * Verifica si ya se tienen los permisos de ubicación.
+   * IMPORTANTE: Este método solo VERIFICA, no solicita permisos.
    */
   async checkPermission(): Promise<boolean> {
     if (Platform.OS === "ios") {
@@ -99,9 +110,15 @@ class LocationService {
     }
 
     if (Platform.OS === "android") {
-      const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
-      this.hasPermission = granted;
-      return granted;
+      try {
+        const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        this.hasPermission = granted;
+        console.log(`[LocationService] Check permission result: ${granted}`);
+        return granted;
+      } catch (error) {
+        console.error("[LocationService] Error checking permission:", error);
+        return false;
+      }
     }
 
     return false;

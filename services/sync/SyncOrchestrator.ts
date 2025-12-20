@@ -1,13 +1,14 @@
-import Realm from 'realm';
-import { SyncTask, SyncTaskResult, SyncProgress } from './SyncTask';
-import { UsuariosSyncTask } from './tasks/UsuariosSyncTask';
-import { ProductosSyncTask } from './tasks/ProductosSyncTask';
-import { PreciosSyncTask } from './tasks/PreciosSyncTask';
-import { ClientesSyncTask } from './tasks/ClientesSyncTask';
-import { InventarioSyncTask } from './tasks/InventarioSyncTask';
-import { CarteraSyncTask } from './tasks/CarteraSyncTask';
-import { VentasSyncTask } from './tasks/VentasSyncTask';
-import { KitsSyncTask } from './tasks/KitsSyncTask';
+import Realm from "realm";
+import { SyncTask, SyncTaskResult, SyncProgress } from "./SyncTask";
+import { UsuariosSyncTask } from "./tasks/UsuariosSyncTask";
+import { ProductosSyncTask } from "./tasks/ProductosSyncTask";
+import { PreciosSyncTask } from "./tasks/PreciosSyncTask";
+import { PreciosPromoSyncTask } from "./tasks/PreciosPromoSyncTask";
+import { ClientesSyncTask } from "./tasks/ClientesSyncTask";
+import { InventarioSyncTask } from "./tasks/InventarioSyncTask";
+import { CarteraSyncTask } from "./tasks/CarteraSyncTask";
+import { VentasSyncTask } from "./tasks/VentasSyncTask";
+import { KitsSyncTask } from "./tasks/KitsSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -19,12 +20,7 @@ export class SyncOrchestrator {
   private sucursal: number;
   private onProgress?: (progress: SyncProgress) => void;
 
-  constructor(
-    realm: Realm,
-    syncLogId: string,
-    sucursal: number,
-    onProgress?: (progress: SyncProgress) => void,
-  ) {
+  constructor(realm: Realm, syncLogId: string, sucursal: number, onProgress?: (progress: SyncProgress) => void) {
     this.realm = realm;
     this.syncLogId = syncLogId;
     this.sucursal = sucursal;
@@ -39,6 +35,7 @@ export class SyncOrchestrator {
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),
       new KitsSyncTask(this.realm, this.syncLogId),
+      new PreciosPromoSyncTask(this.realm, this.syncLogId),
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId),
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
@@ -63,7 +60,7 @@ export class SyncOrchestrator {
     // Función recursiva para agregar tareas
     const addTask = (task: SyncTask): void => {
       const tableName = task.getTableName();
-      
+
       if (completed.has(tableName)) {
         return;
       }
@@ -106,7 +103,10 @@ export class SyncOrchestrator {
     const errors: string[] = [];
 
     console.log(`[SyncOrchestrator] Iniciando sincronización de ${sortedTasks.length} tareas`);
-    console.log(`[SyncOrchestrator] Orden de ejecución:`, sortedTasks.map(t => t.getTableName()));
+    console.log(
+      `[SyncOrchestrator] Orden de ejecución:`,
+      sortedTasks.map((t) => t.getTableName())
+    );
 
     let current = 0;
     const total = sortedTasks.length;
@@ -120,19 +120,19 @@ export class SyncOrchestrator {
           current,
           total,
           entity: task.getTableName(),
-          status: 'syncing',
+          status: "syncing",
           message: `Sincronizando ${task.getTableName()}...`,
         });
       }
 
       try {
         console.log(`[SyncOrchestrator] Ejecutando tarea: ${task.getTableName()}`);
-        
+
         const result = await task.executeWithLogging();
         results.set(task.getTableName(), result);
 
         if (!result.success) {
-          errors.push(`${task.getTableName()}: ${result.error || 'Error desconocido'}`);
+          errors.push(`${task.getTableName()}: ${result.error || "Error desconocido"}`);
           console.error(`[SyncOrchestrator] Error en ${task.getTableName()}:`, result.error);
         } else {
           console.log(`[SyncOrchestrator] Tarea ${task.getTableName()} completada exitosamente`);
@@ -144,21 +144,21 @@ export class SyncOrchestrator {
             current,
             total,
             entity: task.getTableName(),
-            status: result.success ? 'success' : 'error',
-            message: result.success 
-              ? `${task.getTableName()} sincronizado` 
-              : `Error en ${task.getTableName()}: ${result.error || 'Error desconocido'}`,
+            status: result.success ? "success" : "error",
+            message: result.success
+              ? `${task.getTableName()} sincronizado`
+              : `Error en ${task.getTableName()}: ${result.error || "Error desconocido"}`,
           });
         }
       } catch (error) {
         const errorResult: SyncTaskResult = {
           success: false,
-          error: error instanceof Error ? error.message : 'Error desconocido',
+          error: error instanceof Error ? error.message : "Error desconocido",
         };
-        
+
         results.set(task.getTableName(), errorResult);
         errors.push(`${task.getTableName()}: ${errorResult.error}`);
-        
+
         console.error(`[SyncOrchestrator] Error crítico en ${task.getTableName()}:`, error);
 
         // Notificar error
@@ -167,20 +167,20 @@ export class SyncOrchestrator {
             current,
             total,
             entity: task.getTableName(),
-            status: 'error',
+            status: "error",
             message: `Error crítico en ${task.getTableName()}: ${errorResult.error}`,
           });
         }
       }
 
       // Pequeña pausa entre tareas para no sobrecargar la API
-      await new Promise<void>(resolve => setTimeout(() => resolve(), 100));
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 100));
     }
 
     const success = errors.length === 0;
-    
+
     console.log(`[SyncOrchestrator] Sincronización completada. Éxito: ${success}, Errores: ${errors.length}`);
-    
+
     if (errors.length > 0) {
       console.log(`[SyncOrchestrator] Resumen de errores:`, errors);
     }
@@ -197,22 +197,22 @@ export class SyncOrchestrator {
    */
   async executeTask(tableName: string): Promise<SyncTaskResult | null> {
     const tasks = this.createAllTasks();
-    const task = tasks.find(t => t.getTableName() === tableName);
-    
+    const task = tasks.find((t) => t.getTableName() === tableName);
+
     if (!task) {
       console.error(`[SyncOrchestrator] Tarea no encontrada: ${tableName}`);
       return null;
     }
 
     console.log(`[SyncOrchestrator] Ejecutando tarea individual: ${tableName}`);
-    
+
     // Notificar progreso
     if (this.onProgress) {
       this.onProgress({
         current: 1,
         total: 1,
         entity: tableName,
-        status: 'syncing',
+        status: "syncing",
         message: `Sincronizando ${tableName}...`,
       });
     }
@@ -225,10 +225,10 @@ export class SyncOrchestrator {
         current: 1,
         total: 1,
         entity: tableName,
-        status: result.success ? 'success' : 'error',
-        message: result.success 
-          ? `${tableName} sincronizado` 
-          : `Error en ${tableName}: ${result.error || 'Error desconocido'}`,
+        status: result.success ? "success" : "error",
+        message: result.success
+          ? `${tableName} sincronizado`
+          : `Error en ${tableName}: ${result.error || "Error desconocido"}`,
       });
     }
 

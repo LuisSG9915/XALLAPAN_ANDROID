@@ -2,6 +2,7 @@ import Realm, { UpdateMode } from "realm";
 import { ALL_SCHEMAS, SyncLogSchema } from "./RealmSchemas";
 import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
+import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 
 export type SyncProgressCallback = (progress: SyncProgress) => void;
 
@@ -322,6 +323,63 @@ class FullSyncService {
 
           console.log(
             `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "PreciosPromoIncremental",
+        run: async () => {
+          const tableName = "PrecioPromo";
+          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
+            fechaInicial
+          )}`;
+
+          console.log("[Incremental] PreciosPromo desde", fechaInicial, url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/octet-stream" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} PreciosPromo`);
+          }
+
+          const precios = await response.json();
+          const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const precio of precios) {
+              const existing = this.realm!.objectForPrimaryKey("PrecioPromo", precio.id) as any;
+
+              const precioData: any = {
+                ...precio,
+                syncedAt: new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("PrecioPromo", precioData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("PrecioPromo", precioData);
+                registrosGuardados++;
+              }
+            }
+          });
+
+          console.log(
+            `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
           );
 
           return {
@@ -1544,6 +1602,31 @@ class FullSyncService {
     return Array.from(this.realm.objects("Precio").filtered("listaPrecio == $0", listaPrecio));
   }
 
+  getPreciosPromo(limit: number = 100): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("PrecioPromo").sorted("descripcion").slice(0, limit));
+  }
+
+  getPreciosPromoPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(
+      this.realm
+        .objects("PrecioPromo")
+        .sorted("descripcion")
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getPreciosPromoByCliente(idCliente: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("PrecioPromo").filtered("idCliente == $0", idCliente));
+  }
+
+  getPreciosPromoByProducto(claveProd: number): any[] {
+    if (!this.isInitialized || !this.realm) return [];
+    return Array.from(this.realm.objects("PrecioPromo").filtered("claveProd == $0", claveProd));
+  }
+
   getSyncStatus(entity: string = "all"): any {
     if (!this.isInitialized || !this.realm) return null;
     return this.realm.objectForPrimaryKey("SyncStatus", entity);
@@ -1595,7 +1678,7 @@ class FullSyncService {
         console.log("[FullSyncService] No pending ventas to send");
         return { success: true, sent: 0 };
       }
-
+      
       const payload = ventasLocales.map((venta: any) => {
         const cliente = venta.cveCliente ? this.getClienteFullById(venta.cveCliente) : null;
 
@@ -1608,14 +1691,12 @@ class FullSyncService {
           fecha: (venta.fecha ?? new Date()).toISOString(),
           tipo_pago: venta.tipoPago ?? 1,
           usuario: idUsuario,
-          longitud: cliente?.longitud ?? 0,
-          latitud: cliente?.latitud ?? 0,
+          longitud: venta?.longitud ?? 0,
+          latitud: venta?.latitud ?? 0,
           id_movil: venta.idMovil,
           fechaTransfer: new Date().toISOString(),
         };
       });
-
-      console.log("[FullSyncService] 📦 Payload ventas:", payload.length, "registros");
 
       // Usar el mismo endpoint que el sincronizador periódico (que funciona correctamente)
       const url = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
@@ -1628,7 +1709,7 @@ class FullSyncService {
         },
         body: JSON.stringify(payload),
       });
-
+      console.log({ payload });
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         console.error("[FullSyncService] ❌ Error arrastre ventas", response.status, errorText);

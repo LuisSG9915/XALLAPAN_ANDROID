@@ -88,6 +88,22 @@ export const PrecioSchema = {
   primaryKey: "id",
 };
 
+export const PrecioPromoSchema = {
+  name: "PrecioPromo",
+  properties: {
+    id: "string",
+    descripcion: "string?",
+    idCliente: "int?",
+    claveProd: "int?",
+    precio: "float?",
+    listaPrecio: "int?",
+    fechaAct: "date?",
+    syncedAt: "date",
+    syncedAr: "date?",
+  },
+  primaryKey: "id",
+};
+
 export const InventarioSchema = {
   name: "Inventario",
   properties: {
@@ -204,6 +220,7 @@ export const ALL_SCHEMAS = [
   ProductoSchema,
   KitSchema,
   PrecioSchema,
+  PrecioPromoSchema,
   InventarioSchema,
   CarteraSchema,
   ClienteFullSchema,
