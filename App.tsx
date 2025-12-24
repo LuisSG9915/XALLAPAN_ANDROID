@@ -42,6 +42,7 @@ import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
+import CierreRutaService from "./services/CierreRutaService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
@@ -328,19 +329,102 @@ function AppContent({ navigation }: { navigation: any }) {
   const [dsucursalName, dsetSucursalName] = useState("");
   const [syncProgress, setSyncProgress] = useState<SyncProgress[]>([]);
   const [userName, setUserName] = useState<string>("");
+  const [hasPendingTraspasos, setHasPendingTraspasos] = useState(false);
+  const [rutaCerrada, setRutaCerrada] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const pollingIntervalRef = useRef<any>(null);
+  const [pressingCierre, setPressingCierre] = useState(false);
+  const [pressProgress, setPressProgress] = useState(0);
+  const pressTimerRef = useRef<any>(null);
+  const pressStartTimeRef = useRef<number>(0);
 
   useEffect(() => {
     const loadUserInfo = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
         console.log(user);
+        setCurrentUser(user);
         setUserName(user.claveEmpleado + " - " + user.nombre || "Usuario");
-        setSucursalName(user.sucursal_origen || user.sucursal || "Sucursal");
+        setSucursalName(String(user.sucursal_origen || user.sucursal || "Sucursal"));
         dsetSucursalName(user.dSucursal || "Sucursal");
+
+        const sucursal = user.sucursal_origen || user.sucursal || 1;
+        const vendedor = user.id || 0;
+        const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+        setRutaCerrada(rutaStatus);
+
+        checkPendingTraspasos(user);
       }
     };
     loadUserInfo();
   }, []);
+
+  const checkPendingTraspasos = useCallback(
+    async (user?: any) => {
+      try {
+        const currentUserData = user || currentUser;
+        if (!currentUserData) return;
+
+        const sucursal = currentUserData.sucursal_origen || currentUserData.sucursal || 1;
+        const vendedorId = currentUserData.id || 0;
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, "0");
+        const dd = String(today.getDate()).padStart(2, "0");
+        const fechaHoy = `${yyyy}-${mm}-${dd}`;
+
+        const url = `https://cbinfo.no-ip.info:9031/api/DetalleTraspasos/sp_traspasoBusquedaRecepcion?sucursal=${sucursal}&vendedor=${vendedorId}&fecha1=${encodeURIComponent(
+          fechaHoy
+        )}&fecha2=${encodeURIComponent(fechaHoy)}`;
+
+        const response = await fetch(url, { timeout: 1000 } as any);
+        if (response.ok) {
+          const data = await response.json();
+
+          // Filtramos para obtener solo los que NO (!==) sean "Finalizado"
+          const pending = Array.isArray(data) ? data.filter((item) => item.estatus !== "Finalizado") : [];
+          console.log({ pending });
+          setHasPendingTraspasos(pending.length > 0);
+        }
+      } catch (error) {
+        console.error("Error al verificar traspasos pendientes:", error);
+      }
+    },
+    [currentUser]
+  );
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    console.log("[Home] Iniciando polling de traspasos pendientes cada 10 segundos");
+    checkPendingTraspasos();
+
+    pollingIntervalRef.current = setInterval(() => {
+      console.log("[Home] Ejecutando checkPendingTraspasos...");
+      checkPendingTraspasos();
+    }, 10000);
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        console.log("[Home] Limpiando intervalo de polling");
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [currentUser, checkPendingTraspasos]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", async () => {
+      if (currentUser) {
+        const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
+        const vendedor = currentUser.id || 0;
+        const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+        setRutaCerrada(rutaStatus);
+        console.log("[Home] Ruta status actualizado:", rutaStatus);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, currentUser]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Cerrar Sesión", "¿Estás seguro de que deseas cerrar sesión?", [
@@ -370,7 +454,6 @@ function AppContent({ navigation }: { navigation: any }) {
         setSyncProgress((prev) => [...prev, progress]);
       });
 
-      // Mantener el modal visible 2 segundos después de terminar
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
       Alert.alert("✅ Sincronización Completa", "Todos los datos han sido actualizados correctamente.");
     } catch (error: any) {
@@ -379,6 +462,97 @@ function AppContent({ navigation }: { navigation: any }) {
       setSyncing(false);
     }
   }, [syncing]);
+
+  const handlePressInCierre = useCallback(() => {
+    if (!currentUser || rutaCerrada) return;
+
+    setPressingCierre(true);
+    setPressProgress(0);
+    pressStartTimeRef.current = Date.now();
+
+    const updateProgress = () => {
+      const elapsed = Date.now() - pressStartTimeRef.current;
+      const progress = Math.min(elapsed / 5000, 1);
+      setPressProgress(progress);
+
+      if (progress >= 1) {
+        handleCierreRutaComplete();
+      } else {
+        pressTimerRef.current = requestAnimationFrame(updateProgress);
+      }
+    };
+
+    pressTimerRef.current = requestAnimationFrame(updateProgress);
+  }, [currentUser, rutaCerrada]);
+
+  const handlePressOutCierre = useCallback(() => {
+    if (pressTimerRef.current) {
+      cancelAnimationFrame(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    setPressingCierre(false);
+    setPressProgress(0);
+  }, []);
+
+  const handleCierreRutaComplete = useCallback(async () => {
+    if (pressTimerRef.current) {
+      cancelAnimationFrame(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    setPressingCierre(false);
+    setPressProgress(0);
+
+    if (!currentUser) return;
+
+    const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
+    const vendedor = currentUser.id || 0;
+
+    Alert.alert(
+      "Cerrar Ruta",
+      "¿Confirma que desea cerrar la ruta? El punto de venta será bloqueado hasta recibir un traspaso.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sí, cerrar",
+          style: "destructive",
+          onPress: async () => {
+            await CierreRutaService.setRutaCerrada(sucursal, vendedor, true);
+            setRutaCerrada(true);
+            Alert.alert(
+              "Ruta Cerrada",
+              "El punto de venta ha sido bloqueado. Solo se desbloqueará al recibir un traspaso."
+            );
+          },
+        },
+      ]
+    );
+  }, [currentUser]);
+
+  const handleTapRutaCerrada = useCallback(() => {
+    Alert.alert(
+      "Ruta Cerrada",
+      "La ruta está cerrada. Solo se puede abrir automáticamente al recibir un traspaso exitosamente. No es posible abrirla manualmente.",
+      [{ text: "Entendido" }]
+    );
+  }, []);
+
+  const handleNavigateToSales = useCallback(async () => {
+    if (!currentUser) return;
+
+    const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
+    const vendedor = currentUser.id || 0;
+    const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+
+    if (rutaStatus) {
+      Alert.alert(
+        "Ruta Cerrada",
+        "No puede acceder al punto de venta porque la ruta está cerrada. Debe recibir un traspaso primero."
+      );
+      return;
+    }
+
+    navigation.navigate("Sales");
+  }, [currentUser, navigation]);
 
   const menuItems = [
     {
@@ -389,6 +563,7 @@ function AppContent({ navigation }: { navigation: any }) {
       color: COLORS.cards.sales,
       screen: "Sales",
       description: "Registra ventas",
+      customHandler: handleNavigateToSales,
     },
     {
       id: "traspaso",
@@ -460,11 +635,10 @@ function AppContent({ navigation }: { navigation: any }) {
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View>
-              <TouchableOpacity onPress={async () => console.log(await AuthService.restoreSession())}>
-                <Text style={styles.welcomeText}>
-                  Bienvenido {sucursalName} {"  -   " + dsucursalName}
-                </Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={styles.welcomeText}>Bienvenido {sucursalName}</Text>
+                {hasPendingTraspasos && <View style={styles.redIndicator} />}
+              </View>
               <Text style={styles.businessName}>{APP_NAME}</Text>
               <View style={styles.userBadge}>
                 <Icon name="person" type="material" size={14} color={COLORS.primary} />
@@ -479,20 +653,35 @@ function AppContent({ navigation }: { navigation: any }) {
 
         {/* Menu Grid */}
         <View style={styles.menuGrid}>
-          {menuItems.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.menuCard, { backgroundColor: item.color }]}
-              onPress={() => navigation.navigate(item.screen)}
-              activeOpacity={0.9}
-            >
-              <View style={styles.iconContainer}>
-                <Icon name={item.icon} type={item.type} color={item.color} size={28} />
-              </View>
-              <Text style={styles.menuTitle}>{item.title}</Text>
-              <Text style={styles.menuDescription}>{item.description}</Text>
-            </TouchableOpacity>
-          ))}
+          {menuItems.map((item) => {
+            const isSalesDisabled = item.id === "sales" && rutaCerrada;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.menuCard, { backgroundColor: item.color }, isSalesDisabled && styles.menuCardDisabled]}
+                onPress={() => {
+                  if (item.customHandler) {
+                    item.customHandler();
+                  } else {
+                    navigation.navigate(item.screen);
+                  }
+                }}
+                activeOpacity={0.9}
+                disabled={isSalesDisabled}
+              >
+                <View style={styles.iconContainer}>
+                  <Icon name={item.icon} type={item.type} color={item.color} size={28} />
+                </View>
+                <Text style={styles.menuTitle}>{item.title}</Text>
+                <Text style={styles.menuDescription}>{item.description}</Text>
+                {isSalesDisabled && (
+                  <View style={styles.disabledOverlay}>
+                    <Icon name="lock" type="material" size={40} color="rgba(255,255,255,0.9)" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Sync Button */}
@@ -505,6 +694,40 @@ function AppContent({ navigation }: { navigation: any }) {
           >
             <Icon name="sync" type="material" size={24} color="#fff" style={syncing ? styles.spinning : {}} />
             <Text style={styles.syncButtonText}>{syncing ? "Sincronizando..." : "Sincronizar Datos"}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.cierreRutaButton,
+              rutaCerrada && styles.cierreRutaButtonClosed,
+              pressingCierre && styles.cierreRutaButtonPressing,
+            ]}
+            onPressIn={rutaCerrada ? undefined : handlePressInCierre}
+            onPressOut={rutaCerrada ? undefined : handlePressOutCierre}
+            onPress={rutaCerrada ? handleTapRutaCerrada : undefined}
+            activeOpacity={0.85}
+            disabled={pressingCierre}
+          >
+            {pressingCierre ? (
+              <View style={styles.pressProgressContainer}>
+                <View style={[styles.pressProgressBar, { width: `${pressProgress * 100}%` }]} />
+                <View style={styles.pressProgressContent}>
+                  <Icon name="lock" type="material" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.syncButtonText}>Mantenga presionado ({Math.ceil((1 - pressProgress) * 5)}s)</Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <Icon
+                  name={rutaCerrada ? "lock" : "lock-open"}
+                  type="material"
+                  size={20}
+                  color="#fff"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.syncButtonText}>{rutaCerrada ? "Ruta Cerrada" : "Mantener 5s para Cerrar"}</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -660,7 +883,7 @@ const styles = StyleSheet.create({
   },
   permissionTitle: {
     ...TYPOGRAPHY.h2,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
     marginTop: SPACING.l,
     marginBottom: SPACING.m,
     textAlign: "center",
@@ -696,6 +919,66 @@ const styles = StyleSheet.create({
     color: COLORS.error,
     fontWeight: "bold",
     fontSize: 14,
+  },
+  redIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.error,
+    marginTop: 2,
+  },
+  cierreRutaButton: {
+    backgroundColor: COLORS.warning,
+    borderRadius: BORDER_RADIUS.l,
+    paddingVertical: SPACING.m,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.s,
+    marginTop: SPACING.m,
+    ...SHADOWS.medium,
+  },
+  cierreRutaButtonClosed: {
+    backgroundColor: COLORS.error,
+  },
+  cierreRutaButtonPressing: {
+    backgroundColor: COLORS.primary,
+  },
+  pressProgressContainer: {
+    position: "relative",
+    width: "100%",
+    overflow: "hidden",
+    borderRadius: BORDER_RADIUS.l,
+  },
+  pressProgressBar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    borderRadius: BORDER_RADIUS.l,
+  },
+  pressProgressContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: SPACING.m,
+    gap: SPACING.s,
+    zIndex: 1,
+  },
+  menuCardDisabled: {
+    opacity: 0.5,
+  },
+  disabledOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderRadius: BORDER_RADIUS.l,
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
 

@@ -4,6 +4,7 @@ import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 
+export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
 
 class FullSyncService {
@@ -1678,7 +1679,7 @@ class FullSyncService {
         console.log("[FullSyncService] No pending ventas to send");
         return { success: true, sent: 0 };
       }
-      
+
       const payload = ventasLocales.map((venta: any) => {
         const cliente = venta.cveCliente ? this.getClienteFullById(venta.cveCliente) : null;
 

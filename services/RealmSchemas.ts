@@ -214,6 +214,19 @@ export const SyncTableLogSchema = {
   primaryKey: "id",
 };
 
+export const CierreRutaSchema = {
+  name: "CierreRuta",
+  properties: {
+    id: "string",
+    sucursal: "int?",
+    vendedor: "int?",
+    fechaCierre: "date?",
+    rutaCerrada: "bool",
+    updatedAt: "date",
+  },
+  primaryKey: "id",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -227,4 +240,5 @@ export const ALL_SCHEMAS = [
   SyncStatusSchema,
   SyncLogSchema,
   SyncTableLogSchema,
+  CierreRutaSchema,
 ];
