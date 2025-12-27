@@ -227,6 +227,33 @@ export const CierreRutaSchema = {
   primaryKey: "id",
 };
 
+export const VisitaSchema = {
+  name: "Visita",
+  properties: {
+    id: "int",
+    idCliente: "int",
+    ruta: "string",
+    l: "bool",
+    m: "bool",
+    mi: "bool",
+    j: "bool",
+    v: "bool",
+    s: "bool",
+    d: "bool",
+    ordenL: "int",
+    ordenM: "int",
+    ordenMi: "int",
+    ordenJ: "int",
+    ordenV: "int",
+    ordenS: "int",
+    ordenD: "int",
+    visitado: "bool",
+    fecha: "string?",
+    syncedAr: "string?",
+  },
+  primaryKey: "id",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -241,4 +268,5 @@ export const ALL_SCHEMAS = [
   SyncLogSchema,
   SyncTableLogSchema,
   CierreRutaSchema,
+  VisitaSchema,
 ];

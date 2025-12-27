@@ -36,6 +36,7 @@ import ClienteGruposScreen from "./components/ClienteGruposScreen";
 // import SignalRService from './services/SignalRService';
 import DataViewScreen from "./components/DataViewScreen";
 import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
+import CumplimientoScreen from "./components/CumplimientoScreen";
 import AuthService from "./services/AuthService";
 import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
@@ -315,6 +316,11 @@ function App() {
             name="PrinterSettings"
             component={PrinterSettingsScreen}
             options={{ title: "🖨️ Configuración de Impresora" }}
+          />
+          <Stack.Screen
+            name="Cumplimiento"
+            component={CumplimientoScreen}
+            options={{ title: "📅 Cumplimiento de Agenda" }}
           />
         </Stack.Navigator>
       </NavigationContainer>
@@ -619,6 +625,15 @@ function AppContent({ navigation }: { navigation: any }) {
       color: COLORS.cards.billing,
       screen: "Billing",
       description: "Gestiona pagos",
+    },
+    {
+      id: "cumplimiento",
+      title: "Agenda",
+      icon: "event",
+      type: "material",
+      color: "#8E44AD",
+      screen: "Cumplimiento",
+      description: "Cumplimiento de visitas",
     },
   ];
 

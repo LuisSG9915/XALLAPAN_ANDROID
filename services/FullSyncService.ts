@@ -21,7 +21,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 7, // v7: latitud y longitud en Venta
+        schemaVersion: 8, // v8: agregada tabla Visita para cumplimiento de agenda
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {

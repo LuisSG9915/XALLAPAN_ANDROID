@@ -9,6 +9,7 @@ import { InventarioSyncTask } from "./tasks/InventarioSyncTask";
 import { CarteraSyncTask } from "./tasks/CarteraSyncTask";
 import { VentasSyncTask } from "./tasks/VentasSyncTask";
 import { KitsSyncTask } from "./tasks/KitsSyncTask";
+import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -41,6 +42,7 @@ export class SyncOrchestrator {
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
       new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
+      new VisitaSyncTask(this.realm, this.syncLogId),
     ];
   }
 
