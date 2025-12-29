@@ -98,7 +98,7 @@ class VisitaSyncService {
     }
   }
 
-  async getVisitasDelDia(): Promise<any[]> {
+  async getVisitasDelDia(sucursal: number): Promise<any[]> {
     try {
       const realm = await this.getRealm();
       const today = new Date().getDay(); // 0 = Domingo, 1 = Lunes, etc.
@@ -118,7 +118,7 @@ class VisitaSyncService {
       let visitas = realm.objects("Visita");
 
       // Filtrar por día de la semana
-      visitas = visitas.filtered(`${dayField} == true`);
+      visitas = visitas.filtered(`${dayField} == true AND ruta == '${sucursal}'`);
 
       // Ordenar por el campo de orden correspondiente al día
       const ordenField = `orden${dayField.charAt(0).toUpperCase() + dayField.slice(1)}`;
@@ -152,13 +152,13 @@ class VisitaSyncService {
     }
   }
 
-  async getEstadisticasCumplimiento(): Promise<{
+  async getEstadisticasCumplimiento(sucursal: number): Promise<{
     totalProgramadas: number;
     totalRealizadas: number;
     porcentaje: number;
   }> {
     try {
-      const visitas = await this.getVisitasDelDia();
+      const visitas = await this.getVisitasDelDia(sucursal);
       const totalProgramadas = visitas.length;
       const totalRealizadas = visitas.filter((v) => v.visitado).length;
       const porcentaje = totalProgramadas > 0 ? (totalRealizadas / totalProgramadas) * 100 : 0;

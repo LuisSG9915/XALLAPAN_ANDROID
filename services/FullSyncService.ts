@@ -46,7 +46,7 @@ class FullSyncService {
    * Si no hay registros o todas son null, regresa null.
    */
   private getLastSyncedAr(tableName: string): Date | null {
-    if (!this.realm) return null;
+    if (!this.realm || this.realm.isClosed) return null;
 
     const collection: any = this.realm.objects(tableName);
     if (!collection || collection.length === 0) return null;
@@ -899,7 +899,7 @@ class FullSyncService {
   }
 
   private updateSyncStatus(entity: string, success: boolean): void {
-    if (!this.realm) return;
+    if (!this.realm || this.realm.isClosed) return;
 
     this.realm.write(() => {
       this.realm!.create(
@@ -940,12 +940,12 @@ class FullSyncService {
 
   // Métodos para consultar datos
   getVentas(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Venta").sorted("fecha", true).slice(0, limit));
   }
 
   getVentasPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("Venta")
@@ -955,12 +955,12 @@ class FullSyncService {
   }
 
   getSyncTableLogsCount(): number {
-    if (!this.isInitialized || !this.realm) return 0;
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return 0;
     return this.realm.objects("SyncTableLog").length;
   }
 
   getVentasBySucursal(sucursal: number, limit: number = 10000): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm.objects("Venta").filtered("sucursal == $0", sucursal).sorted("fecha", true).slice(0, limit)
     );
@@ -993,12 +993,10 @@ class FullSyncService {
       longitud?: number | null;
     }[]
   ): Promise<void> {
-    if (!ventas.length) return;
-
-    if (!this.isInitialized || !this.realm) {
+    if (!this.isInitialized) {
       await this.initialize();
     }
-    if (!this.realm) return;
+    if (!this.realm || this.realm.isClosed) return;
 
     this.realm.write(() => {
       ventas.forEach((v) => {
@@ -1030,7 +1028,7 @@ class FullSyncService {
   }
 
   getVentasByMovilId(idMovil: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Venta").filtered("idMovil == $0", idMovil));
   }
 
@@ -1064,11 +1062,11 @@ class FullSyncService {
       return;
     }
 
-    if (!this.isInitialized || !this.realm) {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       console.log("[FullSync] updateInventarioAfterSale: Initializing realm...");
       await this.initialize();
     }
-    if (!this.realm) {
+    if (!this.realm || this.realm.isClosed) {
       console.error("[FullSync] updateInventarioAfterSale: Realm not available after init!");
       return;
     }
@@ -1178,11 +1176,11 @@ class FullSyncService {
       return;
     }
 
-    if (!this.isInitialized || !this.realm) {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       console.log("[FullSync] updateInventarioAfterSaleScreen: Initializing realm...");
       await this.initialize();
     }
-    if (!this.realm) {
+    if (!this.realm || this.realm.isClosed) {
       console.error("[FullSync] updateInventarioAfterSaleScreen: Realm not available after init!");
       return;
     }
@@ -1418,12 +1416,12 @@ class FullSyncService {
   }
 
   getUsuarios(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Usuario").sorted("nombre").slice(0, limit));
   }
 
   getUsuariosPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("Usuario")
@@ -1433,12 +1431,12 @@ class FullSyncService {
   }
 
   getProductos(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Producto").sorted("descripcion").slice(0, limit));
   }
 
   getProductosPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("Producto")
@@ -1451,7 +1449,7 @@ class FullSyncService {
    * Obtiene todos los kits (relación producto-insumo)
    */
   getKits(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Kit").slice(0, limit));
   }
 
@@ -1459,7 +1457,7 @@ class FullSyncService {
    * Obtiene kits con paginación
    */
   getKitsPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Kit").slice(offset, offset + limit));
   }
 
@@ -1467,7 +1465,7 @@ class FullSyncService {
    * Obtiene los kits (insumos) de un producto específico
    */
   getKitsByProducto(idProducto: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Kit").filtered("idProducto == $0", idProducto));
   }
 
@@ -1475,7 +1473,7 @@ class FullSyncService {
    * Obtiene los productos que usan un insumo específico
    */
   getKitsByInsumo(idInsumo: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo));
   }
 
@@ -1488,7 +1486,7 @@ class FullSyncService {
   }
 
   getPrecios(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Precio").sorted("descripcion").slice(0, limit));
   }
 
@@ -1503,22 +1501,22 @@ class FullSyncService {
   }
 
   getInventario(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Inventario").slice(0, limit));
   }
 
   getInventarioPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Inventario").slice(offset, offset + limit));
   }
 
   getCartera(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Cartera").sorted("nombreCliente").slice(0, limit));
   }
 
   getCarteraPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("Cartera")
@@ -1528,7 +1526,7 @@ class FullSyncService {
   }
 
   getVentasTotalEfectivoForDate(date: Date, sucursal?: number): number {
-    if (!this.isInitialized || !this.realm) return 0;
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return 0;
 
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
@@ -1573,12 +1571,12 @@ class FullSyncService {
   //     "syncedAt": "1970-01-01T00:00:00.000Z"
   // }
   getClientesFull(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("ClienteFull").sorted("nombre").slice(0, limit));
   }
 
   getClientesFullPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("ClienteFull")
@@ -1588,28 +1586,28 @@ class FullSyncService {
   }
 
   getClienteFullById(idCliente: number): any | null {
-    if (!this.isInitialized || !this.realm) return null;
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
     const obj = this.realm.objectForPrimaryKey("ClienteFull", idCliente);
     return obj || null;
   }
 
   getPreciosByCliente(idCliente: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Precio").filtered("idCliente == $0", idCliente));
   }
 
   getPreciosByListaPrecio(listaPrecio: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Precio").filtered("listaPrecio == $0", listaPrecio));
   }
 
   getPreciosPromo(limit: number = 100): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("PrecioPromo").sorted("descripcion").slice(0, limit));
   }
 
   getPreciosPromoPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("PrecioPromo")
@@ -1619,22 +1617,22 @@ class FullSyncService {
   }
 
   getPreciosPromoByCliente(idCliente: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("PrecioPromo").filtered("idCliente == $0", idCliente));
   }
 
   getPreciosPromoByProducto(claveProd: number): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("PrecioPromo").filtered("claveProd == $0", claveProd));
   }
 
   getSyncStatus(entity: string = "all"): any {
-    if (!this.isInitialized || !this.realm) return null;
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
     return this.realm.objectForPrimaryKey("SyncStatus", entity);
   }
 
   getSyncTableLogsPaginated(offset: number = 0, limit: number = 50): any[] {
-    if (!this.isInitialized || !this.realm) return [];
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("SyncTableLog")
@@ -1655,11 +1653,11 @@ class FullSyncService {
     const LOCAL_SALE_ID_THRESHOLD = 1700000000;
 
     try {
-      if (!this.isInitialized || !this.realm) {
+      if (!this.isInitialized || !this.realm || this.realm.isClosed) {
         await this.initialize();
       }
-      if (!this.realm) {
-        return { success: false, sent: 0, error: "Realm no inicializado" };
+      if (!this.realm || this.realm.isClosed) {
+        return { success: false, sent: 0, error: "Realm no inicializado o cerrado" };
       }
 
       const ventasRealm = this.getVentas();

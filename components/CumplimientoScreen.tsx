@@ -13,6 +13,8 @@ import { Icon } from "react-native-elements";
 import VisitaSyncService from "../services/VisitaSyncService";
 import Realm from "realm";
 import { ALL_SCHEMAS } from "../services/RealmSchemas";
+import AuthService from "../services/AuthService";
+import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
 
 interface Visita {
   id: number;
@@ -47,6 +49,30 @@ interface Estadisticas {
 }
 
 export default function CumplimientoScreen() {
+  const [currentSucursal, setCurrentSucursal] = useState<number>(1);
+
+  useEffect(() => {
+    const init = async () => {
+      const user = await AuthService.restoreSession();
+      if (user) {
+        const vendedor =
+          (user.claveEmpleado as string | undefined) ||
+          (user.nombre as string | undefined) ||
+          "";
+        const sucursal =
+          (user.sucursal_origen as number | null | undefined) ??
+          (user.sucursal as number | null | undefined) ??
+          1;
+        setCurrentSucursal(sucursal);
+
+        // Cargar datos después de establecer la sucursal
+        cargarDatos(sucursal);
+      }
+    };
+
+    init();
+  }, []);
+
   const [visitas, setVisitas] = useState<VisitaConCliente[]>([]);
   const [estadisticas, setEstadisticas] = useState<Estadisticas>({
     totalProgramadas: 0,
@@ -56,60 +82,46 @@ export default function CumplimientoScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const obtenerNombreCliente = async (idCliente: number): Promise<string> => {
-    try {
-      const realm = await Realm.open({
-        path: "FullSyncDB",
-        schema: ALL_SCHEMAS,
-        schemaVersion: 8,
-      });
-
-      const cliente = realm.objectForPrimaryKey("ClienteFull", idCliente);
-
-      // Extraer el nombre antes de cerrar el realm
-      let nombreCliente = `Cliente ${idCliente}`;
-      if (cliente && (cliente as any).nombre) {
-        nombreCliente = (cliente as any).nombre;
-      }
-
-      realm.close();
-      return nombreCliente;
-    } catch (error) {
-      console.error("Error al obtener nombre de cliente:", error);
-      return `Cliente ${idCliente}`;
+  const obtenerNombreCliente = async (idCliente: number) => {
+    const cliente = FullSyncService.getClienteFullById(idCliente);
+    if (cliente) {
+      return cliente.nombre;
+    } else {
+      const clientes = FullSyncService.getClientesFull();
+      const clienteEncontrado = clientes.find((c) => c.id === idCliente);
+      return clienteEncontrado ? clienteEncontrado.nombre : "Cliente no encontrado";
     }
   };
 
-  const cargarDatos = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [visitasDelDia, stats] = await Promise.all([
-        VisitaSyncService.getInstance().getVisitasDelDia(),
-        VisitaSyncService.getInstance().getEstadisticasCumplimiento(),
-      ]);
-
-      // Obtener nombres de clientes
-      const visitasConNombres = await Promise.all(
-        visitasDelDia.map(async (visita) => ({
-          ...visita,
-          nombreCliente: await obtenerNombreCliente(visita.idCliente),
-        }))
-      );
-
-      setVisitas(visitasConNombres);
-      setEstadisticas(stats);
-    } catch (error) {
-      console.error("Error al cargar datos:", error);
-      Alert.alert("Error", "No se pudieron cargar las visitas");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const cargarDatos = useCallback((sucursal: number) => {
+    setLoading(true);
+    Promise.all([
+      VisitaSyncService.getInstance().getVisitasDelDia(sucursal),
+      VisitaSyncService.getInstance().getEstadisticasCumplimiento(sucursal),
+    ])
+      .then(([visitasDelDia, stats]) => {
+        // Obtener nombres de clientes
+        Promise.all(
+          visitasDelDia.map((visita) => {
+            return obtenerNombreCliente(visita.idCliente).then((nombreCliente) => ({
+              ...visita,
+              nombreCliente,
+            }));
+          })
+        ).then((visitasConNombres) => {
+          setVisitas(visitasConNombres);
+          setEstadisticas(stats);
+        });
+      })
+      .catch((error) => {
+        console.error("Error al cargar datos:", error);
+        Alert.alert("Error", "No se pudieron cargar las visitas");
+      })
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, []);
-
-  useEffect(() => {
-    cargarDatos();
-  }, [cargarDatos]);
 
   const handleMarcarVisitado = async (idVisita: number) => {
     const visita = visitas.find((v) => v.id === idVisita);
@@ -129,7 +141,11 @@ export default function CumplimientoScreen() {
           if (exito) {
             // Actualizar la lista localmente
             setVisitas((prev) =>
-              prev.map((v) => (v.id === idVisita ? { ...v, visitado: true, fecha: new Date().toISOString() } : v))
+              prev.map((v) =>
+                v.id === idVisita
+                  ? { ...v, visitado: true, fecha: new Date().toISOString() }
+                  : v
+              )
             );
             // Actualizar estadísticas
             setEstadisticas((prev) => ({
@@ -146,7 +162,15 @@ export default function CumplimientoScreen() {
   };
 
   const obtenerNombreDia = () => {
-    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const dias = [
+      "Domingo",
+      "Lunes",
+      "Martes",
+      "Miércoles",
+      "Jueves",
+      "Viernes",
+      "Sábado",
+    ];
     return dias[new Date().getDay()];
   };
 
@@ -176,7 +200,12 @@ export default function CumplimientoScreen() {
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
     <View style={styles.visitaContainer}>
       <View style={styles.timelineLine} />
-      <View style={[styles.timelineDot, item.visitado ? styles.timelineDotVisited : styles.timelineDotPending]} />
+      <View
+        style={[
+          styles.timelineDot,
+          item.visitado ? styles.timelineDotVisited : styles.timelineDotPending,
+        ]}
+      />
       <View style={styles.visitaContent}>
         <View style={styles.visitaHeader}>
           <View style={styles.visitaInfo}>
@@ -187,14 +216,19 @@ export default function CumplimientoScreen() {
             <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
           </View>
           <TouchableOpacity
-            style={[styles.botonVisitado, item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo]}
+            style={[
+              styles.botonVisitado,
+              item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
+            ]}
             onPress={() => handleMarcarVisitado(item.id)}
             disabled={item.visitado}
           >
             <Text
               style={[
                 styles.botonVisitadoTexto,
-                item.visitado ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
+                item.visitado
+                  ? styles.botonVisitadoTextoActivo
+                  : styles.botonVisitadoTextoInactivo,
               ]}
             >
               {item.visitado ? "Visitado" : "Visitar"}
@@ -220,7 +254,8 @@ export default function CumplimientoScreen() {
         <Text style={styles.titulo}>Cumplimiento de agenda</Text>
         <Text style={styles.porcentaje}>{estadisticas.porcentaje.toFixed(1)}%</Text>
         <Text style={styles.subtitulo}>
-          {estadisticas.totalRealizadas} visitas realizadas de {estadisticas.totalProgramadas} programadas
+          {estadisticas.totalRealizadas} visitas realizadas de{" "}
+          {estadisticas.totalProgramadas} programadas
         </Text>
         <Text style={styles.diaTexto}>{obtenerNombreDia()}</Text>
       </View>
@@ -230,7 +265,15 @@ export default function CumplimientoScreen() {
         renderItem={renderVisita}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={cargarDatos} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              cargarDatos(currentSucursal);
+            }}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="event" type="material" size={64} color="#C7C7CC" />
