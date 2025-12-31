@@ -21,7 +21,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 8, // v8: agregada tabla Visita para cumplimiento de agenda
+        schemaVersion: 9, // v9: agregada tabla DetalleVisitas para control de visitas
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {
@@ -708,7 +708,8 @@ class FullSyncService {
    */
   async syncAll(
     sucursal: number = 1,
-    onProgress?: SyncProgressCallback
+    onProgress?: SyncProgressCallback,
+    idUsuario: number = 1
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -738,7 +739,7 @@ class FullSyncService {
       // );
 
       // Crear orquestador y ejecutar todas las tareas
-      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, onProgress);
+      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, idUsuario, onProgress);
 
       const result = await orchestrator.executeAll();
 
@@ -810,7 +811,8 @@ class FullSyncService {
   async syncTable(
     tableName: string,
     sucursal: number = 1,
-    onProgress?: SyncProgressCallback
+    onProgress?: SyncProgressCallback,
+    idUsuario: number = 1
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -840,7 +842,7 @@ class FullSyncService {
       // );
 
       // Crear orquestador y ejecutar tarea específica
-      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, onProgress);
+      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, idUsuario, onProgress);
 
       const result = await orchestrator.executeTask(tableName);
 

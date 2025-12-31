@@ -77,7 +77,7 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
         // Mostrar advertencia sobre batería
         Alert.alert(
           "Sincronización Automática",
-          "Esta función mantiene la sincronización activa en segundo plano cada 1 minuto.\n\n⚠️ Consumirá más batería.\n\nPara mejor funcionamiento, desactiva la optimización de batería para esta app en Configuración.",
+          "Esta función mantiene la sincronización activa en segundo plano cada 3 minutos.\n\n⚠️ Consumirá más batería.\n\nPara mejor funcionamiento, desactiva la optimización de batería para esta app en Configuración.",
           [
             {
               text: "Configurar Batería",

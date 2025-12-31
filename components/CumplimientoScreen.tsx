@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Icon } from "react-native-elements";
 import VisitaSyncService from "../services/VisitaSyncService";
+import DetalleVisitasService from "../services/DetalleVisitasService";
 import Realm from "realm";
 import { ALL_SCHEMAS } from "../services/RealmSchemas";
 import AuthService from "../services/AuthService";
@@ -55,14 +56,9 @@ export default function CumplimientoScreen() {
     const init = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        const vendedor =
-          (user.claveEmpleado as string | undefined) ||
-          (user.nombre as string | undefined) ||
-          "";
+        const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ??
-          (user.sucursal as number | null | undefined) ??
-          1;
+          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
         setCurrentSucursal(sucursal);
 
         // Cargar datos después de establecer la sucursal
@@ -125,7 +121,10 @@ export default function CumplimientoScreen() {
 
   const handleMarcarVisitado = async (idVisita: number) => {
     const visita = visitas.find((v) => v.id === idVisita);
-    if (!visita) return;
+    if (!visita) {
+      Alert.alert("Error", "Visita no encontrada");
+      return;
+    }
 
     if (visita.visitado) {
       Alert.alert("Información", "Esta visita ya fue marcada como realizada");
@@ -139,13 +138,23 @@ export default function CumplimientoScreen() {
         onPress: async () => {
           const exito = await VisitaSyncService.getInstance().marcarVisitado(idVisita);
           if (exito) {
+            // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
+            try {
+              const user = await AuthService.restoreSession();
+              const sucursal = user?.sucursal_origen || user?.sucursal || 0;
+              await DetalleVisitasService.getInstance().registrarVisitaCompleta(
+                visita.idCliente,
+                user?.id || 0,
+                sucursal
+              );
+              console.log(`[Cumplimiento] Visita registrada en DetalleVisitas para cliente ${visita.idCliente}`);
+            } catch (error) {
+              console.error("[Cumplimiento] Error al registrar en DetalleVisitas:", error);
+            }
+
             // Actualizar la lista localmente
             setVisitas((prev) =>
-              prev.map((v) =>
-                v.id === idVisita
-                  ? { ...v, visitado: true, fecha: new Date().toISOString() }
-                  : v
-              )
+              prev.map((v) => (v.id === idVisita ? { ...v, visitado: true, fecha: new Date().toISOString() } : v))
             );
             // Actualizar estadísticas
             setEstadisticas((prev) => ({
@@ -162,15 +171,7 @@ export default function CumplimientoScreen() {
   };
 
   const obtenerNombreDia = () => {
-    const dias = [
-      "Domingo",
-      "Lunes",
-      "Martes",
-      "Miércoles",
-      "Jueves",
-      "Viernes",
-      "Sábado",
-    ];
+    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
     return dias[new Date().getDay()];
   };
 
@@ -200,12 +201,7 @@ export default function CumplimientoScreen() {
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
     <View style={styles.visitaContainer}>
       <View style={styles.timelineLine} />
-      <View
-        style={[
-          styles.timelineDot,
-          item.visitado ? styles.timelineDotVisited : styles.timelineDotPending,
-        ]}
-      />
+      <View style={[styles.timelineDot, item.visitado ? styles.timelineDotVisited : styles.timelineDotPending]} />
       <View style={styles.visitaContent}>
         <View style={styles.visitaHeader}>
           <View style={styles.visitaInfo}>
@@ -216,19 +212,14 @@ export default function CumplimientoScreen() {
             <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
           </View>
           <TouchableOpacity
-            style={[
-              styles.botonVisitado,
-              item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
-            ]}
+            style={[styles.botonVisitado, item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo]}
             onPress={() => handleMarcarVisitado(item.id)}
             disabled={item.visitado}
           >
             <Text
               style={[
                 styles.botonVisitadoTexto,
-                item.visitado
-                  ? styles.botonVisitadoTextoActivo
-                  : styles.botonVisitadoTextoInactivo,
+                item.visitado ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
               ]}
             >
               {item.visitado ? "Visitado" : "Visitar"}
@@ -254,8 +245,7 @@ export default function CumplimientoScreen() {
         <Text style={styles.titulo}>Cumplimiento de agenda</Text>
         <Text style={styles.porcentaje}>{estadisticas.porcentaje.toFixed(1)}%</Text>
         <Text style={styles.subtitulo}>
-          {estadisticas.totalRealizadas} visitas realizadas de{" "}
-          {estadisticas.totalProgramadas} programadas
+          {estadisticas.totalRealizadas} visitas realizadas de {estadisticas.totalProgramadas} programadas
         </Text>
         <Text style={styles.diaTexto}>{obtenerNombreDia()}</Text>
       </View>

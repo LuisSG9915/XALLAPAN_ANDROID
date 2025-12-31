@@ -20,7 +20,7 @@ class VisitaSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 8,
+        schemaVersion: 9,
       });
     }
     return this.realm;

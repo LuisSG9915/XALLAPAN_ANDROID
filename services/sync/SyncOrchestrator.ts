@@ -10,6 +10,7 @@ import { CarteraSyncTask } from "./tasks/CarteraSyncTask";
 import { VentasSyncTask } from "./tasks/VentasSyncTask";
 import { KitsSyncTask } from "./tasks/KitsSyncTask";
 import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
+import { DetalleVisitasSyncTask } from "./tasks/DetalleVisitasSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -19,12 +20,20 @@ export class SyncOrchestrator {
   private realm: Realm;
   private syncLogId: string;
   private sucursal: number;
+  private idUsuario: number;
   private onProgress?: (progress: SyncProgress) => void;
 
-  constructor(realm: Realm, syncLogId: string, sucursal: number, onProgress?: (progress: SyncProgress) => void) {
+  constructor(
+    realm: Realm,
+    syncLogId: string,
+    sucursal: number,
+    idUsuario: number,
+    onProgress?: (progress: SyncProgress) => void
+  ) {
     this.realm = realm;
     this.syncLogId = syncLogId;
     this.sucursal = sucursal;
+    this.idUsuario = idUsuario;
     this.onProgress = onProgress;
   }
 
@@ -43,6 +52,7 @@ export class SyncOrchestrator {
       new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new VisitaSyncTask(this.realm, this.syncLogId),
+      new DetalleVisitasSyncTask(this.realm, this.syncLogId, this.idUsuario),
     ];
   }
 

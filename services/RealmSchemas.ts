@@ -254,6 +254,20 @@ export const VisitaSchema = {
   primaryKey: "id",
 };
 
+export const DetalleVisitasSchema = {
+  name: "DetalleVisitas",
+  properties: {
+    id: "string",
+    fechaInicio: "date?",
+    fechaFin: "date?",
+    idCliente: "int?",
+    idUsuario: "int?",
+    idRuta: "int?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -269,4 +283,5 @@ export const ALL_SCHEMAS = [
   SyncTableLogSchema,
   CierreRutaSchema,
   VisitaSchema,
+  DetalleVisitasSchema,
 ];

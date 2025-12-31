@@ -13,7 +13,7 @@ class CierreRutaService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 8,
+        schemaVersion: 9,
       });
       console.log("✅ CierreRutaService inicializado");
     } catch (error) {
