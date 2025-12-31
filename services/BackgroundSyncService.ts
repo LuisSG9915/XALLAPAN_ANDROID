@@ -73,19 +73,14 @@ class BackgroundSyncService {
    * Usa react-native-background-fetch para funcionar con pantalla apagada
    */
   async start(): Promise<void> {
-    if (this.intervalId || this.isBackgroundFetchConfigured) {
-      console.log("[BackgroundSync] ✅ Ya está activo o en proceso de activación");
-      // Si solo uno está configurado, completar la configuración
-      if (!this.intervalId) {
-        console.log("[BackgroundSync] Configurando intervalo faltante...");
-        this.intervalId = setInterval(() => {
-          this.performSync();
-        }, this.SYNC_INTERVAL_MS);
-      }
-      if (!this.isBackgroundFetchConfigured) {
-        console.log("[BackgroundSync] Configurando BackgroundFetch faltante...");
-        await this.configureBackgroundFetch();
-      }
+    console.log("[BackgroundSync] 🔍 start() llamado", {
+      intervalId: !!this.intervalId,
+      status: this.state.status,
+    });
+
+    // Si ya está activo, no hacer nada
+    if (this.intervalId) {
+      console.log("[BackgroundSync] ✅ Ya está activo, ignorando llamada duplicada");
       return;
     }
 
@@ -98,16 +93,26 @@ class BackgroundSyncService {
       nextSyncTime: nextSync,
     });
 
-    // Configurar BackgroundFetch para sincronización con pantalla apagada
-    await this.configureBackgroundFetch();
+    // DESACTIVADO: BackgroundFetch causa sincronizaciones adicionales impredecibles
+    // El sistema operativo decide cuándo ejecutarlo, no respeta el intervalo exacto
+    // Usar solo setInterval para control preciso de 3 minutos
+    /*
+    if (!this.isBackgroundFetchConfigured) {
+      await this.configureBackgroundFetch();
+    }
+    */
 
-    // También usar intervalo para cuando la app está en primer plano (más preciso)
+    // Crear intervalo para sincronización cada 3 minutos (preciso)
     this.intervalId = setInterval(() => {
       this.performSync();
     }, this.SYNC_INTERVAL_MS);
+    console.log("[BackgroundSync] ✅ Intervalo de 3 minutos configurado");
 
-    // Ejecutar primera sincronización inmediatamente
-    this.performSync();
+    // Ejecutar primera sincronización inmediatamente solo si es la primera vez
+    if (!this.state.lastSyncTime) {
+      console.log("[BackgroundSync] Ejecutando primera sincronización inmediata");
+      this.performSync();
+    }
   }
 
   /**
@@ -306,8 +311,8 @@ class BackgroundSyncService {
     }, 5 * 60 * 1000); // 5 minutos
 
     try {
-      const sucursal = user.sucursal_origen || user.sucursal;
-      const idUsuario: number = Number(user.id || user.idUsuario || 1);
+      const sucursal = user.sucursal_origen || user.sucursal || 1;
+      const idUsuario: number = Number(user.id ?? user.idUsuario ?? 1);
       console.log("[BackgroundSync] Sincronizando sucursal:", sucursal, "usuario:", idUsuario);
 
       // Ejecutar sincronización INCREMENTAL usando arquitectura escalable
