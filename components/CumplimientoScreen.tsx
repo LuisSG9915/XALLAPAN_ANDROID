@@ -8,6 +8,8 @@ import {
   Alert,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { Icon } from "react-native-elements";
 import VisitaSyncService from "../services/VisitaSyncService";
@@ -77,6 +79,19 @@ export default function CumplimientoScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
+  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
+
+  // Obtener tipos de visita desde la base de datos
+  const getTipoVisitas = () => {
+    if (!FullSyncService.isServiceInitialized()) return [];
+    const tipos = FullSyncService.getTipoVisitas();
+    console.log(tipos);
+    return Array.isArray(tipos) ? tipos : [];
+  };
+
+  const tiposVisita = getTipoVisitas();
 
   const obtenerNombreCliente = async (idCliente: number) => {
     const cliente = FullSyncService.getClienteFullById(idCliente);
@@ -131,43 +146,45 @@ export default function CumplimientoScreen() {
       return;
     }
 
-    Alert.alert("Confirmar", "¿Desea marcar esta visita como realizada?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Aceptar",
-        onPress: async () => {
-          const exito = await VisitaSyncService.getInstance().marcarVisitado(idVisita);
-          if (exito) {
-            // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
-            try {
-              const user = await AuthService.restoreSession();
-              const sucursal = user?.sucursal_origen || user?.sucursal || 0;
-              await DetalleVisitasService.getInstance().registrarVisitaCompleta(
-                visita.idCliente,
-                user?.id || 0,
-                sucursal
-              );
-              console.log(`[Cumplimiento] Visita registrada en DetalleVisitas para cliente ${visita.idCliente}`);
-            } catch (error) {
-              console.error("[Cumplimiento] Error al registrar en DetalleVisitas:", error);
-            }
+    // Abrir modal para seleccionar tipo de visita
+    setVisitaSeleccionada(visita);
+    setTipoVisitaSeleccionado(null);
+    setModalVisible(true);
+  };
 
-            // Actualizar la lista localmente
-            setVisitas((prev) =>
-              prev.map((v) => (v.id === idVisita ? { ...v, visitado: true, fecha: new Date().toISOString() } : v))
-            );
-            // Actualizar estadísticas
-            setEstadisticas((prev) => ({
-              ...prev,
-              totalRealizadas: prev.totalRealizadas + 1,
-              porcentaje: ((prev.totalRealizadas + 1) / prev.totalProgramadas) * 100,
-            }));
-          } else {
-            Alert.alert("Error", "No se pudo marcar la visita como realizada");
-          }
-        },
-      },
-    ]);
+  const confirmarMarcarVisitado = async () => {
+    if (!visitaSeleccionada || tipoVisitaSeleccionado === null) {
+      Alert.alert("Error", "Debe seleccionar un tipo de visita");
+      return;
+    }
+
+    setModalVisible(false);
+
+    const exito = await VisitaSyncService.getInstance().marcarVisitado(visitaSeleccionada.id, tipoVisitaSeleccionado);
+
+    if (exito) {
+      // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
+      try {
+        const user = await AuthService.restoreSession();
+        const sucursal = user?.sucursal_origen || user?.sucursal || 0;
+        await DetalleVisitasService.getInstance().registrarVisitaCompleta(
+          visitaSeleccionada.idCliente,
+          user?.id || 0,
+          sucursal,
+          tipoVisitaSeleccionado
+        );
+        console.log(
+          `[Cumplimiento] Visita registrada en DetalleVisitas para cliente ${visitaSeleccionada.idCliente} con tipo ${tipoVisitaSeleccionado}`
+        );
+      } catch (error) {
+        console.error("[Cumplimiento] Error al registrar en DetalleVisitas:", error);
+      }
+
+      Alert.alert("Éxito", "Visita marcada como realizada");
+      cargarDatos(currentSucursal);
+    } else {
+      Alert.alert("Error", "No se pudo marcar la visita");
+    }
   };
 
   const obtenerNombreDia = () => {
@@ -271,6 +288,52 @@ export default function CumplimientoScreen() {
           </View>
         }
       />
+
+      {/* Modal de selección de tipo de visita */}
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Seleccionar Tipo de Visita</Text>
+            <Text style={styles.modalSubtitle}>
+              Cliente: {visitaSeleccionada?.nombreCliente || visitaSeleccionada?.idCliente}
+            </Text>
+
+            <ScrollView style={styles.tiposContainer}>
+              {tiposVisita
+                .filter((tipo) => tipo.id !== 1)
+                .map((tipo) => (
+                  <TouchableOpacity
+                    key={tipo.id}
+                    style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
+                    onPress={() => setTipoVisitaSeleccionado(tipo.id)}
+                  >
+                    <Text style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}>
+                      {tipo.descripcion}
+                    </Text>
+                    {tipoVisitaSeleccionado === tipo.id && (
+                      <Icon name="check-circle" type="material" size={24} color="#007AFF" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+            </ScrollView>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.modalButtonTextCancel}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonConfirm]}
+                onPress={confirmarMarcarVisitado}
+              >
+                <Text style={styles.modalButtonText}>Confirmar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -420,5 +483,83 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#8E8E93",
     marginTop: 16,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalCard: {
+    backgroundColor: "white",
+    borderRadius: 16,
+    padding: 24,
+    width: "85%",
+    maxHeight: "70%",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#000",
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#8E8E93",
+    marginBottom: 20,
+  },
+  tiposContainer: {
+    maxHeight: 300,
+  },
+  tipoOption: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#F2F2F7",
+    marginBottom: 12,
+  },
+  tipoOptionSelected: {
+    backgroundColor: "#E3F2FD",
+    borderWidth: 2,
+    borderColor: "#007AFF",
+  },
+  tipoText: {
+    fontSize: 16,
+    color: "#000",
+    fontWeight: "500",
+  },
+  tipoTextSelected: {
+    color: "#007AFF",
+    fontWeight: "600",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 20,
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalButtonCancel: {
+    backgroundColor: "#F2F2F7",
+  },
+  modalButtonConfirm: {
+    backgroundColor: "#007AFF",
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "white",
+  },
+  modalButtonTextCancel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#000",
   },
 });

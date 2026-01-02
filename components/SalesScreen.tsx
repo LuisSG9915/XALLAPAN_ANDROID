@@ -73,6 +73,7 @@ export default function SalesScreen() {
   const [processingVenta, setProcessingVenta] = useState(false);
   const [clientesEntregaDia, setClientesEntregaDia] = useState<Cliente[]>([]);
   const [currentDetalleVisitaId, setCurrentDetalleVisitaId] = useState<string | null>(null);
+  const [validandoUbicacion, setValidandoUbicacion] = useState(false);
 
   const buildProductosFormateados = useCallback(
     (
@@ -356,14 +357,78 @@ export default function SalesScreen() {
     setVisitaConfirmModalOpen(true);
   };
 
+  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371e3;
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+  };
+
   const handleConfirmarVisita = async (desdeaIniciarVisita: boolean) => {
     if (!desdeaIniciarVisita) {
       setVisitaConfirmModalOpen(false);
       return;
     }
+    console.log({ clientePendienteVisita });
     if (!clientePendienteVisita) return;
 
     if (desdeaIniciarVisita) {
+      // Verificar ubicación del vendedor
+      if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
+        try {
+          setValidandoUbicacion(true);
+          console.log("[Sales] 📍 Obteniendo ubicación del vendedor...");
+          const ubicacionVendedor = await LocationService.getCurrentLocation();
+
+          if (ubicacionVendedor) {
+            const distancia = calcularDistancia(
+              ubicacionVendedor.latitude,
+              ubicacionVendedor.longitude,
+              clientePendienteVisita.latitud,
+              clientePendienteVisita.longitud
+            );
+
+            console.log(`[Sales] 📏 Distancia al cliente: ${distancia.toFixed(2)} metros`);
+
+            if (distancia > 30) {
+              setValidandoUbicacion(false);
+              Alert.alert(
+                "Ubicación",
+                `Estás a ${distancia.toFixed(
+                  0
+                )} metros del domicilio del cliente.\n\nDebes estar a menos de 30 metros para iniciar la visita.`
+              );
+              setVisitaConfirmModalOpen(false);
+              return;
+            }
+          } else {
+            setValidandoUbicacion(false);
+            Alert.alert(
+              "Ubicación no disponible",
+              "No se pudo obtener tu ubicación. Verifica que el GPS esté activado."
+            );
+            setVisitaConfirmModalOpen(false);
+            return;
+          }
+        } catch (locationError) {
+          setValidandoUbicacion(false);
+          console.error("[Sales] ⚠️ Error al obtener ubicación:", locationError);
+          Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.");
+          setVisitaConfirmModalOpen(false);
+          return;
+        }
+      } else {
+        Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
+        setVisitaConfirmModalOpen(false);
+        return;
+      }
+
       // Registrar inicio de visita en DetalleVisitas
       try {
         const detalleId = await DetalleVisitasService.getInstance().iniciarVisita(
@@ -857,11 +922,11 @@ export default function SalesScreen() {
         );
       }
 
-      // Finalizar visita si existe
+      // Finalizar visita si existe con tipoVisita=1 (Venta)
       if (currentDetalleVisitaId) {
         try {
-          await DetalleVisitasService.getInstance().finalizarVisita(currentDetalleVisitaId);
-          console.log(`[Sales] ✅ Visita finalizada: ${currentDetalleVisitaId}`);
+          await DetalleVisitasService.getInstance().finalizarVisita(currentDetalleVisitaId, 1);
+          console.log(`[Sales] ✅ Visita finalizada con tipo Venta: ${currentDetalleVisitaId}`);
           setCurrentDetalleVisitaId(null);
         } catch (error) {
           console.error("[Sales] ⚠️ Error al finalizar visita:", error);
@@ -1178,20 +1243,27 @@ export default function SalesScreen() {
               <Text style={styles.confirmModalTitle}>¿Desea iniciar visita?</Text>
               <Text style={styles.confirmModalSubtitle}>Cliente: {clientePendienteVisita?.nombre}</Text>
 
-              <View style={styles.confirmModalButtonsRow}>
-                <TouchableOpacity
-                  style={[styles.confirmModalBtn, styles.confirmModalBtnNo]}
-                  onPress={() => handleConfirmarVisita(false)}
-                >
-                  <Text style={styles.confirmModalBtnText}>No</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.confirmModalBtn, styles.confirmModalBtnYes]}
-                  onPress={() => handleConfirmarVisita(true)}
-                >
-                  <Text style={styles.confirmModalBtnText}>Sí</Text>
-                </TouchableOpacity>
-              </View>
+              {validandoUbicacion ? (
+                <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                  <ActivityIndicator size="large" color={COLORS.primary} />
+                  <Text style={{ marginTop: 12, color: COLORS.textSecondary }}>Validando ubicación...</Text>
+                </View>
+              ) : (
+                <View style={styles.confirmModalButtonsRow}>
+                  <TouchableOpacity
+                    style={[styles.confirmModalBtn, styles.confirmModalBtnNo]}
+                    onPress={() => handleConfirmarVisita(false)}
+                  >
+                    <Text style={styles.confirmModalBtnText}>No</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.confirmModalBtn, styles.confirmModalBtnYes]}
+                    onPress={() => handleConfirmarVisita(true)}
+                  >
+                    <Text style={styles.confirmModalBtnText}>Sí</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
         </Modal>

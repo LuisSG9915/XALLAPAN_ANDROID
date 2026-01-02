@@ -31,15 +31,12 @@ export class VentasSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log(
-        `[VentasSyncTask] Obteniendo ventas para sucursal ${this.sucursal}...`,
-      );
+      console.log(`[VentasSyncTask] Obteniendo ventas para sucursal ${this.sucursal}...`);
 
       const response = await fetch(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      console.log(response);
       const ventas = await response.json();
       const registrosLeidos = ventas.length;
       const nowMexico = this.getMexicoNow();
@@ -57,10 +54,10 @@ export class VentasSyncTask extends SyncTask {
           maxIdVenta = venta;
         }
       }
-      
+
       // Obtener el fechaLog del registro con el ID más alto
       const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
-      
+
       console.log(`[VentasSyncTask] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`);
 
       this.realm.write(() => {
@@ -68,7 +65,7 @@ export class VentasSyncTask extends SyncTask {
           const idMovil = venta.idMovil ?? null;
 
           // Primero verificar si existe por ID (primary key)
-          const existingById = this.realm.objectForPrimaryKey('Venta', venta.id);
+          const existingById = this.realm.objectForPrimaryKey("Venta", venta.id);
 
           if (existingById) {
             // Actualizar registro existente por ID
@@ -78,20 +75,16 @@ export class VentasSyncTask extends SyncTask {
             (existingById as any).importe = venta.importe;
             (existingById as any).folioFactura = venta.folioFactura;
             (existingById as any).facturacionMovil = venta.facturacionMovil;
-            (existingById as any).syncedAt = venta.fechaLog
-              ? new Date(venta.fechaLog)
-              : nowMexico;
+            (existingById as any).syncedAt = venta.fechaLog ? new Date(venta.fechaLog) : nowMexico;
             registrosActualizados++;
           } else {
             // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000000)
             const localVentas =
               idMovil === null
                 ? []
-                : this.realm.objects('Venta').filtered(
-                    'idMovil == $0 AND claveProd == $1 AND id > 1700000000000',
-                    idMovil,
-                    venta.claveProd,
-                  );
+                : this.realm
+                    .objects("Venta")
+                    .filtered("idMovil == $0 AND claveProd == $1 AND id > 1700000000000", idMovil, venta.claveProd);
 
             if (localVentas.length > 0) {
               // Actualizar solo los campos específicos en cada registro encontrado
@@ -102,14 +95,12 @@ export class VentasSyncTask extends SyncTask {
                 (localVenta as any).importe = venta.importe;
                 (localVenta as any).folioFactura = venta.folioFactura;
                 (localVenta as any).facturacionMovil = venta.facturacionMovil;
-                (localVenta as any).syncedAt = venta.fechaLog
-                  ? new Date(venta.fechaLog)
-                  : nowMexico;
+                (localVenta as any).syncedAt = venta.fechaLog ? new Date(venta.fechaLog) : nowMexico;
                 registrosActualizados++;
               }
             } else {
               // Crear registro porque no existe ni por ID ni por idMovil+claveProd
-              this.realm.create('Venta', {
+              this.realm.create("Venta", {
                 id: venta.id,
                 idMovil: venta.idMovil ?? null,
                 sucursal: venta.sucursal ?? null,
@@ -136,17 +127,13 @@ export class VentasSyncTask extends SyncTask {
         }
 
         // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
-        const allLocalVentas = this.realm
-          .objects('Venta')
-          .filtered('id > 1700000000');
+        const allLocalVentas = this.realm.objects("Venta").filtered("id > 1700000000");
         for (const localVenta of allLocalVentas) {
           (localVenta as any).syncedAr = syncedArValue;
         }
       });
 
-      console.log(
-        `[VentasSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`,
-      );
+      console.log(`[VentasSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
       console.log(ventas);
       return {
         success: true,
@@ -159,10 +146,10 @@ export class VentasSyncTask extends SyncTask {
         },
       };
     } catch (error) {
-      console.error('[VentasSyncTask] Error:', error);
+      console.error("[VentasSyncTask] Error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Error desconocido',
+        error: error instanceof Error ? error.message : "Error desconocido",
       };
     }
   }

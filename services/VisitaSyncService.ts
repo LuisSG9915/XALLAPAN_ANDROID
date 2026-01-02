@@ -20,7 +20,7 @@ class VisitaSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 9,
+        schemaVersion: 10,
       });
     }
     return this.realm;
@@ -78,7 +78,7 @@ class VisitaSyncService {
     }
   }
 
-  async marcarVisitado(idVisita: number): Promise<boolean> {
+  async marcarVisitado(idVisita: number, tipoVisita?: number): Promise<boolean> {
     try {
       const realm = await this.getRealm();
 
@@ -87,7 +87,10 @@ class VisitaSyncService {
         if (visita && !visita.visitado) {
           visita.visitado = true;
           visita.fecha = new Date().toISOString();
-          console.log(`[VisitaSync] ✅ Visita ${idVisita} marcada como visitada`);
+          if (tipoVisita !== undefined) {
+            visita.tipoVisita = tipoVisita;
+          }
+          console.log(`[VisitaSync] ✅ Visita ${idVisita} marcada como visitada con tipo ${tipoVisita}`);
         }
       });
 

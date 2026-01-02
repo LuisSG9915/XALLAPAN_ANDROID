@@ -250,6 +250,7 @@ export const VisitaSchema = {
     visitado: "bool",
     fecha: "string?",
     syncedAr: "string?",
+    tipoVisita: "int?",
   },
   primaryKey: "id",
 };
@@ -263,7 +264,17 @@ export const DetalleVisitasSchema = {
     idCliente: "int?",
     idUsuario: "int?",
     idRuta: "int?",
+    tipoVisita: "int?",
     syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
+export const TipoVisitaSchema = {
+  name: "TipoVisita",
+  properties: {
+    id: "int",
+    descripcion: "string?",
   },
   primaryKey: "id",
 };
@@ -284,4 +295,5 @@ export const ALL_SCHEMAS = [
   CierreRutaSchema,
   VisitaSchema,
   DetalleVisitasSchema,
+  TipoVisitaSchema,
 ];

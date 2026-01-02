@@ -21,7 +21,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 9, // v9: agregada tabla DetalleVisitas para control de visitas
+        schemaVersion: 10, // v10: agregado campo tipoVisita a Visita y DetalleVisitas, agregada tabla TipoVisita
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {
@@ -221,20 +221,30 @@ class FullSyncService {
         name: "ClientesIncremental",
         run: async () => {
           const tableName = "ClienteFull";
-          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          let last = this.getLastSyncedAr(tableName);
+
+          // Si no hay sincronización previa, usar fecha de hoy menos 1 día para no traer todo
+          if (!last) {
+            last = new Date();
+            last.setDate(last.getDate() - 1); // Restar 1 día
+          }
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(fechaInicial)}`;
 
-          // console.log('[Incremental] Clientes desde', fechaInicial, url);
+          console.log("[Incremental] Clientes desde", fechaInicial);
+          console.log("[Incremental] URL completa:", url);
 
           const response = await fetch(url, {
             headers: { accept: "application/octet-stream" },
           });
           if (!response.ok) {
+            console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
             throw new Error(`HTTP ${response.status} Clientes`);
           }
 
           const clientes = await response.json();
+          console.log({ clientes });
           const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
           let registrosGuardados = 0;
           let registrosActualizados = 0;
@@ -284,7 +294,14 @@ class FullSyncService {
         name: "PreciosIncremental",
         run: async () => {
           const tableName = "Precio";
-          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          let last = this.getLastSyncedAr(tableName);
+
+          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
+          if (!last) {
+            last = new Date();
+            last.setDate(last.getDate() - 1);
+          }
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
 
@@ -339,7 +356,14 @@ class FullSyncService {
         name: "PreciosPromoIncremental",
         run: async () => {
           const tableName = "PrecioPromo";
-          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          let last = this.getLastSyncedAr(tableName);
+
+          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
+          if (!last) {
+            last = new Date();
+            last.setDate(last.getDate() - 1);
+          }
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
             fechaInicial
@@ -451,7 +475,14 @@ class FullSyncService {
         name: "VentasIncremental",
         run: async () => {
           const tableName = "Venta";
-          const last = this.getLastSyncedAr(tableName) || new Date(0);
+          let last = this.getLastSyncedAr(tableName);
+
+          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
+          if (!last) {
+            last = new Date();
+            last.setDate(last.getDate() - 1);
+          }
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
             fechaInicial
@@ -1631,6 +1662,21 @@ class FullSyncService {
   getSyncStatus(entity: string = "all"): any {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
     return this.realm.objectForPrimaryKey("SyncStatus", entity);
+  }
+  getTipoVisita(): any {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    const tipoVisitas = this.realm.objects("TipoVisita");
+    return tipoVisitas.length > 0 ? tipoVisitas[0] : null;
+  }
+
+  getTipoVisitas(): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    const tipoVisitas = this.realm.objects("TipoVisita");
+    return Array.from(tipoVisitas);
+  }
+
+  isServiceInitialized(): boolean {
+    return this.isInitialized;
   }
 
   getSyncTableLogsPaginated(offset: number = 0, limit: number = 50): any[] {

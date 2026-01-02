@@ -19,13 +19,18 @@ class DetalleVisitasService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 9,
+        schemaVersion: 10,
       });
     }
     return this.realm;
   }
 
-  async iniciarVisita(idCliente: number, idUsuario: number, idRuta: number): Promise<string | null> {
+  async iniciarVisita(
+    idCliente: number,
+    idUsuario: number,
+    idRuta: number,
+    tipoVisita?: number
+  ): Promise<string | null> {
     try {
       const realm = await this.getRealm();
       const detalleId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -39,6 +44,7 @@ class DetalleVisitasService {
           idCliente,
           idUsuario,
           idRuta,
+          tipoVisita: tipoVisita ?? null,
           syncedAt: new Date(0),
         });
       });
@@ -57,7 +63,7 @@ class DetalleVisitasService {
     }
   }
 
-  async finalizarVisita(detalleId: string): Promise<boolean> {
+  async finalizarVisita(detalleId: string, tipoVisita?: number): Promise<boolean> {
     try {
       const realm = await this.getRealm();
       const now = new Date();
@@ -66,8 +72,12 @@ class DetalleVisitasService {
         const detalle = realm.objectForPrimaryKey("DetalleVisitas", detalleId);
         if (detalle) {
           (detalle as any).fechaFin = now;
+          if (tipoVisita !== undefined) {
+            (detalle as any).tipoVisita = tipoVisita;
+          }
           console.log(`[DetalleVisitas] ✅ Visita finalizada: ${detalleId}`, {
             fechaFin: now,
+            tipoVisita,
           });
         } else {
           console.warn(`[DetalleVisitas] ⚠️ No se encontró detalle con ID: ${detalleId}`);
@@ -81,7 +91,12 @@ class DetalleVisitasService {
     }
   }
 
-  async registrarVisitaCompleta(idCliente: number, idUsuario: number, idRuta: number): Promise<string | null> {
+  async registrarVisitaCompleta(
+    idCliente: number,
+    idUsuario: number,
+    idRuta: number,
+    tipoVisita?: number
+  ): Promise<string | null> {
     try {
       const realm = await this.getRealm();
       const detalleId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -95,6 +110,7 @@ class DetalleVisitasService {
           idCliente,
           idUsuario,
           idRuta,
+          tipoVisita: tipoVisita ?? null,
           syncedAt: new Date(0),
         });
       });
@@ -126,6 +142,7 @@ class DetalleVisitasService {
         idCliente: v.idCliente,
         idUsuario: v.idUsuario,
         idRuta: v.idRuta,
+        tipoVisita: v.tipoVisita,
       }));
     } catch (error) {
       console.error("[DetalleVisitas] ❌ Error al obtener visitas activas:", error);
