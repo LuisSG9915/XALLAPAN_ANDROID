@@ -217,29 +217,42 @@ export default function CumplimientoScreen() {
 
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
     <View style={styles.visitaContainer}>
-      <View style={styles.timelineLine} />
-      <View style={[styles.timelineDot, item.visitado ? styles.timelineDotVisited : styles.timelineDotPending]} />
-      <View style={styles.visitaContent}>
+      <View style={styles.visitaCard}>
         <View style={styles.visitaHeader}>
           <View style={styles.visitaInfo}>
-            <Text style={styles.visitaTitulo}>Visita programada</Text>
-            <Text style={styles.clienteTexto}>
-              {item.idCliente} - {item.nombreCliente || "Cargando..."}
-            </Text>
-            <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
+            <View style={styles.clienteRow}>
+              <View style={styles.clienteIcon}>
+                <Icon
+                  name={item.visitado ? "check-circle" : "radio-button-unchecked"}
+                  type="material"
+                  size={24}
+                  color={item.visitado ? "#34C759" : "#007AFF"}
+                />
+              </View>
+              <View style={styles.clienteDetails}>
+                <Text style={styles.clienteId}>#{item.idCliente}</Text>
+                <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
+              </View>
+            </View>
+            <View style={styles.horaRow}>
+              <Icon name="schedule" type="material" size={16} color="#8E8E93" />
+              <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
+            </View>
           </View>
           <TouchableOpacity
             style={[styles.botonVisitado, item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo]}
             onPress={() => handleMarcarVisitado(item.id)}
             disabled={item.visitado}
+            activeOpacity={0.8}
           >
+            <Icon name={item.visitado ? "check" : "directions-walk"} type="material" size={20} color="white" />
             <Text
               style={[
                 styles.botonVisitadoTexto,
                 item.visitado ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
               ]}
             >
-              {item.visitado ? "Visitado" : "Visitar"}
+              {item.visitado ? "Completado" : "Visitar"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -290,46 +303,83 @@ export default function CumplimientoScreen() {
       />
 
       {/* Modal de selección de tipo de visita */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={modalVisible} animationType="fade" transparent>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Seleccionar Tipo de Visita</Text>
-            <Text style={styles.modalSubtitle}>
-              Cliente: {visitaSeleccionada?.nombreCliente || visitaSeleccionada?.idCliente}
-            </Text>
+            <View style={styles.modalHeader}>
+              <Icon name="assignment" type="material" size={28} color="#007AFF" />
+              <Text style={styles.modalTitle}>Tipo de Visita</Text>
+            </View>
+            <View style={styles.modalContent}>
+              <View style={styles.clienteInfoModal}>
+                <Icon name="person" type="material" size={20} color="#8E8E93" />
+                <Text style={styles.modalSubtitle}>
+                  {visitaSeleccionada?.nombreCliente || `Cliente #${visitaSeleccionada?.idCliente}`}
+                </Text>
+              </View>
 
-            <ScrollView style={styles.tiposContainer}>
-              {tiposVisita
-                .filter((tipo) => tipo.id !== 1)
-                .map((tipo) => (
-                  <TouchableOpacity
-                    key={tipo.id}
-                    style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
-                    onPress={() => setTipoVisitaSeleccionado(tipo.id)}
-                  >
-                    <Text style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}>
-                      {tipo.descripcion}
-                    </Text>
-                    {tipoVisitaSeleccionado === tipo.id && (
-                      <Icon name="check-circle" type="material" size={24} color="#007AFF" />
-                    )}
-                  </TouchableOpacity>
-                ))}
-            </ScrollView>
+              <ScrollView style={styles.tiposContainer} showsVerticalScrollIndicator={false}>
+                {tiposVisita
+                  .filter((tipo) => tipo.id !== 1)
+                  .map((tipo) => {
+                    const icons: { [key: number]: string } = {
+                      2: "account-balance-wallet",
+                      3: "local-offer",
+                      4: "visibility",
+                      5: "local-shipping",
+                    };
+                    return (
+                      <TouchableOpacity
+                        key={tipo.id}
+                        style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
+                        onPress={() => setTipoVisitaSeleccionado(tipo.id)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.tipoOptionContent}>
+                          <Icon
+                            name={icons[tipo.id] || "label"}
+                            type="material"
+                            size={24}
+                            color={tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"}
+                          />
+                          <Text
+                            style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}
+                          >
+                            {tipo.descripcion}
+                          </Text>
+                        </View>
+                        {tipoVisitaSeleccionado === tipo.id && (
+                          <View style={styles.checkCircle}>
+                            <Icon name="check" type="material" size={20} color="white" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+              </ScrollView>
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalButtonTextCancel}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonConfirm]}
-                onPress={confirmarMarcarVisitado}
-              >
-                <Text style={styles.modalButtonText}>Confirmar</Text>
-              </TouchableOpacity>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={() => setModalVisible(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalButtonTextCancel}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    styles.modalButtonConfirm,
+                    tipoVisitaSeleccionado === null && styles.modalButtonDisabled,
+                  ]}
+                  onPress={confirmarMarcarVisitado}
+                  disabled={tipoVisitaSeleccionado === null}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="check" type="material" size={20} color="white" />
+                  <Text style={styles.modalButtonText}>Confirmar</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -385,92 +435,129 @@ const styles = StyleSheet.create({
     color: "white",
     opacity: 0.8,
   },
+  statsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    backgroundColor: "white",
+    marginHorizontal: 24,
+    paddingVertical: 20,
+    borderRadius: 16,
+    marginTop: -30,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+  },
+  statItem: {
+    alignItems: "center",
+  },
+  statValor: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#007AFF",
+  },
+  statLabel: {
+    fontSize: 13,
+    color: "#8E8E93",
+    marginTop: 4,
+    fontWeight: "500",
+  },
   lista: {
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+  },
+  listaContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 24,
   },
   visitaContainer: {
-    flexDirection: "row",
-    marginBottom: 20,
-    position: "relative",
+    marginBottom: 16,
   },
-  timelineLine: {
-    position: "absolute",
-    left: 15,
-    top: 30,
-    bottom: -20,
-    width: 2,
-    backgroundColor: "#E5E5EA",
-  },
-  timelineDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    marginRight: 16,
-    marginTop: 5,
-    zIndex: 1,
-  },
-  timelineDotPending: {
-    backgroundColor: "#007AFF",
-  },
-  timelineDotVisited: {
-    backgroundColor: "#34C759",
-  },
-  visitaContent: {
-    flex: 1,
+  visitaCard: {
     backgroundColor: "white",
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    overflow: "hidden",
   },
   visitaHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    padding: 20,
   },
   visitaInfo: {
     flex: 1,
   },
-  visitaTitulo: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#8E8E93",
-    marginBottom: 4,
+  clienteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
   },
-  clienteTexto: {
+  clienteIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  clienteDetails: {
+    flex: 1,
+  },
+  clienteId: {
+    fontSize: 12,
+    color: "#007AFF",
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  clienteNombre: {
     fontSize: 16,
-    fontWeight: "bold",
-    color: "#000",
-    marginBottom: 4,
+    fontWeight: "600",
+    color: "#1C1C1E",
+  },
+  horaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
   },
   horaTexto: {
     fontSize: 14,
     color: "#8E8E93",
+    marginLeft: 6,
+    fontWeight: "500",
   },
   botonVisitado: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: 80,
+    flexDirection: "row",
     alignItems: "center",
-  },
-  botonVisitadoInactivo: {
-    backgroundColor: "#007AFF",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    minWidth: 100,
+    justifyContent: "center",
   },
   botonVisitadoActivo: {
     backgroundColor: "#34C759",
   },
-  botonVisitadoTexto: {
-    fontSize: 14,
-    fontWeight: "600",
+  botonVisitadoInactivo: {
+    backgroundColor: "#007AFF",
   },
-  botonVisitadoTextoInactivo: {
+  botonVisitadoTexto: {
     color: "white",
+    fontWeight: "600",
+    marginLeft: 6,
+    fontSize: 14,
   },
   botonVisitadoTextoActivo: {
+    color: "white",
+  },
+  botonVisitadoTextoInactivo: {
     color: "white",
   },
   emptyContainer: {
@@ -486,27 +573,54 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
     justifyContent: "center",
     alignItems: "center",
   },
   modalCard: {
     backgroundColor: "white",
-    borderRadius: 16,
-    padding: 24,
-    width: "85%",
-    maxHeight: "70%",
+    borderRadius: 24,
+    width: "90%",
+    maxWidth: 400,
+    maxHeight: "80%",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    overflow: "hidden",
+  },
+  modalHeader: {
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#000",
-    marginBottom: 8,
+    color: "#1C1C1E",
+    marginTop: 8,
+  },
+  modalContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  clienteInfoModal: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8F9FA",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 20,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: "#8E8E93",
-    marginBottom: 20,
+    fontSize: 16,
+    color: "#495057",
+    marginLeft: 8,
+    fontWeight: "500",
   },
   tiposContainer: {
     maxHeight: 300,
@@ -515,51 +629,75 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: "#F2F2F7",
-    marginBottom: 12,
+    marginBottom: 8,
+    backgroundColor: "#F8F9FA",
+    borderWidth: 2,
+    borderColor: "transparent",
   },
   tipoOptionSelected: {
     backgroundColor: "#E3F2FD",
-    borderWidth: 2,
     borderColor: "#007AFF",
+  },
+  tipoOptionContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
   },
   tipoText: {
     fontSize: 16,
-    color: "#000",
+    color: "#212529",
+    marginLeft: 12,
     fontWeight: "500",
   },
   tipoTextSelected: {
     color: "#007AFF",
     fontWeight: "600",
   },
+  checkCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#007AFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   modalButtons: {
     flexDirection: "row",
-    justifyContent: "space-between",
     marginTop: 20,
     gap: 12,
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: 25,
+    flexDirection: "row",
+    justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 20,
   },
   modalButtonCancel: {
-    backgroundColor: "#F2F2F7",
+    backgroundColor: "#F8F9FA",
+    borderWidth: 2,
+    borderColor: "#DEE2E6",
   },
   modalButtonConfirm: {
     backgroundColor: "#007AFF",
   },
+  modalButtonDisabled: {
+    backgroundColor: "#E9ECEF",
+  },
   modalButtonText: {
+    color: "white",
     fontSize: 16,
     fontWeight: "600",
-    color: "white",
+    marginLeft: 6,
   },
   modalButtonTextCancel: {
+    color: "#6C757D",
     fontSize: 16,
     fontWeight: "600",
-    color: "#000",
   },
 });

@@ -383,7 +383,7 @@ export default function SalesScreen() {
       if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
         try {
           setValidandoUbicacion(true);
-          console.log("[Sales] 📍 Obteniendo ubicación del vendedor...");
+          // console.log("[Sales] 📍 Obteniendo ubicación del vendedor...");
           const ubicacionVendedor = await LocationService.getCurrentLocation();
 
           if (ubicacionVendedor) {
@@ -394,15 +394,20 @@ export default function SalesScreen() {
               clientePendienteVisita.longitud
             );
 
-            console.log(`[Sales] 📏 Distancia al cliente: ${distancia.toFixed(2)} metros`);
-
-            if (distancia > 30) {
+            // console.log(`[Sales] 📏 Distancia al cliente: ${distancia.toFixed(2)} metros`);
+            // Obtener usuario desde Realm para acceder al campo metros
+            const usuarioRealm = currentUser?.id ? FullSyncService.getUsuarioById(currentUser.id) : null;
+            const maxDistancia = usuarioRealm?.metros ?? currentUser?.metros ?? 31;
+            console.log(
+              `[Sales] 🎯 Máxima distancia permitida: ${maxDistancia} metros (usuario: ${currentUser?.claveEmpleado})`
+            );
+            if (distancia > maxDistancia) {
               setValidandoUbicacion(false);
               Alert.alert(
                 "Ubicación",
                 `Estás a ${distancia.toFixed(
                   0
-                )} metros del domicilio del cliente.\n\nDebes estar a menos de 30 metros para iniciar la visita.`
+                )} metros del domicilio del cliente.\n\nDebes estar a menos de ${maxDistancia} metros para iniciar la visita.`
               );
               setVisitaConfirmModalOpen(false);
               return;
@@ -1007,12 +1012,48 @@ export default function SalesScreen() {
           </View>
         )}
 
-        {/* Cliente */}
+        {/* Entregas del Día - VISTA PRINCIPAL */}
+        {/* <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>📋 Entregas del Día</Text>
+            <Text style={styles.badgeText}>{clientesEntregaDia.length}</Text>
+          </View>
+          {clientesEntregaDia.length === 0 ? (
+            <Text style={styles.muted}>No hay entregas programadas para hoy</Text>
+          ) : (
+            <View style={styles.clientesList}>
+              {clientesEntregaDia.map((cliente) => (
+                <TouchableOpacity
+                  key={cliente.id}
+                  style={[styles.clienteItem, selectedClient?.id === cliente.id && styles.clienteItemSelected]}
+                  onPress={() => {
+                    setSelectedClient(cliente);
+                    setClienteModalOpen(false);
+                  }}
+                >
+                  <View style={styles.clienteItemContent}>
+                    <Text style={styles.clienteItemName}>{cliente.nombre}</Text>
+                    <Text style={styles.clienteItemId}>#{cliente.id}</Text>
+                  </View>
+                  {selectedClient?.id === cliente.id && <Text style={styles.checkmark}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View> */}
+
+        {/* Cliente Seleccionado */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity style={styles.smallBtn} onPress={() => setClienteModalOpen(true)}>
-              <Text style={styles.smallBtnText}>Seleccionar</Text>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={() => {
+                setClienteModalOpen(true);
+                setFilteredClientes(clientesEntregaDia.length > 0 ? clientesEntregaDia : clientes);
+              }}
+            >
+              <Text style={styles.smallBtnText}>Cambiar</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
@@ -1177,15 +1218,6 @@ export default function SalesScreen() {
               {/* Botones de filtro */}
               <View style={styles.filterButtonsRow}>
                 <TouchableOpacity
-                  style={[styles.filterBtn, styles.filterBtnActive]}
-                  onPress={() => {
-                    setSearchQuery("");
-                    setFilteredClientes(clientes);
-                  }}
-                >
-                  <Text style={styles.filterBtnText}>Seleccionar todos</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   style={[styles.filterBtn, clientesEntregaDia.length === 0 && styles.filterBtnDisabled]}
                   onPress={() => {
                     setSearchQuery("");
@@ -1193,7 +1225,16 @@ export default function SalesScreen() {
                   }}
                   disabled={clientesEntregaDia.length === 0}
                 >
-                  <Text style={styles.filterBtnText}>Entrega día</Text>
+                  <Text style={styles.filterBtnText}>📋 Entrega día</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.filterBtn]}
+                  onPress={() => {
+                    setSearchQuery("");
+                    setFilteredClientes(clientes);
+                  }}
+                >
+                  <Text style={styles.filterBtnText}>Todos</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1470,6 +1511,54 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.s,
   },
   cardTitle: { ...TYPOGRAPHY.h3, fontSize: 18 },
+  badgeText: {
+    backgroundColor: COLORS.primary,
+    color: "#fff",
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.m,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  clientesList: {
+    marginTop: SPACING.s,
+  },
+  clienteItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.s,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  clienteItemSelected: {
+    backgroundColor: "#E3F2FD",
+    borderColor: COLORS.primary,
+    borderWidth: 2,
+  },
+  clienteItemContent: {
+    flex: 1,
+  },
+  clienteItemName: {
+    fontWeight: "600",
+    color: COLORS.textPrimary,
+    fontSize: 14,
+  },
+  clienteItemId: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  checkmark: {
+    color: COLORS.primary,
+    fontSize: 18,
+    fontWeight: "bold",
+    marginLeft: SPACING.s,
+  },
   valueText: {
     marginTop: SPACING.s,
     ...TYPOGRAPHY.body,

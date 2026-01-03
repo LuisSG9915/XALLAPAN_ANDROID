@@ -250,6 +250,13 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
           </View>
         )}
 
+        {/* Información de Sucursal y Usuario */}
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoLabel}>
+            Parámetros de Sincronización: 📍 Sucursal: {state.sucursal || "N/A"} 👤 Usuario: {state.idUsuario || "N/A"}
+          </Text>
+        </View>
+
         {/* Última sincronización */}
         {state.lastSyncTime && (
           <View style={styles.row}>
@@ -380,6 +387,25 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     backgroundColor: COLORS.primary,
+  },
+  infoContainer: {
+    backgroundColor: COLORS.background,
+    padding: SPACING.s,
+    borderRadius: BORDER_RADIUS.s,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.primary,
+    marginVertical: SPACING.s,
+  },
+  infoLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  infoText: {
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    marginBottom: 4,
   },
   errorContainer: {
     backgroundColor: "#FFEBEE",

@@ -10,8 +10,8 @@ export class ClientesSyncTask extends SyncTask {
     return "Clientes";
   }
 
-  getEndpoint(): string {
-    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full";
+  getEndpoint(sucursal: number = 1): string {
+    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
   }
 
   getPriority(): number {
@@ -24,9 +24,10 @@ export class ClientesSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log("[ClientesSyncTask] Obteniendo clientes desde API...");
+      const sucursal = this.sucursal || 1;
+      console.log("[ClientesSyncTask] Obteniendo clientes desde API (sucursal: " + sucursal + ")...");
 
-      const response = await fetch(this.getEndpoint());
+      const response = await fetch(this.getEndpoint(sucursal));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

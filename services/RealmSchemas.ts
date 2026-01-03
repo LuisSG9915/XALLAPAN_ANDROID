@@ -40,6 +40,7 @@ export const UsuarioSchema = {
     claveEmpleado: "string?",
     password: "string?",
     sucursalOrigen: "int?",
+    metros: "float?",
     syncedAt: "date",
   },
   primaryKey: "id",

@@ -21,13 +21,23 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 10, // v10: agregado campo tipoVisita a Visita y DetalleVisitas, agregada tabla TipoVisita
+        schemaVersion: 11, // v11: agregado campo metros a Usuario
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
           for (let i = 0; i < newCartera.length; i++) {
             const obj: any = newCartera[i];
             if (typeof obj.cobrado === "undefined") {
               obj.cobrado = false;
+            }
+          }
+
+          // Migración para Usuario - inicializar campo metros
+          const newUsuarios = newRealm.objects("Usuario");
+          for (let i = 0; i < newUsuarios.length; i++) {
+            const obj: any = newUsuarios[i];
+            if (typeof obj.metros === "undefined" || obj.metros === null) {
+              obj.metros = 31; // Valor por defecto
             }
           }
         },
@@ -226,13 +236,15 @@ class FullSyncService {
           // Si no hay sincronización previa, usar fecha de hoy menos 1 día para no traer todo
           if (!last) {
             last = new Date();
-            last.setDate(last.getDate() - 1); // Restar 1 día
+            last.setDate(last.getDate() - 2); // Restar 1 día
           }
 
           const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(
+            fechaInicial
+          )}&sucursal=${sucursal}`;
 
-          console.log("[Incremental] Clientes desde", fechaInicial);
+          console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
           console.log("[Incremental] URL completa:", url);
 
           const response = await fetch(url, {
@@ -1673,6 +1685,11 @@ class FullSyncService {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     const tipoVisitas = this.realm.objects("TipoVisita");
     return Array.from(tipoVisitas);
+  }
+
+  getUsuarioById(id: number): any {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    return this.realm.objectForPrimaryKey("Usuario", id);
   }
 
   isServiceInitialized(): boolean {

@@ -1,17 +1,17 @@
-import Realm, { UpdateMode } from 'realm';
-import { SyncTask, SyncTaskResult } from '../SyncTask';
-import { UsuarioSchema } from '../../RealmSchemas';
+import Realm, { UpdateMode } from "realm";
+import { SyncTask, SyncTaskResult } from "../SyncTask";
+import { UsuarioSchema } from "../../RealmSchemas";
 
 /**
  * Tarea de sincronización para la tabla Usuarios
  */
 export class UsuariosSyncTask extends SyncTask {
   getTableName(): string {
-    return 'Usuarios';
+    return "Usuarios";
   }
 
   getEndpoint(): string {
-    return 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/usuarios/full';
+    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/usuarios/full";
   }
 
   getPriority(): number {
@@ -24,14 +24,15 @@ export class UsuariosSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log('[UsuariosSyncTask] Obteniendo usuarios desde API...');
-      
+      console.log("[UsuariosSyncTask] Obteniendo usuarios desde API...");
+
       const response = await fetch(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const usuarios = await response.json();
+      console.log({ usuarios });
       const registrosLeidos = usuarios.length;
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
@@ -42,8 +43,8 @@ export class UsuariosSyncTask extends SyncTask {
       // Sincronizar con Realm
       this.realm.write(() => {
         for (const usuario of usuarios) {
-          const existing = this.realm.objectForPrimaryKey('Usuario', usuario.id);
-          
+          const existing = this.realm.objectForPrimaryKey("Usuario", usuario.id);
+
           const usuarioData = {
             ...usuario,
             syncedAt: new Date(),
@@ -51,10 +52,10 @@ export class UsuariosSyncTask extends SyncTask {
           };
 
           if (existing) {
-            this.realm.create('Usuario', usuarioData, UpdateMode.Modified);
+            this.realm.create("Usuario", usuarioData, UpdateMode.Modified);
             registrosActualizados++;
           } else {
-            this.realm.create('Usuario', usuarioData);
+            this.realm.create("Usuario", usuarioData);
             registrosGuardados++;
           }
         }
@@ -72,10 +73,10 @@ export class UsuariosSyncTask extends SyncTask {
         },
       };
     } catch (error) {
-      console.error('[UsuariosSyncTask] Error:', error);
+      console.error("[UsuariosSyncTask] Error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Error desconocido',
+        error: error instanceof Error ? error.message : "Error desconocido",
       };
     }
   }

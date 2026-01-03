@@ -1,5 +1,5 @@
-import Realm from 'realm';
-import { SyncTableLogSchema } from '../RealmSchemas';
+import Realm from "realm";
+import { SyncTableLogSchema } from "../RealmSchemas";
 
 /**
  * Interfaz para el resultado de una sincronización individual
@@ -20,7 +20,7 @@ export interface SyncProgress {
   current: number;
   total: number;
   entity: string;
-  status: 'syncing' | 'success' | 'error';
+  status: "syncing" | "success" | "error";
   message: string;
 }
 
@@ -31,10 +31,12 @@ export interface SyncProgress {
 export abstract class SyncTask {
   protected realm: Realm;
   protected syncLogId: string;
+  protected sucursal?: number;
 
-  constructor(realm: Realm, syncLogId: string) {
+  constructor(realm: Realm, syncLogId: string, sucursal?: number) {
     this.realm = realm;
     this.syncLogId = syncLogId;
+    this.sucursal = sucursal;
   }
 
   /**
@@ -73,16 +75,12 @@ export abstract class SyncTask {
   /**
    * Guarda un log detallado de la sincronización de esta tabla
    */
-  protected async saveTableLog(
-    result: SyncTaskResult,
-    fechaInicio: Date,
-    fechaFinal: Date,
-  ): Promise<void> {
+  protected async saveTableLog(result: SyncTaskResult, fechaInicio: Date, fechaFinal: Date): Promise<void> {
     try {
       const duracionMs = fechaFinal.getTime() - fechaInicio.getTime();
 
       this.realm.write(() => {
-        this.realm.create('SyncTableLog', {
+        this.realm.create("SyncTableLog", {
           id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           syncLogId: this.syncLogId,
           tabla: this.getTableName(),
@@ -106,10 +104,7 @@ export abstract class SyncTask {
         registrosGuardados: result.registrosGuardados,
       });
     } catch (error) {
-      console.error(
-        `[${this.getTableName()}] Error al guardar bitácora:`,
-        error,
-      );
+      console.error(`[${this.getTableName()}] Error al guardar bitácora:`, error);
     }
   }
 
@@ -118,9 +113,7 @@ export abstract class SyncTask {
    */
   async executeWithLogging(): Promise<SyncTaskResult> {
     const fechaInicio = new Date();
-    console.log(
-      `[${this.getTableName()}] Iniciando sincronización con retry logic...`,
-    );
+    console.log(`[${this.getTableName()}] Iniciando sincronización con retry logic...`);
 
     const maxRetries = 3;
     const baseDelay = 1000; // 1 segundo
@@ -131,11 +124,9 @@ export abstract class SyncTask {
         if (attempt > 1) {
           const delay = baseDelay * Math.pow(2, attempt - 2); // Exponential backoff
           console.log(
-            `[${this.getTableName()}] Reintentando sincronización (intento ${attempt}/${maxRetries}) después de ${delay}ms...`,
+            `[${this.getTableName()}] Reintentando sincronización (intento ${attempt}/${maxRetries}) después de ${delay}ms...`
           );
-          await new Promise<void>(resolve =>
-            setTimeout(() => resolve(), delay),
-          );
+          await new Promise<void>((resolve) => setTimeout(() => resolve(), delay));
         }
 
         const result = await this.execute();
@@ -151,12 +142,8 @@ export abstract class SyncTask {
 
         return result;
       } catch (error) {
-        lastError =
-          error instanceof Error ? error : new Error('Error desconocido');
-        console.error(
-          `[${this.getTableName()}] Intento ${attempt}/${maxRetries} fallido:`,
-          lastError.message,
-        );
+        lastError = error instanceof Error ? error : new Error("Error desconocido");
+        console.error(`[${this.getTableName()}] Intento ${attempt}/${maxRetries} fallido:`, lastError.message);
 
         // Si es el último intento, guardar el error y retornar
         if (attempt === maxRetries) {
@@ -175,7 +162,7 @@ export abstract class SyncTask {
 
           console.error(
             `[${this.getTableName()}] Sincronización fallida después de ${maxRetries} intentos:`,
-            lastError,
+            lastError
           );
           return errorResult;
         }
@@ -185,7 +172,7 @@ export abstract class SyncTask {
     // Este código nunca debería ejecutarse, pero TypeScript lo requiere
     const errorResult: SyncTaskResult = {
       success: false,
-      error: lastError?.message || 'Error desconocido',
+      error: lastError?.message || "Error desconocido",
     };
     return errorResult;
   }
@@ -195,18 +182,16 @@ export abstract class SyncTask {
    */
   private isNetworkError(error: Error): boolean {
     const networkErrorMessages = [
-      'network',
-      'timeout',
-      'connection',
-      'fetch',
-      'ECONNRESET',
-      'ENOTFOUND',
-      'ETIMEDOUT',
-      'HTTP 5',
+      "network",
+      "timeout",
+      "connection",
+      "fetch",
+      "ECONNRESET",
+      "ENOTFOUND",
+      "ETIMEDOUT",
+      "HTTP 5",
     ];
 
-    return networkErrorMessages.some(msg =>
-      error.message.toLowerCase().includes(msg.toLowerCase()),
-    );
+    return networkErrorMessages.some((msg) => error.message.toLowerCase().includes(msg.toLowerCase()));
   }
 }

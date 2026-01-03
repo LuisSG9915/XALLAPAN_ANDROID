@@ -32,6 +32,8 @@ export interface BackgroundSyncState {
   currentProgress: SyncProgress | null;
   errorMessage: string | null;
   syncCount: number;
+  sucursal?: number;
+  idUsuario?: number;
 }
 
 type StateListener = (state: BackgroundSyncState) => void;
@@ -336,7 +338,9 @@ class BackgroundSyncService {
       clearTimeout(timeoutId);
 
       const syncDuration = Date.now() - syncStartTime;
-      console.log(`[BackgroundSync] Sincronización finalizada en ${syncDuration}ms`);
+      console.log(
+        `[BackgroundSync] Sincronización finalizada en ${syncDuration}ms - Sucursal: ${sucursal}, Usuario: ${idUsuario}`
+      );
 
       if (result.success) {
         this.updateState({
@@ -346,8 +350,12 @@ class BackgroundSyncService {
           currentProgress: null,
           errorMessage: null,
           syncCount: this.state.syncCount + 1,
+          sucursal,
+          idUsuario,
         });
-        console.log("[BackgroundSync] ✅ Sincronización completada exitosamente");
+        console.log(
+          `[BackgroundSync] ✅ Sincronización completada exitosamente (Sucursal: ${sucursal}, Usuario: ${idUsuario})`
+        );
       } else {
         this.updateState({
           status: "error",
@@ -356,7 +364,10 @@ class BackgroundSyncService {
           currentProgress: null,
           errorMessage: result.error || "Error desconocido",
         });
-        console.log("[BackgroundSync] ❌ Sincronización completada con errores:", result.error);
+        console.log(
+          `[BackgroundSync] ❌ Sincronización completada con errores (Sucursal: ${sucursal}, Usuario: ${idUsuario}):`,
+          result.error
+        );
       }
     } catch (error: any) {
       // Limpiar timeout

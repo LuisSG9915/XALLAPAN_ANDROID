@@ -449,13 +449,17 @@ function AppContent({ navigation }: { navigation: any }) {
     try {
       const user = await AuthService.restoreSession();
       const sucursal = user?.sucursal_origen || user?.sucursal || 1;
+      const vendedor = user?.id || 0;
 
       await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
         setSyncProgress((prev) => [...prev, progress]);
       });
 
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-      Alert.alert("✅ Sincronización Completa", "Todos los datos han sido actualizados correctamente.");
+      Alert.alert(
+        "✅ Sincronización Completa",
+        `Todos los datos han sido actualizados correctamente.\n\nSucursal: ${sucursal}\nVendedor: ${vendedor}`
+      );
     } catch (error: any) {
       Alert.alert("❌ Error de Sincronización", error?.message || "No se pudo completar la sincronización");
     } finally {

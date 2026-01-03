@@ -6,11 +6,8 @@ import { VentaSchema } from "../../RealmSchemas";
  * Tarea de sincronización para la tabla Ventas
  */
 export class VentasSyncTask extends SyncTask {
-  private sucursal: number;
-
   constructor(realm: Realm, syncLogId: string, sucursal: number) {
-    super(realm, syncLogId);
-    this.sucursal = sucursal;
+    super(realm, syncLogId, sucursal);
   }
 
   getTableName(): string {

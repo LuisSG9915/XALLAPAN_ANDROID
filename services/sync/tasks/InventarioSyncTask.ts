@@ -6,11 +6,8 @@ import { InventarioSchema } from "../../RealmSchemas";
  * Tarea de sincronización para la tabla Inventario
  */
 export class InventarioSyncTask extends SyncTask {
-  private sucursal: number;
-
   constructor(realm: Realm, syncLogId: string, sucursal: number) {
-    super(realm, syncLogId);
-    this.sucursal = sucursal;
+    super(realm, syncLogId, sucursal);
   }
 
   getTableName(): string {
@@ -22,7 +19,7 @@ export class InventarioSyncTask extends SyncTask {
     const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
 
     return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
-      String(this.sucursal),
+      String(this.sucursal)
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
   }
   // fechaMovto
@@ -44,8 +41,8 @@ export class InventarioSyncTask extends SyncTask {
       }
 
       const inventario = await response.json();
-      console.log({inventario});
-      console.log({inventarioLength: inventario.length});
+      console.log({ inventario });
+      console.log({ inventarioLength: inventario.length });
       const registrosLeidos = inventario.length;
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
@@ -78,10 +75,10 @@ export class InventarioSyncTask extends SyncTask {
         // 2. Eliminar registros que ya no existen en el servidor
         // Obtener todos los registros locales de esta sucursal
         const inventarioLocal = this.realm.objects("Inventario").filtered("sucursal == $0", this.sucursal);
-        
+
         // Crear Set con los IDs del servidor para búsqueda rápida
         const idsServidor = new Set(inventario.map((item: any) => item.id));
-        
+
         // Encontrar y eliminar registros que no están en el servidor
         const registrosAEliminar: any[] = [];
         inventarioLocal.forEach((item: any) => {
