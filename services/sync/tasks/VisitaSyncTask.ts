@@ -27,7 +27,8 @@ export class VisitaSyncTask extends SyncTask {
   }
 
   async execute(): Promise<SyncTaskResult> {
-    const result = await this.visitaService.syncFull();
+    // Sincronizar visitas de hoy
+    const result = await this.visitaService.syncByDate(new Date());
 
     if (!result.success) {
       throw new Error(result.error || "Error al sincronizar visitas");

@@ -23,22 +23,10 @@ interface Visita {
   id: number;
   idCliente: number;
   ruta: string;
-  l: boolean;
-  m: boolean;
-  mi: boolean;
-  j: boolean;
-  v: boolean;
-  s: boolean;
-  d: boolean;
-  ordenL: number;
-  ordenM: number;
-  ordenMi: number;
-  ordenJ: number;
-  ordenV: number;
-  ordenS: number;
-  ordenD: number;
-  visitado: boolean;
-  fecha?: string | null;
+  fecha: Date;
+  orden: number;
+  tipo: number;
+  visitado: number;
 }
 
 interface VisitaConCliente extends Visita {
@@ -53,18 +41,24 @@ interface Estadisticas {
 
 export default function CumplimientoScreen() {
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
+  const [fechaSeleccionada, setFechaSeleccionada] = useState<Date>(new Date());
 
   useEffect(() => {
     const init = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
+        const vendedor =
+          (user.claveEmpleado as string | undefined) ||
+          (user.nombre as string | undefined) ||
+          "";
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
+          (user.sucursal_origen as number | null | undefined) ??
+          (user.sucursal as number | null | undefined) ??
+          1;
         setCurrentSucursal(sucursal);
 
         // Cargar datos después de establecer la sucursal
-        cargarDatos(sucursal);
+        cargarDatos(new Date(), sucursal);
       }
     };
 
@@ -80,8 +74,12 @@ export default function CumplimientoScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
-  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
+  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(
+    null
+  );
+  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(
+    null
+  );
 
   // Obtener tipos de visita desde la base de datos
   const getTipoVisitas = () => {
@@ -104,16 +102,16 @@ export default function CumplimientoScreen() {
     }
   };
 
-  const cargarDatos = useCallback((sucursal: number) => {
+  const cargarDatos = useCallback((fecha: Date, sucursal: number) => {
     setLoading(true);
     Promise.all([
-      VisitaSyncService.getInstance().getVisitasDelDia(sucursal),
-      VisitaSyncService.getInstance().getEstadisticasCumplimiento(sucursal),
+      VisitaSyncService.getInstance().getVisitasByFecha(fecha, sucursal),
+      VisitaSyncService.getInstance().getEstadisticasCumplimiento(fecha, sucursal),
     ])
       .then(([visitasDelDia, stats]) => {
         // Obtener nombres de clientes
         Promise.all(
-          visitasDelDia.map((visita) => {
+          visitasDelDia.map((visita: any) => {
             return obtenerNombreCliente(visita.idCliente).then((nombreCliente) => ({
               ...visita,
               nombreCliente,
@@ -141,7 +139,7 @@ export default function CumplimientoScreen() {
       return;
     }
 
-    if (visita.visitado) {
+    if (visita.visitado === 1) {
       Alert.alert("Información", "Esta visita ya fue marcada como realizada");
       return;
     }
@@ -160,7 +158,10 @@ export default function CumplimientoScreen() {
 
     setModalVisible(false);
 
-    const exito = await VisitaSyncService.getInstance().marcarVisitado(visitaSeleccionada.id, tipoVisitaSeleccionado);
+    const exito = await VisitaSyncService.getInstance().marcarVisitado(
+      visitaSeleccionada.id,
+      tipoVisitaSeleccionado
+    );
 
     if (exito) {
       // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
@@ -181,30 +182,50 @@ export default function CumplimientoScreen() {
       }
 
       Alert.alert("Éxito", "Visita marcada como realizada");
-      cargarDatos(currentSucursal);
+      cargarDatos(fechaSeleccionada, currentSucursal);
     } else {
       Alert.alert("Error", "No se pudo marcar la visita");
     }
   };
 
-  const obtenerNombreDia = () => {
-    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-    return dias[new Date().getDay()];
+  const obtenerNombreDia = (fecha: Date) => {
+    const dias = [
+      "Domingo",
+      "Lunes",
+      "Martes",
+      "Miércoles",
+      "Jueves",
+      "Viernes",
+      "Sábado",
+    ];
+    return dias[fecha.getDay()];
+  };
+
+  const formatearFecha = (fecha: Date) => {
+    const opciones: Intl.DateTimeFormatOptions = {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    };
+    return fecha.toLocaleDateString("es-MX", opciones);
+  };
+
+  const cambiarDia = (dias: number) => {
+    const nuevaFecha = new Date(fechaSeleccionada);
+    nuevaFecha.setDate(nuevaFecha.getDate() + dias);
+    setFechaSeleccionada(nuevaFecha);
+    cargarDatos(nuevaFecha, currentSucursal);
+  };
+
+  const sincronizarFecha = async () => {
+    setRefreshing(true);
+    await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    cargarDatos(fechaSeleccionada, currentSucursal);
   };
 
   const obtenerRangoHorario = (visita: Visita) => {
-    // Simular rango horario basado en el orden
-    const horaInicio =
-      8 +
-      (visita.ordenL ||
-        visita.ordenM ||
-        visita.ordenMi ||
-        visita.ordenJ ||
-        visita.ordenV ||
-        visita.ordenS ||
-        visita.ordenD) *
-        0.5;
-    const horaFin = horaInicio + 0.05; // 3 minutos
+    const horaInicio = 8 + visita.orden * 0.5;
+    const horaFin = horaInicio + 0.05;
 
     const formatoHora = (hora: number) => {
       const h = Math.floor(hora);
@@ -212,7 +233,7 @@ export default function CumplimientoScreen() {
       return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
     };
 
-    return `${formatoHora(horaInicio)} - ${formatoHora(horaFin)} `;
+    return `${formatoHora(horaInicio)} - ${formatoHora(horaFin)}`;
   };
 
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
@@ -223,36 +244,50 @@ export default function CumplimientoScreen() {
             <View style={styles.clienteRow}>
               <View style={styles.clienteIcon}>
                 <Icon
-                  name={item.visitado ? "check-circle" : "radio-button-unchecked"}
+                  name={item.visitado === 1 ? "check-circle" : "radio-button-unchecked"}
                   type="material"
-                  size={24}
-                  color={item.visitado ? "#34C759" : "#007AFF"}
+                  size={20}
+                  color={item.visitado === 1 ? "#34C759" : "#007AFF"}
                 />
               </View>
               <View style={styles.clienteDetails}>
                 <Text style={styles.clienteId}>#{item.idCliente}</Text>
-                <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
+                <Text style={styles.clienteNombre}>
+                  {item.nombreCliente || "Cargando..."}
+                </Text>
               </View>
             </View>
             <View style={styles.horaRow}>
-              <Icon name="schedule" type="material" size={16} color="#8E8E93" />
+              <Icon name="schedule" type="material" size={14} color="#8E8E93" />
               <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
             </View>
           </View>
           <TouchableOpacity
-            style={[styles.botonVisitado, item.visitado ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo]}
+            style={[
+              styles.botonVisitado,
+              item.visitado === 1
+                ? styles.botonVisitadoActivo
+                : styles.botonVisitadoInactivo,
+            ]}
             onPress={() => handleMarcarVisitado(item.id)}
-            disabled={item.visitado}
+            disabled={item.visitado === 1}
             activeOpacity={0.8}
           >
-            <Icon name={item.visitado ? "check" : "directions-walk"} type="material" size={20} color="white" />
+            <Icon
+              name={item.visitado === 1 ? "check" : "directions-walk"}
+              type="material"
+              size={16}
+              color="white"
+            />
             <Text
               style={[
                 styles.botonVisitadoTexto,
-                item.visitado ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
+                item.visitado === 1
+                  ? styles.botonVisitadoTextoActivo
+                  : styles.botonVisitadoTextoInactivo,
               ]}
             >
-              {item.visitado ? "Completado" : "Visitar"}
+              {item.visitado === 1 ? "Completado" : "Visitar"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -273,11 +308,35 @@ export default function CumplimientoScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.titulo}>Cumplimiento de agenda</Text>
+
+        <View style={styles.navegacionFechas}>
+          <TouchableOpacity
+            style={styles.botonFlecha}
+            onPress={() => cambiarDia(-1)}
+            activeOpacity={0.7}
+          >
+            <Icon name="chevron-left" type="material" size={24} color="white" />
+          </TouchableOpacity>
+
+          <View style={styles.fechaContainer}>
+            <Text style={styles.fechaTexto}>{formatearFecha(fechaSeleccionada)}</Text>
+            <Text style={styles.diaTexto}>{obtenerNombreDia(fechaSeleccionada)}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.botonFlecha}
+            onPress={() => cambiarDia(1)}
+            activeOpacity={0.7}
+          >
+            <Icon name="chevron-right" type="material" size={24} color="white" />
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.porcentaje}>{estadisticas.porcentaje.toFixed(1)}%</Text>
         <Text style={styles.subtitulo}>
-          {estadisticas.totalRealizadas} visitas realizadas de {estadisticas.totalProgramadas} programadas
+          {estadisticas.totalRealizadas} visitas realizadas de{" "}
+          {estadisticas.totalProgramadas} programadas
         </Text>
-        <Text style={styles.diaTexto}>{obtenerNombreDia()}</Text>
       </View>
 
       <FlatList
@@ -286,13 +345,7 @@ export default function CumplimientoScreen() {
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              cargarDatos(currentSucursal);
-            }}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -314,11 +367,15 @@ export default function CumplimientoScreen() {
               <View style={styles.clienteInfoModal}>
                 <Icon name="person" type="material" size={20} color="#8E8E93" />
                 <Text style={styles.modalSubtitle}>
-                  {visitaSeleccionada?.nombreCliente || `Cliente #${visitaSeleccionada?.idCliente}`}
+                  {visitaSeleccionada?.nombreCliente ||
+                    `Cliente #${visitaSeleccionada?.idCliente}`}
                 </Text>
               </View>
 
-              <ScrollView style={styles.tiposContainer} showsVerticalScrollIndicator={false}>
+              <ScrollView
+                style={styles.tiposContainer}
+                showsVerticalScrollIndicator={false}
+              >
                 {tiposVisita
                   .filter((tipo) => tipo.id !== 1)
                   .map((tipo) => {
@@ -331,7 +388,10 @@ export default function CumplimientoScreen() {
                     return (
                       <TouchableOpacity
                         key={tipo.id}
-                        style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
+                        style={[
+                          styles.tipoOption,
+                          tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected,
+                        ]}
                         onPress={() => setTipoVisitaSeleccionado(tipo.id)}
                         activeOpacity={0.7}
                       >
@@ -340,10 +400,16 @@ export default function CumplimientoScreen() {
                             name={icons[tipo.id] || "label"}
                             type="material"
                             size={24}
-                            color={tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"}
+                            color={
+                              tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"
+                            }
                           />
                           <Text
-                            style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}
+                            style={[
+                              styles.tipoText,
+                              tipoVisitaSeleccionado === tipo.id &&
+                                styles.tipoTextSelected,
+                            ]}
                           >
                             {tipo.descripcion}
                           </Text>
@@ -406,66 +472,92 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: "#007AFF",
-    paddingTop: 60,
-    paddingBottom: 24,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    paddingTop: 50,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
   titulo: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "bold",
     color: "white",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   porcentaje: {
-    fontSize: 36,
+    fontSize: 28,
     fontWeight: "bold",
     color: "white",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   subtitulo: {
-    fontSize: 16,
+    fontSize: 14,
     color: "white",
     opacity: 0.9,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   diaTexto: {
     fontSize: 14,
     color: "white",
-    opacity: 0.8,
+    opacity: 0.9,
+  },
+  navegacionFechas: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginVertical: 12,
+    paddingHorizontal: 4,
+  },
+  botonFlecha: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fechaContainer: {
+    flex: 1,
+    alignItems: "center",
+    marginHorizontal: 12,
+  },
+  fechaTexto: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "white",
+    marginBottom: 2,
   },
   statsContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
     backgroundColor: "white",
-    marginHorizontal: 24,
-    paddingVertical: 20,
-    borderRadius: 16,
-    marginTop: -30,
-    elevation: 8,
+    marginHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: -20,
+    elevation: 6,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 4,
   },
   statItem: {
     alignItems: "center",
   },
   statValor: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#007AFF",
   },
   statLabel: {
-    fontSize: 13,
+    fontSize: 11,
     color: "#8E8E93",
-    marginTop: 4,
+    marginTop: 2,
     fontWeight: "500",
   },
   lista: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   listaContainer: {
     flex: 1,
@@ -473,23 +565,23 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   visitaContainer: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   visitaCard: {
     backgroundColor: "white",
-    borderRadius: 16,
-    elevation: 4,
+    borderRadius: 12,
+    elevation: 3,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 3,
     overflow: "hidden",
   },
   visitaHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
+    padding: 14,
   },
   visitaInfo: {
     flex: 1,
@@ -500,46 +592,46 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   clienteIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
+    marginRight: 10,
   },
   clienteDetails: {
     flex: 1,
   },
   clienteId: {
-    fontSize: 12,
+    fontSize: 10,
     color: "#007AFF",
     fontWeight: "600",
-    marginBottom: 2,
+    marginBottom: 1,
   },
   clienteNombre: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#1C1C1E",
   },
   horaRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
+    marginTop: 4,
   },
   horaTexto: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#8E8E93",
-    marginLeft: 6,
+    marginLeft: 4,
     fontWeight: "500",
   },
   botonVisitado: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
-    minWidth: 100,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    minWidth: 80,
     justifyContent: "center",
   },
   botonVisitadoActivo: {
@@ -551,8 +643,8 @@ const styles = StyleSheet.create({
   botonVisitadoTexto: {
     color: "white",
     fontWeight: "600",
-    marginLeft: 6,
-    fontSize: 14,
+    marginLeft: 4,
+    fontSize: 12,
   },
   botonVisitadoTextoActivo: {
     color: "white",

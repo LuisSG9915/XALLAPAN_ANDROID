@@ -20,15 +20,20 @@ class VisitaSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 11,
+        schemaVersion: 12,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Usuario - inicializar campo metros
           const newUsuarios = newRealm.objects("Usuario");
           for (let i = 0; i < newUsuarios.length; i++) {
             const obj: any = newUsuarios[i];
             if (typeof obj.metros === "undefined" || obj.metros === null) {
-              obj.metros = 31; // Valor por defecto
+              obj.metros = 31;
             }
+          }
+          // Migración de Visitas: eliminar esquema antiguo
+          if (oldRealm.schemaVersion < 12) {
+            const oldVisitas = oldRealm.objects("Visita");
+            oldRealm.delete(oldVisitas);
           }
         },
       });
@@ -36,12 +41,12 @@ class VisitaSyncService {
     return this.realm;
   }
 
-  async syncFull(): Promise<SyncTaskResult> {
+  async syncByDate(fecha: Date): Promise<SyncTaskResult> {
     try {
-      console.log("[VisitaSync] Iniciando sincronización completa");
+      console.log(`[VisitaSync] Sincronizando visitas para fecha: ${fecha.toISOString()}`);
 
-      const response = await fetch("https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full");
-      if (!response.ok) {
+      const fechaStr = fecha.toISOString().split('T')[0];
+      const response = await fetch("https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full");      if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const visitasData = await response.json();
@@ -51,36 +56,45 @@ class VisitaSyncService {
       }
 
       const realm = await this.getRealm();
-      let actualizados = 0;
       let nuevos = 0;
 
       realm.write(() => {
-        // Limpiar todas las visitas existentes
-        const existingVisitas = realm.objects("Visita");
+        // Limpiar visitas de la fecha específica
+        const startOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+        const endOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1);
+        
+        const existingVisitas = realm.objects("Visita").filtered(`fecha >= $0 AND fecha < $1`, 
+          startOfDay,
+          endOfDay
+        );
+        console.log(`[VisitaSync] Eliminando ${existingVisitas.length} visitas existentes de la fecha`);
         realm.delete(existingVisitas);
 
-        // Insertar todas las visitas con syncedAr
+        // Insertar visitas de la fecha (update: true para evitar duplicados)
         visitasData.forEach((visita: any) => {
-          const visitaRealm = realm.create("Visita", {
-            ...visita,
-            syncedAr: new Date().toISOString(),
-          });
-
-          if (visita.id > 0) {
-            nuevos++;
-          }
+          realm.create("Visita", {
+            id: visita.id,
+            idCliente: visita.idCliente,
+            ruta: String(visita.ruta),
+            fecha: new Date(visita.fecha),
+            orden: Number(visita.orden),
+            tipo: Number(visita.tipo),
+            visitado: typeof visita.visitado === 'boolean' ? (visita.visitado ? 1 : 0) : Number(visita.visitado),
+            syncedAt: new Date(),
+          }, true); // true = update mode
+          nuevos++;
         });
       });
 
-      console.log(`[VisitaSync] ✅ Sincronización completa: ${nuevos} nuevas visitas`);
+      console.log(`[VisitaSync] ✅ Sincronización completa: ${nuevos} visitas para ${fechaStr}`);
       return {
         success: true,
         registrosLeidos: visitasData.length,
         registrosGuardados: nuevos,
-        registrosActualizados: actualizados,
+        registrosActualizados: 0,
       };
     } catch (error) {
-      console.error("[VisitaSync] ❌ Error en sincronización completa:", error);
+      console.error("[VisitaSync] ❌ Error en sincronización:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -93,12 +107,11 @@ class VisitaSyncService {
       const realm = await this.getRealm();
 
       realm.write(() => {
-        const visita = realm.objectForPrimaryKey("Visita", idVisita);
-        if (visita && !visita.visitado) {
-          visita.visitado = true;
-          visita.fecha = new Date().toISOString();
+        const visita: any = realm.objectForPrimaryKey("Visita", idVisita);
+        if (visita && visita.visitado === 0) {
+          visita.visitado = 1;
           if (tipoVisita !== undefined) {
-            visita.tipoVisita = tipoVisita;
+            visita.tipo = tipoVisita;
           }
           console.log(`[VisitaSync] ✅ Visita ${idVisita} marcada como visitada con tipo ${tipoVisita}`);
         }
@@ -111,69 +124,43 @@ class VisitaSyncService {
     }
   }
 
-  async getVisitasDelDia(sucursal: number): Promise<any[]> {
+  async getVisitasByFecha(fecha: Date, sucursal: number): Promise<any[]> {
     try {
       const realm = await this.getRealm();
-      const today = new Date().getDay(); // 0 = Domingo, 1 = Lunes, etc.
+      
+      const startOfDay = new Date(fecha);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(fecha);
+      endOfDay.setHours(23, 59, 59, 999);
 
-      const dayMap: { [key: number]: string } = {
-        0: "d", // Domingo
-        1: "l", // Lunes
-        2: "m", // Martes
-        3: "mi", // Miércoles
-        4: "j", // Jueves
-        5: "v", // Viernes
-        6: "s", // Sábado
-      };
+      let visitas = realm.objects("Visita")
+        .filtered(`fecha >= $0 AND fecha <= $1 AND ruta == $2`, startOfDay, endOfDay, sucursal.toString())
+        .sorted("orden");
 
-      const dayField = dayMap[today];
-
-      let visitas = realm.objects("Visita");
-
-      // Filtrar por día de la semana
-      visitas = visitas.filtered(`${dayField} == true AND ruta == '${sucursal}'`);
-
-      // Ordenar por el campo de orden correspondiente al día
-      const ordenField = `orden${dayField.charAt(0).toUpperCase() + dayField.slice(1)}`;
-      visitas = visitas.sorted(ordenField);
-
-      // Convertir a objetos JavaScript planos para evitar problemas con Realm cerrado
       return visitas.map((v: any) => ({
         id: v.id,
         idCliente: v.idCliente,
         ruta: v.ruta,
-        l: v.l,
-        m: v.m,
-        mi: v.mi,
-        j: v.j,
-        v: v.v,
-        s: v.s,
-        d: v.d,
-        ordenL: v.ordenL,
-        ordenM: v.ordenM,
-        ordenMi: v.ordenMi,
-        ordenJ: v.ordenJ,
-        ordenV: v.ordenV,
-        ordenS: v.ordenS,
-        ordenD: v.ordenD,
-        visitado: v.visitado,
         fecha: v.fecha,
+        orden: v.orden,
+        tipo: v.tipo,
+        visitado: v.visitado,
       }));
     } catch (error) {
-      console.error("[VisitaSync] ❌ Error al obtener visitas del día:", error);
+      console.error("[VisitaSync] ❌ Error al obtener visitas:", error);
       return [];
     }
   }
 
-  async getEstadisticasCumplimiento(sucursal: number): Promise<{
+  async getEstadisticasCumplimiento(fecha: Date, sucursal: number): Promise<{
     totalProgramadas: number;
     totalRealizadas: number;
     porcentaje: number;
   }> {
     try {
-      const visitas = await this.getVisitasDelDia(sucursal);
+      const visitas = await this.getVisitasByFecha(fecha, sucursal);
       const totalProgramadas = visitas.length;
-      const totalRealizadas = visitas.filter((v) => v.visitado).length;
+      const totalRealizadas = visitas.filter((v) => v.visitado === 1).length;
       const porcentaje = totalProgramadas > 0 ? (totalRealizadas / totalProgramadas) * 100 : 0;
 
       return {

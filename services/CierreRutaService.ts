@@ -13,7 +13,7 @@ class CierreRutaService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 11,
+        schemaVersion: 12,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Usuario - inicializar campo metros
           const newUsuarios = newRealm.objects("Usuario");
@@ -22,6 +22,11 @@ class CierreRutaService {
             if (typeof obj.metros === "undefined" || obj.metros === null) {
               obj.metros = 31; // Valor por defecto
             }
+          }
+          // Migración de Visitas: eliminar esquema antiguo
+          if (oldRealm.schemaVersion < 12) {
+            const oldVisitas = oldRealm.objects("Visita");
+            oldRealm.delete(oldVisitas);
           }
         },
       });

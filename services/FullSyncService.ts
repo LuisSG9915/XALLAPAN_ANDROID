@@ -21,7 +21,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 11, // v11: agregado campo metros a Usuario
+        schemaVersion: 12, // v12: nuevo schema de Visita basado en fechas
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -39,6 +39,11 @@ class FullSyncService {
             if (typeof obj.metros === "undefined" || obj.metros === null) {
               obj.metros = 31; // Valor por defecto
             }
+          }
+          // Migración de Visitas: eliminar esquema antiguo
+          if (oldRealm.schemaVersion < 12) {
+            const oldVisitas = oldRealm.objects("Visita");
+            oldRealm.delete(oldVisitas);
           }
         },
       });
