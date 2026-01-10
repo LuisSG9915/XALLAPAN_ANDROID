@@ -39,7 +39,7 @@ interface Estadisticas {
   porcentaje: number;
 }
 
-export default function CumplimientoScreen() {
+export default function CumplimientoScreen({ navigation }: { navigation: any }) {
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
   const [fechaSeleccionada, setFechaSeleccionada] = useState<Date>(new Date());
 
@@ -47,14 +47,9 @@ export default function CumplimientoScreen() {
     const init = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        const vendedor =
-          (user.claveEmpleado as string | undefined) ||
-          (user.nombre as string | undefined) ||
-          "";
+        const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ??
-          (user.sucursal as number | null | undefined) ??
-          1;
+          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
         setCurrentSucursal(sucursal);
 
         // Cargar datos después de establecer la sucursal
@@ -74,12 +69,8 @@ export default function CumplimientoScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(
-    null
-  );
-  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(
-    null
-  );
+  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
+  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
 
   // Obtener tipos de visita desde la base de datos
   const getTipoVisitas = () => {
@@ -158,10 +149,7 @@ export default function CumplimientoScreen() {
 
     setModalVisible(false);
 
-    const exito = await VisitaSyncService.getInstance().marcarVisitado(
-      visitaSeleccionada.id,
-      tipoVisitaSeleccionado
-    );
+    const exito = await VisitaSyncService.getInstance().marcarVisitado(visitaSeleccionada.id, tipoVisitaSeleccionado);
 
     if (exito) {
       // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
@@ -189,15 +177,7 @@ export default function CumplimientoScreen() {
   };
 
   const obtenerNombreDia = (fecha: Date) => {
-    const dias = [
-      "Domingo",
-      "Lunes",
-      "Martes",
-      "Miércoles",
-      "Jueves",
-      "Viernes",
-      "Sábado",
-    ];
+    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
     return dias[fecha.getDay()];
   };
 
@@ -236,6 +216,14 @@ export default function CumplimientoScreen() {
     return `${formatoHora(horaInicio)} - ${formatoHora(horaFin)}`;
   };
 
+  const handleIrAVentas = (visita: VisitaConCliente) => {
+    navigation.navigate("Sales", {
+      clienteId: visita.idCliente,
+      nombreCliente: visita.nombreCliente,
+      desdeVisita: true,
+    });
+  };
+
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
     <View style={styles.visitaContainer}>
       <View style={styles.visitaCard}>
@@ -252,9 +240,7 @@ export default function CumplimientoScreen() {
               </View>
               <View style={styles.clienteDetails}>
                 <Text style={styles.clienteId}>#{item.idCliente}</Text>
-                <Text style={styles.clienteNombre}>
-                  {item.nombreCliente || "Cargando..."}
-                </Text>
+                <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
               </View>
             </View>
             <View style={styles.horaRow}>
@@ -262,34 +248,33 @@ export default function CumplimientoScreen() {
               <Text style={styles.horaTexto}>{obtenerRangoHorario(item)}</Text>
             </View>
           </View>
-          <TouchableOpacity
-            style={[
-              styles.botonVisitado,
-              item.visitado === 1
-                ? styles.botonVisitadoActivo
-                : styles.botonVisitadoInactivo,
-            ]}
-            onPress={() => handleMarcarVisitado(item.id)}
-            disabled={item.visitado === 1}
-            activeOpacity={0.8}
-          >
-            <Icon
-              name={item.visitado === 1 ? "check" : "directions-walk"}
-              type="material"
-              size={16}
-              color="white"
-            />
-            <Text
+          <View style={styles.botonesContainer}>
+            {item.visitado === 0 && (
+              <TouchableOpacity style={styles.botonVentas} onPress={() => handleIrAVentas(item)} activeOpacity={0.8}>
+                <Icon name="shopping-cart" type="material" size={16} color="white" />
+                <Text style={styles.botonVentasTexto}>Ventas</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
               style={[
-                styles.botonVisitadoTexto,
-                item.visitado === 1
-                  ? styles.botonVisitadoTextoActivo
-                  : styles.botonVisitadoTextoInactivo,
+                styles.botonVisitado,
+                item.visitado === 1 ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
               ]}
+              onPress={() => handleMarcarVisitado(item.id)}
+              disabled={item.visitado === 1}
+              activeOpacity={0.8}
             >
-              {item.visitado === 1 ? "Completado" : "Visitar"}
-            </Text>
-          </TouchableOpacity>
+              <Icon name={item.visitado === 1 ? "check" : "directions-walk"} type="material" size={16} color="white" />
+              <Text
+                style={[
+                  styles.botonVisitadoTexto,
+                  item.visitado === 1 ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
+                ]}
+              >
+                {item.visitado === 1 ? "Completado" : "Visitar"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </View>
@@ -310,11 +295,7 @@ export default function CumplimientoScreen() {
         <Text style={styles.titulo}>Cumplimiento de agenda</Text>
 
         <View style={styles.navegacionFechas}>
-          <TouchableOpacity
-            style={styles.botonFlecha}
-            onPress={() => cambiarDia(-1)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.botonFlecha} onPress={() => cambiarDia(-1)} activeOpacity={0.7}>
             <Icon name="chevron-left" type="material" size={24} color="white" />
           </TouchableOpacity>
 
@@ -323,19 +304,14 @@ export default function CumplimientoScreen() {
             <Text style={styles.diaTexto}>{obtenerNombreDia(fechaSeleccionada)}</Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.botonFlecha}
-            onPress={() => cambiarDia(1)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.botonFlecha} onPress={() => cambiarDia(1)} activeOpacity={0.7}>
             <Icon name="chevron-right" type="material" size={24} color="white" />
           </TouchableOpacity>
         </View>
 
         <Text style={styles.porcentaje}>{estadisticas.porcentaje.toFixed(1)}%</Text>
         <Text style={styles.subtitulo}>
-          {estadisticas.totalRealizadas} visitas realizadas de{" "}
-          {estadisticas.totalProgramadas} programadas
+          {estadisticas.totalRealizadas} visitas realizadas de {estadisticas.totalProgramadas} programadas
         </Text>
       </View>
 
@@ -344,9 +320,7 @@ export default function CumplimientoScreen() {
         renderItem={renderVisita}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="event" type="material" size={64} color="#C7C7CC" />
@@ -367,15 +341,11 @@ export default function CumplimientoScreen() {
               <View style={styles.clienteInfoModal}>
                 <Icon name="person" type="material" size={20} color="#8E8E93" />
                 <Text style={styles.modalSubtitle}>
-                  {visitaSeleccionada?.nombreCliente ||
-                    `Cliente #${visitaSeleccionada?.idCliente}`}
+                  {visitaSeleccionada?.nombreCliente || `Cliente #${visitaSeleccionada?.idCliente}`}
                 </Text>
               </View>
 
-              <ScrollView
-                style={styles.tiposContainer}
-                showsVerticalScrollIndicator={false}
-              >
+              <ScrollView style={styles.tiposContainer} showsVerticalScrollIndicator={false}>
                 {tiposVisita
                   .filter((tipo) => tipo.id !== 1)
                   .map((tipo) => {
@@ -388,10 +358,7 @@ export default function CumplimientoScreen() {
                     return (
                       <TouchableOpacity
                         key={tipo.id}
-                        style={[
-                          styles.tipoOption,
-                          tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected,
-                        ]}
+                        style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
                         onPress={() => setTipoVisitaSeleccionado(tipo.id)}
                         activeOpacity={0.7}
                       >
@@ -400,16 +367,10 @@ export default function CumplimientoScreen() {
                             name={icons[tipo.id] || "label"}
                             type="material"
                             size={24}
-                            color={
-                              tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"
-                            }
+                            color={tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"}
                           />
                           <Text
-                            style={[
-                              styles.tipoText,
-                              tipoVisitaSeleccionado === tipo.id &&
-                                styles.tipoTextSelected,
-                            ]}
+                            style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}
                           >
                             {tipo.descripcion}
                           </Text>
@@ -582,6 +543,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     padding: 14,
+  },
+  botonesContainer: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  botonVentas: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#FF9500",
+    minWidth: 70,
+    justifyContent: "center",
+  },
+  botonVentasTexto: {
+    color: "white",
+    fontWeight: "600",
+    marginLeft: 4,
+    fontSize: 12,
   },
   visitaInfo: {
     flex: 1,
