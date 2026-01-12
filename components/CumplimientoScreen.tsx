@@ -323,7 +323,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const sincronizarFecha = async () => {
     setRefreshing(true);
-    await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada, currentSucursal);
     cargarDatos(fechaSeleccionada, currentSucursal);
   };
 

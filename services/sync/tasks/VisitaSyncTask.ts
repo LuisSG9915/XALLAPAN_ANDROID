@@ -5,8 +5,8 @@ import VisitaSyncService from "../../VisitaSyncService";
 export class VisitaSyncTask extends SyncTask {
   private visitaService: VisitaSyncService;
 
-  constructor(realm: Realm, syncLogId: string) {
-    super(realm, syncLogId);
+  constructor(realm: Realm, syncLogId: string, sucursal: number) {
+    super(realm, syncLogId, sucursal);
     this.visitaService = VisitaSyncService.getInstance();
   }
 
@@ -27,8 +27,9 @@ export class VisitaSyncTask extends SyncTask {
   }
 
   async execute(): Promise<SyncTaskResult> {
+    const sucursal = this.sucursal || 1;
     // Sincronizar visitas de hoy
-    const result = await this.visitaService.syncByDate(new Date());
+    const result = await this.visitaService.syncByDate(new Date(), sucursal);
 
     if (!result.success) {
       throw new Error(result.error || "Error al sincronizar visitas");

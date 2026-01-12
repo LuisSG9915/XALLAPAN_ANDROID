@@ -20,7 +20,7 @@ class VisitaSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 12,
+        schemaVersion: 15, // v15: Agregados campos detallados a BitacoraSync
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Usuario - inicializar campo metros
           const newUsuarios = newRealm.objects("Usuario");
@@ -41,33 +41,40 @@ class VisitaSyncService {
     return this.realm;
   }
 
-  async syncByDate(fecha: Date): Promise<SyncTaskResult> {
+  async syncByDate(fecha: Date, sucursal: number): Promise<SyncTaskResult> {
     try {
-      console.log(`[VisitaSync] Sincronizando visitas para fecha: ${fecha.toISOString()}`);
+      console.log(`[VisitaSync] Sincronizando visitas para fecha: ${fecha.toISOString().split('T')[0]}, Sucursal: ${sucursal}`);
 
       const fechaStr = fecha.toISOString().split('T')[0];
-      const response = await fetch("https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full");      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const url = `https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full?fecha=${fechaStr}&sucursal=${sucursal}`;
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status} url: ${url}`);
       }
       const visitasData = await response.json();
-      console.log(visitasData);
+      
       if (!Array.isArray(visitasData)) {
         throw new Error("La respuesta no es un array de visitas");
       }
+
+      console.log(`[VisitaSync] Recibidos ${visitasData.length} registros`);
 
       const realm = await this.getRealm();
       let nuevos = 0;
 
       realm.write(() => {
-        // Limpiar visitas de la fecha específica
+        // Limpiar visitas de la fecha específica Y de la ruta/sucursal específica
+        // Para evitar borrar visitas de otras rutas si se sincronizaran
         const startOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
         const endOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1);
         
-        const existingVisitas = realm.objects("Visita").filtered(`fecha >= $0 AND fecha < $1`, 
+        const existingVisitas = realm.objects("Visita").filtered(`fecha >= $0 AND fecha < $1 AND ruta == $2`, 
           startOfDay,
-          endOfDay
+          endOfDay,
+          String(sucursal)
         );
-        console.log(`[VisitaSync] Eliminando ${existingVisitas.length} visitas existentes de la fecha`);
+        console.log(`[VisitaSync] Eliminando ${existingVisitas.length} visitas existentes para la fecha y ruta`);
         realm.delete(existingVisitas);
 
         // Insertar visitas de la fecha (update: true para evitar duplicados)
@@ -80,7 +87,7 @@ class VisitaSyncService {
             orden: Number(visita.orden),
             tipo: Number(visita.tipo),
             visitado: typeof visita.visitado === 'boolean' ? (visita.visitado ? 1 : 0) : Number(visita.visitado),
-            syncedAt: new Date(),
+            syncedAr: null, // Reset sync status or set based on logic
           }, true); // true = update mode
           nuevos++;
         });

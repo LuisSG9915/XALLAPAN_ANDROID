@@ -1,5 +1,6 @@
 import Realm from "realm";
 import { SyncTask, SyncTaskResult } from "../SyncTask";
+import BitacoraService from "../../BitacoraService";
 
 /**
  * Tarea de sincronización para enviar DetalleVisitas al servidor
@@ -8,8 +9,8 @@ import { SyncTask, SyncTaskResult } from "../SyncTask";
 export class DetalleVisitasSyncTask extends SyncTask {
   private idUsuario: number;
 
-  constructor(realm: Realm, syncLogId: string, idUsuario: number) {
-    super(realm, syncLogId);
+  constructor(realm: Realm, syncLogId: string, idUsuario: number, sucursal?: number) {
+    super(realm, syncLogId, sucursal);
     this.idUsuario = idUsuario;
   }
 
@@ -45,6 +46,14 @@ export class DetalleVisitasSyncTask extends SyncTask {
   }
 
   async execute(): Promise<SyncTaskResult> {
+    const endpoint = this.getEndpoint();
+    const sucursal = this.sucursal || 0;
+    
+    // --- Inicio Bitácora ---
+    const idBitacora = await BitacoraService.registrarInicioSync(
+      "VisitasArrastre", "incremental", "background", this.idUsuario, sucursal, endpoint
+    );
+
     try {
       console.log(`[DetalleVisitasSyncTask] Enviando visitas pendientes...`);
 
@@ -55,6 +64,14 @@ export class DetalleVisitasSyncTask extends SyncTask {
 
       if (detallesVisitas.length === 0) {
         console.log(`[DetalleVisitasSyncTask] No hay visitas pendientes de sincronizar`);
+        
+        await BitacoraService.registrarFinSync(idBitacora, {
+          exitoso: true,
+          registrosLeidos: 0,
+          registrosGuardados: 0,
+          registrosActualizados: 0
+        });
+
         return {
           success: true,
           registrosLeidos: 0,
@@ -74,7 +91,7 @@ export class DetalleVisitasSyncTask extends SyncTask {
 
       console.log(`[DetalleVisitasSyncTask] Enviando ${visitasArray.length} visitas al servidor`);
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -82,7 +99,6 @@ export class DetalleVisitasSyncTask extends SyncTask {
         },
         body: JSON.stringify(visitasArray),
       });
-      console.log(`[DetalleVisitasSyncTask] Response status: ${response.status}`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -97,6 +113,14 @@ export class DetalleVisitasSyncTask extends SyncTask {
 
       console.log(`[DetalleVisitasSyncTask] ✅ ${visitasArray.length} visitas sincronizadas exitosamente`);
 
+      // Bitácora exitosa
+      await BitacoraService.registrarFinSync(idBitacora, {
+        exitoso: true,
+        registrosLeidos: visitasArray.length,
+        registrosGuardados: 0,
+        registrosActualizados: visitasArray.length
+      });
+
       return {
         success: true,
         registrosLeidos: visitasArray.length,
@@ -106,11 +130,21 @@ export class DetalleVisitasSyncTask extends SyncTask {
           visitasEnviadas: visitasArray.length,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("[DetalleVisitasSyncTask] Error:", error);
+      
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      await BitacoraService.registrarFinSync(idBitacora, {
+        exitoso: false,
+        registrosGuardados: 0,
+        registrosActualizados: 0,
+        error: errorMsg,
+        stackTrace: JSON.stringify(error)
+      });
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: errorMsg,
       };
     }
   }

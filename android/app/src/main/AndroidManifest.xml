@@ -6,6 +6,13 @@
   <!-- Permisos de Ubicación (requeridos para registrar ventas) -->
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  
+  <!-- Permisos para sincronización en segundo plano robusta -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <!-- Requerido para Android 14+: Tipo específico de servicio -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
   <!-- Permisos Bluetooth para Android < 12 -->
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -22,6 +29,22 @@
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
+      <!-- Esquema personalizado para abrir la app desde segundo plano -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="xallapan" />
+      </intent-filter>
     </activity>
+    
+    <!-- Servicio para react-native-background-actions -->
+    <service 
+        android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask" 
+        android:foregroundServiceType="dataSync"
+        android:stopWithTask="false"
+        android:enabled="true"
+        android:exported="false"
+    />
   </application>
 </manifest>

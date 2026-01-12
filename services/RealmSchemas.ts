@@ -267,6 +267,63 @@ export const TipoVisitaSchema = {
   primaryKey: "id",
 };
 
+export const BitacoraSyncSchema = {
+  name: "BitacoraSync",
+  properties: {
+    idBitacoraMovil: "string", // ID único: TimeStamp + Tabla + Random
+    tabla: "string?",
+    tipoSync: "string?", // 'incremental' | 'full'
+    fechaInicio: "date?",
+    fechaFinal: "date?",
+    duracionMs: "int?",
+    exitoso: "bool?",
+    registrosLeidos: "int?",
+    registrosGuardados: "int?",
+    registrosActualizados: "int?",
+    registrosEliminados: "int?",
+
+    // Contexto Dispositivo
+    ipDispositivo: "string?",
+    nombreDispositivo: "string?",
+    sistemaOperativo: "string?",
+    versionApp: "string?",
+
+    // Contexto Red
+    tipoConexion: "string?", // 'wifi', 'cellular'
+    tipoConexionDetallado: "string?",
+    estadoConexion: "int?",
+    intensidadSenal: "int?",
+    velocidadDescargaMbps: "double?",
+    velocidadCargaMbps: "double?",
+    latenciaMs: "int?",
+    esConexionMetered: "bool?",
+    endpoint: "string?", // URL completa
+    
+    // Contexto App
+    appState: "string?", // 'active', 'background'
+    origenSync: "string?", // 'manual', 'background'
+    detallesJSON: "string?",
+    
+    // Usuario
+    idUsuario: "int?",
+    nombreUsuario: "string?",
+    sucursal: "int?",
+
+    // Error
+    error: "string?", // Mantener para compatibilidad interna
+    codigoError: "string?",
+    descripcionError: "string?",
+    stackTrace: "string?",
+
+    // Arrastre
+    fechaArrastre: "date?",
+
+    // Estado Envío
+    enviado: "bool",
+  },
+  primaryKey: "idBitacoraMovil",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -284,4 +341,5 @@ export const ALL_SCHEMAS = [
   VisitaSchema,
   DetalleVisitasSchema,
   TipoVisitaSchema,
+  BitacoraSyncSchema,
 ];

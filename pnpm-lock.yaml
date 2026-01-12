@@ -20,6 +20,9 @@ importers:
       '@react-native-community/datetimepicker':
         specifier: ^8.5.0
         version: 8.5.0(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))(react@19.1.1)
+      '@react-native-community/netinfo':
+        specifier: ^11.4.1
+        version: 11.4.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
       '@react-native/new-app-screen':
         specifier: 0.82.1
         version: 0.82.1(@types/react@19.2.6)(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))(react@19.1.1)
@@ -35,12 +38,18 @@ importers:
       react-native:
         specifier: 0.82.1
         version: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
+      react-native-background-actions:
+        specifier: ^4.0.1
+        version: 4.0.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
       react-native-background-fetch:
         specifier: 4.2.8
         version: 4.2.8
       react-native-bluetooth-escpos-printer:
         specifier: ^0.0.5
         version: 0.0.5(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
+      react-native-device-info:
+        specifier: ^15.0.1
+        version: 15.0.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
       react-native-devsettings:
         specifier: ^1.0.5
         version: 1.0.5
@@ -50,6 +59,9 @@ importers:
       react-native-geolocation-service:
         specifier: ^5.3.1
         version: 5.3.1
+      react-native-network-info:
+        specifier: ^5.2.2
+        version: 5.2.2(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
       react-native-safe-area-context:
         specifier: ^5.6.2
         version: 5.6.2(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))(react@19.1.1)
@@ -1011,6 +1023,11 @@ packages:
         optional: true
       react-native-windows:
         optional: true
+
+  '@react-native-community/netinfo@11.4.1':
+    resolution: {integrity: sha512-B0BYAkghz3Q2V09BF88RA601XursIEA111tnc2JOaN7axJWmNefmfjZqw/KdSxKZp7CZUuPpjBmz/WCR9uaHYg==}
+    peerDependencies:
+      react-native: '>=0.59'
 
   '@react-native/assets-registry@0.82.1':
     resolution: {integrity: sha512-B1SRwpntaAcckiatxbjzylvNK562Ayza05gdJCjDQHTiDafa1OABmyB5LHt7qWDOpNkaluD+w11vHF7pBmTpzQ==}
@@ -1983,6 +2000,9 @@ packages:
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
+
+  eventemitter3@4.0.7:
+    resolution: {integrity: sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw==}
 
   eventsource@2.0.2:
     resolution: {integrity: sha512-IzUmBGPR3+oUG9dUeXynyNmf91/3zUSJg1lCktzKw47OXuhco54U3r9B7O4XX+Rb1Itm9OZ2b0RkTs10bICOxA==}
@@ -3162,6 +3182,11 @@ packages:
   react-is@19.2.0:
     resolution: {integrity: sha512-x3Ax3kNSMIIkyVYhWPyO09bu0uttcAIoecO/um/rKGQ4EltYWVYtyiGkS/3xMynrbVQdS69Jhlv8FXUEZehlzA==}
 
+  react-native-background-actions@4.0.1:
+    resolution: {integrity: sha512-LADhnb4ag1oH5Lotq0j8K9e2cFmrafFyg2PCME88VkTjqDUgNcJonkNdMCTHN0N3fh+hwAA7nDR4Cxkj9Q8eCw==}
+    peerDependencies:
+      react-native: '>=0.47.0'
+
   react-native-background-fetch@4.2.8:
     resolution: {integrity: sha512-vKPumvhBuxr3oI1L7cNunYIsKV8jD4Xz2A9JT/FW5yvn7GAAct184FAZ9dFef75auBxixinaCjRBlip53xGWmQ==}
 
@@ -3169,6 +3194,11 @@ packages:
     resolution: {integrity: sha512-a+GTlz8dctb48wkoJ8woE7gV24NCOoA13J95A+RFEKhjONEWf3/dP5pIqrrlO5fsf/2QYDeMfU3P8bIVQoEqig==}
     peerDependencies:
       react-native: '>=0.55.4'
+
+  react-native-device-info@15.0.1:
+    resolution: {integrity: sha512-U5waZRXtT3l1SgZpZMlIvMKPTkFZPH8W7Ks6GrJhdH723aUIPxjVer7cRSij1mvQdOAAYFJV/9BDzlC8apG89A==}
+    peerDependencies:
+      react-native: '*'
 
   react-native-devsettings@1.0.5:
     resolution: {integrity: sha512-JFdE3/oqIqtAi1HgdseMB+zRHVG9CQpsxMUVd+GXmaQQIyY+Kh2bWB3wdSA8+ojTunaahZkvb9fIFRrLUWdROQ==}
@@ -3181,6 +3211,11 @@ packages:
 
   react-native-geolocation-service@5.3.1:
     resolution: {integrity: sha512-LTXPtPNmrdhx+yeWG47sAaCgQc3nG1z+HLLHlhK/5YfOgfLcAb9HAkhREPjQKPZOUx8pKZMIpdGFUGfJYtimXQ==}
+
+  react-native-network-info@5.2.2:
+    resolution: {integrity: sha512-MDCs9buJRxoNMFyfMjKVktN/qhC9dFGXPBb948th34y/8vkUVQAQW6ZHsba1PNOfYVrupd6IxCOOnZO8VDybLw==}
+    peerDependencies:
+      react-native: '>=0.47'
 
   react-native-ratings@8.0.4:
     resolution: {integrity: sha512-Xczu5lskIIRD6BEdz9A0jDRpEck/SFxRqiglkXi0u67yAtI1/pcJC76P4MukCbT8K4BPVl+42w83YqXBoBRl7A==}
@@ -5123,6 +5158,10 @@ snapshots:
       react: 19.1.1
       react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
 
+  '@react-native-community/netinfo@11.4.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))':
+    dependencies:
+      react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
+
   '@react-native/assets-registry@0.82.1': {}
 
   '@react-native/babel-plugin-codegen@0.82.1(@babel/core@7.28.5)':
@@ -6397,6 +6436,8 @@ snapshots:
   etag@1.8.1: {}
 
   event-target-shim@5.0.1: {}
+
+  eventemitter3@4.0.7: {}
 
   eventsource@2.0.2: {}
 
@@ -7881,9 +7922,18 @@ snapshots:
 
   react-is@19.2.0: {}
 
+  react-native-background-actions@4.0.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)):
+    dependencies:
+      eventemitter3: 4.0.7
+      react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
+
   react-native-background-fetch@4.2.8: {}
 
   react-native-bluetooth-escpos-printer@0.0.5(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)):
+    dependencies:
+      react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
+
+  react-native-device-info@15.0.1(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)):
     dependencies:
       react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
 
@@ -7906,6 +7956,10 @@ snapshots:
       - react-native
 
   react-native-geolocation-service@5.3.1: {}
+
+  react-native-network-info@5.2.2(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)):
+    dependencies:
+      react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
 
   react-native-ratings@8.0.4(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))(react@19.1.1):
     dependencies:

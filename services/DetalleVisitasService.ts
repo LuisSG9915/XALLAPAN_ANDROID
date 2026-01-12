@@ -19,7 +19,7 @@ class DetalleVisitasService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 12,
+        schemaVersion: 15, // v15: Agregados campos detallados a BitacoraSync
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Usuario - inicializar campo metros
           const newUsuarios = newRealm.objects("Usuario");

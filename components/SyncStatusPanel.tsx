@@ -28,6 +28,7 @@ import {
 import { Icon } from "react-native-elements";
 import BackgroundSyncService, { BackgroundSyncState } from "../services/BackgroundSyncService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS } from "../theme/theme";
+import { constGenerales } from "../constGenerales";
 
 interface SyncStatusPanelProps {
   compact?: boolean; // Modo compacto para mostrar en header
@@ -45,7 +46,7 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
     // Suscribirse a cambios de estado
     const unsubscribe = BackgroundSyncService.subscribe((newState: BackgroundSyncState) => {
       setState(newState);
-      setIsBackgroundSyncEnabled(newState.status !== "idle");
+      setIsBackgroundSyncEnabled(newState.isServiceRunning);
     });
 
     // Actualizar contador cada segundo
@@ -138,15 +139,21 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
   };
 
   const getStatusText = () => {
+    // Si el servicio NO está corriendo, mostramos Detenido
+    if (!state.isServiceRunning) return "Detenido";
+
+    // Si el servicio sí está corriendo, interpretamos el estado interno
     switch (state.status) {
       case "syncing":
         return "Sincronizando...";
       case "success":
         return "Activo";
       case "error":
-        return "Error";
+        return "Error (Reintentando)";
+      case "idle":
+        return "Activo - En espera";
       default:
-        return "Detenido";
+        return "Activo";
     }
   };
 
@@ -201,18 +208,18 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
       </View>
 
       {/* Toggle de sincronización persistente */}
-      {/* <View style={styles.toggleContainer}>
+      <View style={styles.toggleContainer}>
         <View style={styles.toggleLeft}>
           <Icon
-            name="battery-charging-full"
+            name="battery-saver"
             type="material"
             color={isBackgroundSyncEnabled ? COLORS.success : COLORS.muted}
             size={20}
           />
           <View style={styles.toggleTextContainer}>
-            <Text style={styles.toggleTitle}>Pantalla Apagada</Text>
+            <Text style={styles.toggleTitle}>Sincronización en Segundo Plano</Text>
             <Text style={styles.toggleSubtitle}>
-              {isBackgroundSyncEnabled ? "Sincroniza cada 1 minuto" : "Desactivado"}
+              {isBackgroundSyncEnabled ? `Ejecutando cada ${constGenerales.SYNC_INTERVAL_MS / 60000} min` : "Desactivado"}
             </Text>
           </View>
         </View>
@@ -222,7 +229,7 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
           trackColor={{ false: COLORS.muted, true: COLORS.primaryLight }}
           thumbColor={isBackgroundSyncEnabled ? COLORS.primary : "#f4f3f4"}
         />
-      </View> */}
+      </View>
 
       <View style={styles.content}>
         {/* Estado actual */}
