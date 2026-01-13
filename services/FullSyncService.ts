@@ -245,9 +245,7 @@ class FullSyncService {
           }
 
           const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(
-            fechaInicial
-          )}&sucursal=${sucursal}`;
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
 
           console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
           console.log("[Incremental] URL completa:", url);
@@ -297,6 +295,64 @@ class FullSyncService {
           // console.log(
           //   `[Incremental] Clientes leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
           // );
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos,
+            registrosGuardados,
+            registrosActualizados,
+          };
+        },
+      },
+      {
+        name: "UsuariosIncremental",
+        run: async () => {
+          const tableName = "Usuario";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
+
+          console.log("[Incremental] Usuarios full desde", url);
+
+          const response = await fetch(url, {
+            headers: { accept: "application/json" },
+          });
+          if (!response.ok) {
+            console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
+            throw new Error(`HTTP ${response.status} Usuarios`);
+          }
+
+          const usuarios = await response.json();
+          const registrosLeidos = Array.isArray(usuarios) ? usuarios.length : 0;
+          let registrosGuardados = 0;
+          let registrosActualizados = 0;
+
+          this.realm!.write(() => {
+            for (const usuario of usuarios) {
+              const existing = this.realm!.objectForPrimaryKey("Usuario", usuario.id) as any;
+
+              const usuarioData: any = {
+                id: usuario.id,
+                nombre: usuario.nombre,
+                perfil: usuario.perfil,
+                descripcionPerfil: usuario.descripcionPerfil,
+                puesto: usuario.puesto,
+                descripcionPuesto: usuario.descripcionPuesto,
+                claveEmpleado: usuario.claveEmpleado,
+                password: usuario.password,
+                sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
+                metros: usuario.metros,
+                syncedAt: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("Usuario", usuarioData, UpdateMode.Modified);
+                registrosActualizados++;
+              } else {
+                this.realm!.create("Usuario", usuarioData);
+                registrosGuardados++;
+              }
+            }
+          });
 
           return {
             tabla: tableName,

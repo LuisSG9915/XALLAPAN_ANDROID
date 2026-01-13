@@ -51,14 +51,33 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const init = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        const vendedor =
-          (user.claveEmpleado as string | undefined) ||
-          (user.nombre as string | undefined) ||
-          "";
+        const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
         const sucursal =
-          (user.sucursal_origen as number | null | undefined) ??
-          (user.sucursal as number | null | undefined) ??
-          1;
+          (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
+
+        // Intentar obtener metros desde Realm (tabla de usuarios)
+        try {
+          if (!FullSyncService.isServiceInitialized()) {
+            await FullSyncService.initialize();
+          }
+          // Asumiendo que user.id existe en la sesión
+          if (user.id) {
+            const realmUser = FullSyncService.getUsuarioById(user.id);
+            if (realmUser && realmUser.metros) {
+              console.log("[Cumplimiento] Metros usuario obtenidos de Realm:", realmUser.metros);
+              setUserMetros(realmUser.metros);
+            } else if (user.metros) {
+              console.log("[Cumplimiento] Metros usuario obtenidos de Sesión:", user.metros);
+              setUserMetros(user.metros);
+            }
+          }
+        } catch (error) {
+          console.error("[Cumplimiento] Error al obtener usuario de Realm:", error);
+          if (user.metros) {
+            setUserMetros(user.metros);
+          }
+        }
+
         setCurrentSucursal(sucursal);
 
         // Cargar datos después de establecer la sucursal
@@ -78,13 +97,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(
-    null
-  );
-  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(
-    null
-  );
+  const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
+  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
+  const [userMetros, setUserMetros] = useState<number | null>(null);
 
   // Obtener tipos de visita desde la base de datos
   const getTipoVisitas = () => {
@@ -96,21 +112,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const tiposVisita = getTipoVisitas();
 
-  const calcularDistancia = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number => {
+  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
     const φ2 = (lat2 * Math.PI) / 180;
     const Δφ = ((lat2 - lat1) * Math.PI) / 180;
     const Δλ = ((lon2 - lon1) * Math.PI) / 180;
 
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c;
@@ -200,13 +209,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             visita.latitud,
             visita.longitud
           );
-          console.log(
-            "[Cumplimiento] Distancia calculada:",
-            Math.round(distancia),
-            "metros"
-          );
+          console.log("[Cumplimiento] Distancia calculada:", Math.round(distancia), "metros");
 
-          const metrosPermitidos = visita.metros || 100; // Valor por defecto de 100 metros
+          const metrosPermitidos = userMetros || visita.metros || 100; // Prioridad: Usuario > Cliente > Default (100)
           if (distancia > metrosPermitidos) {
             console.log("[Cumplimiento] Distancia excede el límite permitido");
             Alert.alert(
@@ -219,32 +224,21 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             return;
           }
 
-          console.log(
-            "[Cumplimiento] Validación exitosa, seteando validandoUbicacion = false"
-          );
+          console.log("[Cumplimiento] Validación exitosa, seteando validandoUbicacion = false");
           setValidandoUbicacion(false);
         } else {
           setValidandoUbicacion(false);
-          Alert.alert(
-            "Ubicación no disponible",
-            "No se pudo obtener tu ubicación. Verifica que el GPS esté activado."
-          );
+          Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
           return;
         }
       } catch (locationError) {
         setValidandoUbicacion(false);
         console.error("[Cumplimiento] ⚠️ Error al obtener ubicación:", locationError);
-        Alert.alert(
-          "Error de ubicación",
-          "No se pudo verificar tu ubicación. Verifica que el GPS esté activado."
-        );
+        Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.");
         return;
       }
     } else {
-      Alert.alert(
-        "Cliente sin ubicación",
-        "El cliente no tiene registrada su ubicación geográfica."
-      );
+      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
       return;
     }
 
@@ -262,10 +256,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     setModalVisible(false);
 
-    const exito = await VisitaSyncService.getInstance().marcarVisitado(
-      visitaSeleccionada.id,
-      tipoVisitaSeleccionado
-    );
+    const exito = await VisitaSyncService.getInstance().marcarVisitado(visitaSeleccionada.id, tipoVisitaSeleccionado);
 
     if (exito) {
       // Registrar visita completa en DetalleVisitas (fechaInicio = fechaFin)
@@ -293,15 +284,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   };
 
   const obtenerNombreDia = (fecha: Date) => {
-    const dias = [
-      "Domingo",
-      "Lunes",
-      "Martes",
-      "Miércoles",
-      "Jueves",
-      "Viernes",
-      "Sábado",
-    ];
+    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
     return dias[fecha.getDay()];
   };
 
@@ -364,9 +347,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               </View>
               <View style={styles.clienteDetails}>
                 <Text style={styles.clienteId}>#{item.idCliente}</Text>
-                <Text style={styles.clienteNombre}>
-                  {item.nombreCliente || "Cargando..."}
-                </Text>
+                <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
               </View>
             </View>
             <View style={styles.horaRow}>
@@ -376,11 +357,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           </View>
           <View style={styles.botonesContainer}>
             {item.visitado === 0 && (
-              <TouchableOpacity
-                style={styles.botonVentas}
-                onPress={() => handleIrAVentas(item)}
-                activeOpacity={0.8}
-              >
+              <TouchableOpacity style={styles.botonVentas} onPress={() => handleIrAVentas(item)} activeOpacity={0.8}>
                 <Icon name="shopping-cart" type="material" size={16} color="white" />
                 <Text style={styles.botonVentasTexto}>Ventas</Text>
               </TouchableOpacity>
@@ -388,9 +365,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             <TouchableOpacity
               style={[
                 styles.botonVisitado,
-                item.visitado === 1
-                  ? styles.botonVisitadoActivo
-                  : styles.botonVisitadoInactivo,
+                item.visitado === 1 ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
                 validandoUbicacion && styles.botonVisitadoDisabled,
               ]}
               onPress={() => handleMarcarVisitado(item.id)}
@@ -413,9 +388,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                   <Text
                     style={[
                       styles.botonVisitadoTexto,
-                      item.visitado === 1
-                        ? styles.botonVisitadoTextoActivo
-                        : styles.botonVisitadoTextoInactivo,
+                      item.visitado === 1 ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
                     ]}
                   >
                     {item.visitado === 1 ? "Completado" : "Visitar"}
@@ -444,11 +417,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         <Text style={styles.titulo}>Cumplimiento de agenda</Text>
 
         <View style={styles.navegacionFechas}>
-          <TouchableOpacity
-            style={styles.botonFlecha}
-            onPress={() => cambiarDia(-1)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.botonFlecha} onPress={() => cambiarDia(-1)} activeOpacity={0.7}>
             <Icon name="chevron-left" type="material" size={24} color="white" />
           </TouchableOpacity>
 
@@ -457,19 +426,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             <Text style={styles.diaTexto}>{obtenerNombreDia(fechaSeleccionada)}</Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.botonFlecha}
-            onPress={() => cambiarDia(1)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.botonFlecha} onPress={() => cambiarDia(1)} activeOpacity={0.7}>
             <Icon name="chevron-right" type="material" size={24} color="white" />
           </TouchableOpacity>
         </View>
 
         <Text style={styles.porcentaje}>{estadisticas.porcentaje.toFixed(1)}%</Text>
         <Text style={styles.subtitulo}>
-          {estadisticas.totalRealizadas} visitas realizadas de{" "}
-          {estadisticas.totalProgramadas} programadas
+          {estadisticas.totalRealizadas} visitas realizadas de {estadisticas.totalProgramadas} programadas
         </Text>
       </View>
 
@@ -478,9 +442,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         renderItem={renderVisita}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="event" type="material" size={64} color="#C7C7CC" />
@@ -501,15 +463,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               <View style={styles.clienteInfoModal}>
                 <Icon name="person" type="material" size={20} color="#8E8E93" />
                 <Text style={styles.modalSubtitle}>
-                  {visitaSeleccionada?.nombreCliente ||
-                    `Cliente #${visitaSeleccionada?.idCliente}`}
+                  {visitaSeleccionada?.nombreCliente || `Cliente #${visitaSeleccionada?.idCliente}`}
                 </Text>
               </View>
 
-              <ScrollView
-                style={styles.tiposContainer}
-                showsVerticalScrollIndicator={false}
-              >
+              <ScrollView style={styles.tiposContainer} showsVerticalScrollIndicator={false}>
                 {tiposVisita
                   .filter((tipo) => tipo.id !== 1)
                   .map((tipo) => {
@@ -522,10 +480,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                     return (
                       <TouchableOpacity
                         key={tipo.id}
-                        style={[
-                          styles.tipoOption,
-                          tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected,
-                        ]}
+                        style={[styles.tipoOption, tipoVisitaSeleccionado === tipo.id && styles.tipoOptionSelected]}
                         onPress={() => setTipoVisitaSeleccionado(tipo.id)}
                         activeOpacity={0.7}
                       >
@@ -534,16 +489,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                             name={icons[tipo.id] || "label"}
                             type="material"
                             size={24}
-                            color={
-                              tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"
-                            }
+                            color={tipoVisitaSeleccionado === tipo.id ? "#007AFF" : "#8E8E93"}
                           />
                           <Text
-                            style={[
-                              styles.tipoText,
-                              tipoVisitaSeleccionado === tipo.id &&
-                                styles.tipoTextSelected,
-                            ]}
+                            style={[styles.tipoText, tipoVisitaSeleccionado === tipo.id && styles.tipoTextSelected]}
                           >
                             {tipo.descripcion}
                           </Text>
