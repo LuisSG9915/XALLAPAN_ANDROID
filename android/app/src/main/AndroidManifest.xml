@@ -1,18 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <!-- Permisos de Ubicación (requeridos para registrar ventas) -->
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-  
+
   <!-- Permisos para sincronización en segundo plano robusta -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <!-- Requerido para Android 14+: Tipo específico de servicio -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
   <!-- Permisos Bluetooth para Android < 12 -->
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -37,14 +40,16 @@
         <data android:scheme="xallapan" />
       </intent-filter>
     </activity>
-    
+
+    <receiver android:name=".BootUpReceiver" android:enabled="true" android:exported="true" android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+        <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+      </intent-filter>
+    </receiver>
+
     <!-- Servicio para react-native-background-actions -->
-    <service 
-        android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask" 
-        android:foregroundServiceType="dataSync"
-        android:stopWithTask="false"
-        android:enabled="true"
-        android:exported="false"
-    />
+    <service android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask" android:foregroundServiceType="dataSync" android:stopWithTask="false" android:enabled="true" android:exported="false" />
   </application>
 </manifest>

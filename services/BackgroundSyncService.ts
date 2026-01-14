@@ -17,6 +17,7 @@ import AuthService from "./AuthService";
 import BatteryOptimizations from "./BatteryOptimizations";
 import BackgroundService from "react-native-background-actions";
 import { Platform, PermissionsAndroid } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import { constGenerales } from "../constGenerales";
 
 export type SyncStatus =
@@ -54,8 +55,8 @@ const options = {
     delay: constGenerales.SYNC_INTERVAL_MS,
   },
   // Prioridad máxima para evitar suspensión
-  notificationImportance: 'high',
-  notificationPriority: 'high',
+  notificationImportance: "high",
+  notificationPriority: "high",
   stopWithTask: false, // Vital para Samsung
 };
 
@@ -82,10 +83,10 @@ class BackgroundSyncService {
 
   // Listeners para notificar cambios de estado
   private listeners: Set<StateListener> = new Set();
-  
+
   // Referencia al intervalo para actualizar UI cuando el servicio corre en otro hilo JS (si aplica)
   // Nota: En RN Background Actions, el código corre en el mismo bundle JS pero mantenido vivo por el servicio nativo.
-  
+
   private constructor() {}
 
   static getInstance(): BackgroundSyncService {
@@ -99,7 +100,7 @@ class BackgroundSyncService {
 
   /**
    * Solicita permisos de notificación (Requerido para Android 13+)
-   * Sin este permiso, el Foreground Service no puede mostrar la notificación 
+   * Sin este permiso, el Foreground Service no puede mostrar la notificación
    * y el SO lo mata al entrar en background.
    */
   private async requestNotificationPermission(): Promise<boolean> {
@@ -111,9 +112,10 @@ class BackgroundSyncService {
 
       const response = await PermissionsAndroid.request("android.permission.POST_NOTIFICATIONS" as any, {
         title: "Sincronización en Segundo Plano",
-        message: "Se requiere permiso de notificaciones para mantener la sincronización activa mientras la app está cerrada.",
+        message:
+          "Se requiere permiso de notificaciones para mantener la sincronización activa mientras la app está cerrada.",
         buttonPositive: "Permitir",
-        buttonNegative: "Más tarde"
+        buttonNegative: "Más tarde",
       });
 
       return response === PermissionsAndroid.RESULTS.GRANTED;
@@ -136,54 +138,61 @@ class BackgroundSyncService {
       while (BackgroundService.isRunning() && this.isLoopRunning) {
         try {
           const currentDelay = Math.floor(this.SYNC_INTERVAL_MS);
-          
+
           // 1. Ejecutar sincronización
           console.log(`[BackgroundSync] 🔄 Iniciando Sync Periodica (${new Date().toLocaleTimeString()})`);
           await Promise.race([
             this.performSync(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Sync")), 120000))
-          ]).catch(err => console.error("[BackgroundSync] Sync falló:", err));
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Sync")), 120000)),
+          ]).catch((err) => console.error("[BackgroundSync] Sync falló:", err));
 
           // 2. Establecer próxima ejecución
           const nextSync = new Date(Date.now() + currentDelay);
           this.updateState({
             status: "idle",
             nextSyncTime: nextSync,
-            isServiceRunning: true
+            isServiceRunning: true,
           });
 
           // 3. Hearbeat Loop (Súper Agresivo para Samsung)
-          let remaining = currentDelay;
+          // Usamos tiempo absoluto para evitar drift por doze mode
+          const endTime = nextSync.getTime();
           let dotCount = 0;
           let loopSec = 0;
-          
-          console.log(`[BackgroundSync] 💤 Entrando en espera de ${remaining}ms`);
-          
-          while (remaining > 0 && BackgroundService.isRunning() && this.isLoopRunning) {
+
+          console.log(`[BackgroundSync] 💤 Entrando en espera hasta ${nextSync.toLocaleTimeString()}`);
+
+          while (BackgroundService.isRunning() && this.isLoopRunning) {
+            const now = Date.now();
+            const remaining = endTime - now;
+
+            if (remaining <= 0) break;
+
             const timeStr = this.getTimeUntilNextSync();
             dotCount = (dotCount + 1) % 4;
             loopSec = (loopSec + 1) % 100;
             const dots = ".".repeat(dotCount);
-            
-            // Actualización visual CADA SEGUNDO para "engañar" al ahorro de energía
-            await BackgroundService.updateNotification({
-              taskTitle: `Xallapan: Sincronización Activa${dots}`,
-              taskDesc: `Siguiente actualización en: ${timeStr} [${loopSec}] 🔄`,
-              progressBar: {
-                max: currentDelay,
-                value: currentDelay - remaining,
-                indeterminate: false
-              }
-            }).catch(() => {});
-            
-            const step = 1000; // Revisar cada 1 segundo
-            await sleep(step);
-            remaining -= step;
-          }
 
+            // Actualización visual CADA 5 SEGUNDOS para reducir consumo y evitar ser matado por el SO
+            if (loopSec % 5 === 0) {
+              console.log(`[BackgroundSync] 💓 Heartbeat running... remaining: ${Math.floor(remaining / 1000)}s`);
+              await BackgroundService.updateNotification({
+                taskTitle: `Xallapan: Sincronización Activa${dots}`,
+                taskDesc: `Siguiente actualización en: ${timeStr} 🔄`,
+                progressBar: {
+                  max: currentDelay,
+                  value: currentDelay - remaining,
+                  indeterminate: false,
+                },
+              }).catch((e) => console.log("[BackgroundSync] Error updating notification:", e));
+            }
+
+            const step = 1000; // Mantener loop de 1s para precisión, pero no actualizar UI siempre
+            await sleep(step);
+          }
         } catch (error) {
           console.error("[BackgroundSync] Error en ciclo:", error);
-          await sleep(10000); 
+          await sleep(10000);
         }
       }
     } finally {
@@ -231,10 +240,10 @@ class BackgroundSyncService {
   async stop(): Promise<void> {
     console.log("[BackgroundSync] Deteniendo servicio...");
     await BackgroundService.stop();
-    this.updateState({ 
+    this.updateState({
       isServiceRunning: false,
       status: "idle",
-      nextSyncTime: null
+      nextSyncTime: null,
     });
   }
 
@@ -250,22 +259,21 @@ class BackgroundSyncService {
    */
   getTimeUntilNextSync(): string | null {
     if (!this.state.nextSyncTime) return null;
-    
+
     const now = Date.now();
     const next = this.state.nextSyncTime.getTime();
     const diff = next - now;
-    
+
     if (diff <= 0) return "Ahora";
-    
+
     const minutes = Math.floor(diff / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
-    
+
     if (minutes > 0) {
       return `${minutes}m ${seconds}s`;
     }
     return `${seconds}s`;
   }
-
 
   /**
    * Ejecuta la sincronización real
@@ -279,6 +287,18 @@ class BackgroundSyncService {
       taskTitle: "Xallapan: Sincronizando...",
       taskDesc: "Procesando datos en segundo plano... ⏳",
     });
+
+    // Verificar conexión a internet
+    const netState = await NetInfo.fetch();
+    console.log(`[BackgroundSync] NetInfo state: type=${netState.type}, isConnected=${netState.isConnected}`);
+
+    if (!netState.isConnected) {
+      console.log("[BackgroundSync] 🚫 Sin conexión a internet. Posponiendo sync.");
+      await BackgroundService.updateNotification({
+        taskDesc: "Sin conexión. Esperando red... 📶❌",
+      });
+      return;
+    }
 
     // Verificar usuario - IMPORTANTE: restoreSession debe funcionar en background
     const user = await AuthService.restoreSession();
@@ -304,18 +324,18 @@ class BackgroundSyncService {
         sucursal,
         (progress: SyncProgress) => {
           this.updateState({ currentProgress: progress });
-          
+
           // Actualizar notificación con progreso real
           const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
           BackgroundService.updateNotification({
-            taskDesc: `Sincronizando ${progress.entity}: ${percent}% 📶`
+            taskDesc: `Sincronizando ${progress.entity}: ${percent}% 📶`,
           }).catch(() => {});
         },
         idUsuario
       );
 
       const now = new Date();
-      
+
       if (result.success) {
         this.updateState({
           status: "success",
@@ -323,20 +343,19 @@ class BackgroundSyncService {
           syncCount: this.state.syncCount + 1,
           errorMessage: null,
           sucursal,
-          idUsuario
+          idUsuario,
         });
-        
+
         console.log(`[BackgroundSync] ✅ Ciclo completado exitosamente a las ${now.toLocaleTimeString()}`);
       } else {
         throw new Error(result.error || "Error en sync");
       }
-
     } catch (error: any) {
       console.error("[BackgroundSync] ❌ Error en performSync:", error.message);
       this.updateState({
         status: "error",
         lastSyncTime: new Date(),
-        errorMessage: error.message
+        errorMessage: error.message,
       });
     }
   }
@@ -351,7 +370,7 @@ class BackgroundSyncService {
    * Ejecuta una sincronización manual (no afecta el intervalo automático)
    */
   async syncNow(): Promise<void> {
-    if (this.state.status === 'syncing') {
+    if (this.state.status === "syncing") {
       console.log("[BackgroundSync] Ya se está sincronizando.");
       return;
     }

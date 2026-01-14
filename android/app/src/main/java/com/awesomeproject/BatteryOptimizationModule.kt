@@ -36,4 +36,37 @@ class BatteryOptimizationModule(reactContext: ReactApplicationContext) : ReactCo
             promise.reject("ERROR", e.message)
         }
     }
+
+    @ReactMethod
+    fun checkOverlayPermission(promise: Promise) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                promise.resolve(Settings.canDrawOverlays(reactApplicationContext))
+            } else {
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            promise.reject("ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun requestOverlayPermission(promise: Promise) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                if (!Settings.canDrawOverlays(reactApplicationContext)) {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + reactApplicationContext.packageName))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactApplicationContext.startActivity(intent)
+                    promise.resolve("REQUESTED")
+                } else {
+                    promise.resolve("GRANTED")
+                }
+            } else {
+                promise.resolve("GRANTED")
+            }
+        } catch (e: Exception) {
+            promise.reject("ERROR", e.message)
+        }
+    }
 }

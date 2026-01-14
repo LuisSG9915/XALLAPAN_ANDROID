@@ -3,6 +3,7 @@ import { ALL_SCHEMAS, SyncLogSchema } from "./RealmSchemas";
 import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
+import NetInfo from "@react-native-community/netinfo";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
@@ -174,6 +175,12 @@ class FullSyncService {
     onProgress?: SyncProgressCallback,
     idUsuario?: number
   ): Promise<{ success: boolean; error?: string }> {
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      console.log("[FullSync] Offline: Saltando sincronización incremental");
+      return { success: false, error: "Sin conexión a internet" };
+    }
+
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -258,15 +265,20 @@ class FullSyncService {
           if (!last) {
             last = new Date(0); // Sincronizar todos si no hay previo
           }
-          
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(
             fechaInicial
           )}&sucursal=${sucursal}`;
-          
+
           // --- Inicio Bitácora ---
           const idBitacora = await BitacoraService.registrarInicioSync(
-             "Clientes", "incremental", "background", idUsuario, sucursal, url
+            "Clientes",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url
           );
 
           try {
@@ -279,56 +291,56 @@ class FullSyncService {
             let registrosActualizados = 0;
 
             this.realm!.write(() => {
-                for (const cliente of clientes) {
+              for (const cliente of clientes) {
                 const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
                 const clienteData: any = {
-                    id: cliente.id,
-                    nombre: cliente.nombre,
-                    longitud: cliente.longitud,
-                    latitud: cliente.latitud,
-                    idGrupo: cliente.idGrupo,
-                    credito: cliente.credito,
-                    facturacionMovil: cliente.facturacionMovil,
-                    fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
-                    correoFactura: cliente.correo_factura || null,
-                    syncedAt: new Date(),
-                    syncedAr: nowMexico,
+                  id: cliente.id,
+                  nombre: cliente.nombre,
+                  longitud: cliente.longitud,
+                  latitud: cliente.latitud,
+                  idGrupo: cliente.idGrupo,
+                  credito: cliente.credito,
+                  facturacionMovil: cliente.facturacionMovil,
+                  fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
+                  correoFactura: cliente.correo_factura || null,
+                  syncedAt: new Date(),
+                  syncedAr: nowMexico,
                 };
 
                 if (existing) {
-                    this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
-                    registrosActualizados++;
+                  this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
+                  registrosActualizados++;
                 } else {
-                    this.realm!.create("ClienteFull", clienteData);
-                    registrosGuardados++;
+                  this.realm!.create("ClienteFull", clienteData);
+                  registrosGuardados++;
                 }
-                }
+              }
             });
 
             // --- Fin Bitácora Exitoso ---
             await BitacoraService.registrarFinSync(idBitacora, {
-                exitoso: true,
-                registrosLeidos,
-                registrosGuardados,
-                registrosActualizados
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
             });
 
             return {
-                tabla: tableName,
-                endpoint: url,
-                registrosLeidos,
-                registrosGuardados,
-                registrosActualizados,
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
             };
           } catch (err: any) {
-              await BitacoraService.registrarFinSync(idBitacora, {
-                exitoso: false,
-                registrosGuardados: 0,
-                registrosActualizados: 0,
-                error: err.message,
-                stackTrace: JSON.stringify(err)
-              });
-              throw err;
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              registrosGuardados: 0,
+              registrosActualizados: 0,
+              error: err.message,
+              stackTrace: JSON.stringify(err),
+            });
+            throw err;
           }
         },
       },
@@ -351,7 +363,12 @@ class FullSyncService {
 
           // --- Inicio Bitácora ---
           const idBitacora = await BitacoraService.registrarInicioSync(
-            "Precios", "incremental", "background", idUsuario, sucursal, url
+            "Precios",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url
           );
 
           try {
@@ -396,7 +413,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -412,7 +429,7 @@ class FullSyncService {
               registrosGuardados: 0,
               registrosActualizados: 0,
               error: err.message,
-              stackTrace: JSON.stringify(err)
+              stackTrace: JSON.stringify(err),
             });
             throw err;
           }
@@ -439,7 +456,12 @@ class FullSyncService {
 
           // --- Inicio Bitácora ---
           const idBitacora = await BitacoraService.registrarInicioSync(
-            "PreciosPromo", "incremental", "background", idUsuario, sucursal, url
+            "PreciosPromo",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url
           );
 
           try {
@@ -484,7 +506,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -500,7 +522,7 @@ class FullSyncService {
               registrosGuardados: 0,
               registrosActualizados: 0,
               error: err.message,
-              stackTrace: JSON.stringify(err)
+              stackTrace: JSON.stringify(err),
             });
             throw err;
           }
@@ -566,19 +588,24 @@ class FullSyncService {
         run: async () => {
           const tableName = "Venta";
           let last = this.getLastSyncedAr(tableName);
-          
+
           if (!last) {
-             last = new Date();
-             last.setDate(last.getDate() - 7); // Default: últimos 7 días
+            last = new Date();
+            last.setDate(last.getDate() - 7); // Default: últimos 7 días
           }
-          
+
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
             fechaInicial
           )}&sucursal=${encodeURIComponent(String(sucursal))}`;
-          
+
           const idBitacora = await BitacoraService.registrarInicioSync(
-             "Ventas", "incremental", "background", idUsuario, sucursal, url
+            "Ventas",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url
           );
 
           try {
@@ -594,98 +621,104 @@ class FullSyncService {
             let maxIdVenta = null;
             let maxId = 0;
             for (const venta of ventas) {
-                if (venta.id && venta.id > maxId) {
+              if (venta.id && venta.id > maxId) {
                 maxId = venta.id;
                 maxIdVenta = venta;
-                }
+              }
             }
             const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
 
             this.realm!.write(() => {
-                for (const venta of ventas) {
+              for (const venta of ventas) {
                 const idMovil = venta.idMovil ?? null;
                 const existingById = this.realm!.objectForPrimaryKey("Venta", venta.id);
 
                 if (existingById) {
-                    (existingById as any).noVenta = venta.noVenta;
-                    (existingById as any).cantProducto = venta.cantProducto;
-                    (existingById as any).precio = venta.precio;
-                    (existingById as any).importe = venta.importe;
-                    (existingById as any).folioFactura = venta.folioFactura;
-                    (existingById as any).facturacionMovil = venta.facturacionMovil;
-                    (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
-                    registrosActualizados++;
+                  (existingById as any).noVenta = venta.noVenta;
+                  (existingById as any).cantProducto = venta.cantProducto;
+                  (existingById as any).precio = venta.precio;
+                  (existingById as any).importe = venta.importe;
+                  (existingById as any).folioFactura = venta.folioFactura;
+                  (existingById as any).facturacionMovil = venta.facturacionMovil;
+                  (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
+                  registrosActualizados++;
                 } else {
-                    const localVentas = idMovil === null ? []
-                        : this.realm!.objects("Venta").filtered("idMovil == $0 AND claveProd == $1 AND id > 1700000000", idMovil, venta.claveProd);
+                  const localVentas =
+                    idMovil === null
+                      ? []
+                      : this.realm!.objects("Venta").filtered(
+                          "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
+                          idMovil,
+                          venta.claveProd
+                        );
 
-                    if (localVentas.length > 0) {
-                        for (const localVenta of localVentas) {
-                            (localVenta as any).noVenta = venta.noVenta;
-                            (localVenta as any).cantProducto = venta.cantProducto;
-                            (localVenta as any).precio = venta.precio;
-                            (localVenta as any).importe = venta.importe;
-                            (localVenta as any).folioFactura = venta.folioFactura;
-                            (localVenta as any).facturacionMovil = venta.facturacionMovil;
-                            (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
-                            registrosActualizados++;
-                        }
-                    } else {
-                        this.realm!.create("Venta", {
-                            id: venta.id,
-                            idMovil: venta.idMovil ?? null,
-                            sucursal: venta.sucursal ?? null,
-                            noVenta: venta.noVenta ?? null,
-                            claveProd: venta.claveProd ?? null,
-                            nombreProducto: venta.nombreProducto ?? null,
-                            cantProducto: venta.cantProducto ?? null,
-                            precio: venta.precio ?? null,
-                            importe: venta.importe ?? null,
-                            cveCliente: venta.cveCliente ?? null,
-                            nombreCliente: venta.nombreCliente ?? null,
-                            fecha: venta.fecha ? new Date(venta.fecha) : null,
-                            tipoPago: venta.tipoPago ?? null,
-                            descripcionMedioPago: venta.descripcionMedioPago ?? null,
-                            vendedor: venta.vendedor ?? null,
-                            folioFactura: venta.folioFactura ?? false,
-                            facturacionMovil: venta.facturacionMovil ?? false,
-                            syncedAt: venta.fechaLog ?? nowMexico,
-                            syncedAr: syncedArValue,
-                        });
-                        registrosGuardados++;
+                  if (localVentas.length > 0) {
+                    for (const localVenta of localVentas) {
+                      (localVenta as any).noVenta = venta.noVenta;
+                      (localVenta as any).cantProducto = venta.cantProducto;
+                      (localVenta as any).precio = venta.precio;
+                      (localVenta as any).importe = venta.importe;
+                      (localVenta as any).folioFactura = venta.folioFactura;
+                      (localVenta as any).facturacionMovil = venta.facturacionMovil;
+                      (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
+                      registrosActualizados++;
                     }
+                  } else {
+                    this.realm!.create("Venta", {
+                      id: venta.id,
+                      idMovil: venta.idMovil ?? null,
+                      sucursal: venta.sucursal ?? null,
+                      noVenta: venta.noVenta ?? null,
+                      claveProd: venta.claveProd ?? null,
+                      nombreProducto: venta.nombreProducto ?? null,
+                      cantProducto: venta.cantProducto ?? null,
+                      precio: venta.precio ?? null,
+                      importe: venta.importe ?? null,
+                      cveCliente: venta.cveCliente ?? null,
+                      nombreCliente: venta.nombreCliente ?? null,
+                      fecha: venta.fecha ? new Date(venta.fecha) : null,
+                      tipoPago: venta.tipoPago ?? null,
+                      descripcionMedioPago: venta.descripcionMedioPago ?? null,
+                      vendedor: venta.vendedor ?? null,
+                      folioFactura: venta.folioFactura ?? false,
+                      facturacionMovil: venta.facturacionMovil ?? false,
+                      syncedAt: venta.fechaLog ?? nowMexico,
+                      syncedAr: syncedArValue,
+                    });
+                    registrosGuardados++;
+                  }
                 }
-                }
-                // Actualizar syncedAr
-                const allLocalVentas = this.realm!.objects("Venta");
-                for (const localVenta of allLocalVentas) {
-                    (localVenta as any).syncedAr = syncedArValue;
-                }
+              }
+              // Actualizar syncedAr
+              const allLocalVentas = this.realm!.objects("Venta");
+              for (const localVenta of allLocalVentas) {
+                (localVenta as any).syncedAr = syncedArValue;
+              }
             });
 
             await BitacoraService.registrarFinSync(idBitacora, {
-                exitoso: true,
-                registrosLeidos,
-                registrosGuardados,
-                registrosActualizados
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
             });
 
             return {
-                tabla: tableName,
-                endpoint: url,
-                registrosLeidos,
-                registrosGuardados,
-                registrosActualizados,
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
             };
           } catch (err: any) {
-              await BitacoraService.registrarFinSync(idBitacora, {
-                exitoso: false,
-                registrosGuardados: 0,
-                registrosActualizados: 0,
-                error: err.message,
-                stackTrace: JSON.stringify(err)
-              });
-              throw err;
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              registrosGuardados: 0,
+              registrosActualizados: 0,
+              error: err.message,
+              stackTrace: JSON.stringify(err),
+            });
+            throw err;
           }
         },
       },
@@ -703,7 +736,12 @@ class FullSyncService {
 
           // --- Inicio Bitácora ---
           const idBitacora = await BitacoraService.registrarInicioSync(
-            "Inventario", "incremental", "background", idUsuario, sucursal, url
+            "Inventario",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url
           );
 
           try {
@@ -749,7 +787,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -765,7 +803,7 @@ class FullSyncService {
               registrosGuardados: 0,
               registrosActualizados: 0,
               error: err.message,
-              stackTrace: JSON.stringify(err)
+              stackTrace: JSON.stringify(err),
             });
             throw err;
           }
@@ -774,49 +812,54 @@ class FullSyncService {
       {
         name: "VisitasIncremental",
         run: async () => {
-           const tableName = "Visita";
-           const fecha = new Date();
-           const fechaStr = fecha.toISOString().split('T')[0];
-           const endpoint = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full?fecha=${fechaStr}&sucursal=${sucursal}`;
-           
-           // --- Inicio Bitácora ---
-           const idBitacora = await BitacoraService.registrarInicioSync(
-             "Visitas", "incremental", "background", idUsuario, sucursal, endpoint
-           );
+          const tableName = "Visita";
+          const fecha = new Date();
+          const fechaStr = fecha.toISOString().split("T")[0];
+          const endpoint = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full?fecha=${fechaStr}&sucursal=${sucursal}`;
 
-           try {
-             const service = VisitaSyncService.getInstance();
-             const result = await service.syncByDate(fecha, sucursal);
-             
-             if (!result.success) {
-                throw new Error(result.error || "Error al sincronizar visitas");
-             }
+          // --- Inicio Bitácora ---
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            "Visitas",
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            endpoint
+          );
 
-             // --- Fin Bitácora Exitoso ---
-             await BitacoraService.registrarFinSync(idBitacora, {
-               exitoso: true,
-               registrosLeidos: result.registrosLeidos || 0,
-               registrosGuardados: result.registrosGuardados || 0,
-               registrosActualizados: result.registrosActualizados || 0
-             });
+          try {
+            const service = VisitaSyncService.getInstance();
+            const result = await service.syncByDate(fecha, sucursal);
 
-             return {
-               tabla: tableName,
-               endpoint,
-               registrosLeidos: result.registrosLeidos || 0,
-               registrosGuardados: result.registrosGuardados || 0,
-               registrosActualizados: result.registrosActualizados || 0,
-             };
-           } catch (err: any) {
-             await BitacoraService.registrarFinSync(idBitacora, {
-               exitoso: false,
-               registrosGuardados: 0,
-               registrosActualizados: 0,
-               error: err.message,
-               stackTrace: JSON.stringify(err)
-             });
-             throw err;
-           }
+            if (!result.success) {
+              throw new Error(result.error || "Error al sincronizar visitas");
+            }
+
+            // --- Fin Bitácora Exitoso ---
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos: result.registrosLeidos || 0,
+              registrosGuardados: result.registrosGuardados || 0,
+              registrosActualizados: result.registrosActualizados || 0,
+            });
+
+            return {
+              tabla: tableName,
+              endpoint,
+              registrosLeidos: result.registrosLeidos || 0,
+              registrosGuardados: result.registrosGuardados || 0,
+              registrosActualizados: result.registrosActualizados || 0,
+            };
+          } catch (err: any) {
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              registrosGuardados: 0,
+              registrosActualizados: 0,
+              error: err.message,
+              stackTrace: JSON.stringify(err),
+            });
+            throw err;
+          }
         },
       },
     ];
@@ -884,7 +927,9 @@ class FullSyncService {
 
     // Enviar bitácoras pendientes (Arrastre) en segundo plano
     if (idUsuario) {
-        BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario).catch(e => console.log("Error enviando bitácoras:", e));
+      BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario).catch((e) =>
+        console.log("Error enviando bitácoras:", e)
+      );
     }
 
     return {
@@ -1865,10 +1910,15 @@ class FullSyncService {
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     const LOCAL_SALE_ID_THRESHOLD = 1700000000;
     const url = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-    
+
     // --- Inicio Bitácora ---
     const idBitacora = await BitacoraService.registrarInicioSync(
-      "VentasArrastre", "incremental", "background", idUsuario, sucursal, url
+      "VentasArrastre",
+      "incremental",
+      "background",
+      idUsuario,
+      sucursal,
+      url
     );
 
     try {
@@ -1881,7 +1931,7 @@ class FullSyncService {
           exitoso: false,
           registrosGuardados: 0,
           registrosActualizados: 0,
-          error: errorMsg
+          error: errorMsg,
         });
         return { success: false, sent: 0, error: errorMsg };
       }
@@ -1905,7 +1955,7 @@ class FullSyncService {
           exitoso: true,
           registrosLeidos: 0,
           registrosGuardados: 0,
-          registrosActualizados: 0
+          registrosActualizados: 0,
         });
         return { success: true, sent: 0 };
       }
@@ -1941,13 +1991,13 @@ class FullSyncService {
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         console.error("[FullSyncService] ❌ Error arrastre ventas", response.status, errorText);
-        
+
         await BitacoraService.registrarFinSync(idBitacora, {
           exitoso: false,
           registrosGuardados: 0,
           registrosActualizados: 0,
           error: `HTTP ${response.status}: ${errorText}`,
-          errorCode: String(response.status)
+          errorCode: String(response.status),
         });
 
         return {
@@ -1963,21 +2013,21 @@ class FullSyncService {
       await BitacoraService.registrarFinSync(idBitacora, {
         exitoso: true,
         registrosLeidos: payload.length, // Registros que se intentaron enviar
-        registrosGuardados: 0, 
-        registrosActualizados: payload.length // Registros que el servidor procesará
+        registrosGuardados: 0,
+        registrosActualizados: payload.length, // Registros que el servidor procesará
       });
 
       return { success: true, sent: payload.length };
     } catch (error: any) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSyncService] Error sending ventas arrastre", error);
-      
+
       await BitacoraService.registrarFinSync(idBitacora, {
         exitoso: false,
         registrosGuardados: 0,
         registrosActualizados: 0,
         error: errorMsg,
-        stackTrace: JSON.stringify(error)
+        stackTrace: JSON.stringify(error),
       });
 
       return { success: false, sent: 0, error: errorMsg };

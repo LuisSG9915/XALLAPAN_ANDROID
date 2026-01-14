@@ -44,6 +44,8 @@ import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
+import BatteryOptimizations from "./services/BatteryOptimizations";
+import BackgroundWatchdog from "./services/BackgroundWatchdog";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
@@ -166,6 +168,19 @@ function App() {
     // Iniciar sincronización automática si hay sesión guardada
     const initBackgroundSync = async () => {
       try {
+        // Solicitar ignorar optimizaciones de batería inmediatamente
+        await BatteryOptimizations.requestDisableBatteryOptimizations().catch((err) =>
+          console.log("[App] Error solicitando optimización batería:", err)
+        );
+
+        // Configurar el Watchdog (siempre)
+        console.log("[App] Configurando BackgroundWatchdog...", BackgroundWatchdog);
+        if (BackgroundWatchdog && BackgroundWatchdog.configure) {
+          await BackgroundWatchdog.configure();
+        } else {
+          console.error("[App] BackgroundWatchdog no está definido o no tiene método configure");
+        }
+
         const user = await AuthService.restoreSession();
         if (user) {
           console.log("[App] Usuario detectado, iniciando sincronización automática");
