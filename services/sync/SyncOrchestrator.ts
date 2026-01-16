@@ -12,6 +12,7 @@ import { KitsSyncTask } from "./tasks/KitsSyncTask";
 import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
 import { DetalleVisitasSyncTask } from "./tasks/DetalleVisitasSyncTask";
 import { TipoVisitaSyncTask } from "./tasks/TipoVisitaSyncTask";
+import { VentasArrastreSyncTask } from "./tasks/VentasArrastreSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -42,7 +43,7 @@ export class SyncOrchestrator {
    * Crea todas las tareas de sincronización
    */
   private createAllTasks(): SyncTask[] {
-    return [
+    const tasks = [
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),
       new KitsSyncTask(this.realm, this.syncLogId),
@@ -50,12 +51,21 @@ export class SyncOrchestrator {
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId, this.sucursal),
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
-      new CarteraSyncTask(this.realm, this.syncLogId),
+      // new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
       new VisitaSyncTask(this.realm, this.syncLogId),
       new DetalleVisitasSyncTask(this.realm, this.syncLogId, this.idUsuario),
+      // Arrastre al final - prioridad 100
+      new VentasArrastreSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
     ];
+
+    // Asignar idUsuario a todas las tareas
+    tasks.forEach(task => {
+      (task as any).idUsuario = this.idUsuario;
+    });
+
+    return tasks as SyncTask[];
   }
 
   /**
@@ -142,12 +152,37 @@ export class SyncOrchestrator {
       try {
         console.log(`[SyncOrchestrator] Ejecutando tarea: ${task.getTableName()}`);
 
-        const result = await task.executeWithLogging();
+        // Ejecutar con timeout de 10 segundos
+        const TIMEOUT_MS = 10000;
+        let timeoutId: number | null = null;
+        
+        const timeoutPromise = new Promise<SyncTaskResult>((resolve) => {
+          timeoutId = setTimeout(() => {
+            console.warn(`[SyncOrchestrator] ⏱️ Timeout en ${task.getTableName()} (10s), saltando a siguiente tarea`);
+            resolve({
+              success: false,
+              error: "Timeout: La tarea tardó más de 10 segundos",
+              timedOut: true,
+            });
+          }, TIMEOUT_MS);
+        });
+
+        const taskPromise = task.executeWithLogging();
+        const result = await Promise.race([taskPromise, timeoutPromise]);
+        
+        // Cancelar el timeout si la tarea terminó antes
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        
         results.set(task.getTableName(), result);
 
         if (!result.success) {
-          errors.push(`${task.getTableName()}: ${result.error || "Error desconocido"}`);
-          console.error(`[SyncOrchestrator] Error en ${task.getTableName()}:`, result.error);
+          const errorMsg = (result as any).timedOut 
+            ? `Timeout (>10s)` 
+            : result.error || "Error desconocido";
+          errors.push(`${task.getTableName()}: ${errorMsg}`);
+          console.error(`[SyncOrchestrator] Error en ${task.getTableName()}:`, errorMsg);
         } else {
           console.log(`[SyncOrchestrator] Tarea ${task.getTableName()} completada exitosamente`);
         }

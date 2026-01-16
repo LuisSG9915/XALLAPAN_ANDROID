@@ -231,7 +231,8 @@ export const CierreRutaSchema = {
 export const VisitaSchema = {
   name: "Visita",
   properties: {
-    id: "int",
+    id: "string", // Ahora es compuesto: "idOriginal-fecha"
+    idOriginal: "int", // ID original del servidor
     idCliente: "int",
     ruta: "string",
     fecha: "date",
@@ -267,6 +268,62 @@ export const TipoVisitaSchema = {
   primaryKey: "id",
 };
 
+export const BitacoraSyncSchema = {
+  name: "BitacoraSync",
+  properties: {
+    idBitacoraMovil: "string", // Primary key
+    tabla: "string",
+    tipoSync: "string", // "incremental" | "full"
+    fechaInicio: "date",
+    fechaFinal: "date?",
+    duracionMs: "int?",
+    
+    // Contexto Usuario
+    idUsuario: "int?",
+    nombreUsuario: "string?",
+    sucursal: "int?",
+    
+    // Contexto Dispositivo
+    ipDispositivo: "string?",
+    nombreDispositivo: "string?", 
+    sistemaOperativo: "string?",
+    versionApp: "string?",
+    
+    // Contexto Red
+    tipoConexion: "string?", // "wifi", "cellular", "none", "unknown"
+    tipoConexionDetallado: "string?", // "2g", "3g", "4g", "5g", etc.
+    estadoConexion: "int?", // 1 = conectado, 0 = desconectado
+    intensidadSenal: "int?", 
+    velocidadDescargaMbps: "double?",
+    velocidadCargaMbps: "double?",
+    latenciaMs: "int?",
+    esConexionMetered: "bool?",
+    
+    // Contexto App
+    appState: "string?", // "active", "background", "inactive"
+    origenSync: "string?", // "manual" | "background"
+    endpoint: "string?",
+    detallesJSON: "string?",
+    
+    // Resultados
+    exitoso: "bool",
+    registrosLeidos: "int?",
+    registrosGuardados: "int?", 
+    registrosActualizados: "int?",
+    registrosEliminados: "int?",
+    
+    // Errores
+    error: "string?",
+    codigoError: "string?",
+    descripcionError: "string?",
+    stackTrace: "string?",
+    
+    // Estado de envío
+    enviado: "bool",
+  },
+  primaryKey: "idBitacoraMovil",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -284,4 +341,5 @@ export const ALL_SCHEMAS = [
   VisitaSchema,
   DetalleVisitasSchema,
   TipoVisitaSchema,
+  BitacoraSyncSchema,
 ];

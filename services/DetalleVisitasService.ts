@@ -14,28 +14,18 @@ class DetalleVisitasService {
     return DetalleVisitasService.instance;
   }
 
-  private async getRealm(): Promise<Realm> {
+  /**
+   * Inyecta la instancia de Realm desde FullSyncService
+   * Evita abrir múltiples instancias del mismo Realm
+   */
+  setRealm(realm: Realm): void {
+    this.realm = realm;
+    console.log("[DetalleVisitasService] Realm inyectado correctamente");
+  }
+
+  private getRealm(): Realm {
     if (!this.realm || this.realm.isClosed) {
-      this.realm = await Realm.open({
-        path: "FullSyncDB",
-        schema: ALL_SCHEMAS,
-        schemaVersion: 12,
-        onMigration: (oldRealm: Realm, newRealm: Realm) => {
-          // Migración para Usuario - inicializar campo metros
-          const newUsuarios = newRealm.objects("Usuario");
-          for (let i = 0; i < newUsuarios.length; i++) {
-            const obj: any = newUsuarios[i];
-            if (typeof obj.metros === "undefined" || obj.metros === null) {
-              obj.metros = 31; // Valor por defecto
-            }
-          }
-          // Migración de Visitas: eliminar esquema antiguo
-          if (oldRealm.schemaVersion < 12) {
-            const oldVisitas = oldRealm.objects("Visita");
-            oldRealm.delete(oldVisitas);
-          }
-        },
-      });
+      throw new Error("[DetalleVisitasService] Realm no inicializado. Debe llamarse FullSyncService.initialize() primero");
     }
     return this.realm;
   }
@@ -47,7 +37,7 @@ class DetalleVisitasService {
     tipoVisita?: number
   ): Promise<string | null> {
     try {
-      const realm = await this.getRealm();
+      const realm = this.getRealm();
       const detalleId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const now = new Date();
 
@@ -80,7 +70,7 @@ class DetalleVisitasService {
 
   async finalizarVisita(detalleId: string, tipoVisita?: number): Promise<boolean> {
     try {
-      const realm = await this.getRealm();
+      const realm = this.getRealm();
       const now = new Date();
 
       realm.write(() => {
@@ -113,7 +103,7 @@ class DetalleVisitasService {
     tipoVisita?: number
   ): Promise<string | null> {
     try {
-      const realm = await this.getRealm();
+      const realm = this.getRealm();
       const detalleId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const now = new Date();
 
@@ -147,7 +137,7 @@ class DetalleVisitasService {
 
   async getVisitasActivas(idCliente: number): Promise<any[]> {
     try {
-      const realm = await this.getRealm();
+      const realm = this.getRealm();
       const visitas = realm.objects("DetalleVisitas").filtered("idCliente == $0 AND fechaFin == null", idCliente);
 
       return Array.from(visitas).map((v: any) => ({

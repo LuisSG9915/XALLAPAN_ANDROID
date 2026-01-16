@@ -3,6 +3,7 @@ import { ALL_SCHEMAS, SyncLogSchema } from "./RealmSchemas";
 import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
+import BitacoraService from "./BitacoraService";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
@@ -21,7 +22,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 12, // v12: nuevo schema de Visita basado en fechas
+        schemaVersion: 16,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -40,19 +41,56 @@ class FullSyncService {
               obj.metros = 31; // Valor por defecto
             }
           }
-          // Migración de Visitas: eliminar esquema antiguo
-          if (oldRealm.schemaVersion < 12) {
-            const oldVisitas = oldRealm.objects("Visita");
-            oldRealm.delete(oldVisitas);
+          
+          // Migración v16: Cambiar Visita.id de int a string compuesto
+          // Realm automáticamente recreará la tabla Visita porque cambió el tipo de primary key
+          // Las visitas antiguas se perderán y deberán sincronizarse nuevamente
+          if (oldRealm.schemaVersion < 16) {
+            console.log("[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse.");
           }
         },
       });
 
       this.isInitialized = true;
-      console.log("✅ FullSyncService inicializado correctamente (v5 con SyncTableLog)");
+      console.log("✅ FullSyncService inicializado correctamente (v16 - Visita con ID compuesto)");
+
+      // Inyectar Realm a otros servicios para evitar múltiples instancias
+      await this.injectRealmToServices();
     } catch (error) {
       console.error("❌ Error al inicializar FullSyncService:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Inyecta la instancia de Realm a todos los servicios que la necesitan
+   * Esto evita el error "ALREADY OPENED" al garantizar una única instancia compartida
+   */
+  private async injectRealmToServices(): Promise<void> {
+    if (!this.realm) {
+      console.warn("[FullSyncService] No se puede inyectar Realm: instancia no inicializada");
+      return;
+    }
+
+    try {
+      // Inyectar a BitacoraService
+      BitacoraService.setRealm(this.realm);
+
+      // Inyectar a DetalleVisitasService
+      const DetalleVisitasService = (await import("./DetalleVisitasService")).default;
+      DetalleVisitasService.getInstance().setRealm(this.realm);
+
+      // Inyectar a VisitaSyncService
+      const VisitaSyncService = (await import("./VisitaSyncService")).default;
+      VisitaSyncService.getInstance().setRealm(this.realm);
+
+      // Inyectar a CierreRutaService
+      const CierreRutaService = (await import("./CierreRutaService")).default;
+      CierreRutaService.setRealm(this.realm);
+
+      console.log("✅ Realm inyectado a todos los servicios");
+    } catch (error) {
+      console.error("❌ Error al inyectar Realm a servicios:", error);
     }
   }
 
@@ -178,7 +216,17 @@ class FullSyncService {
       throw new Error("Realm no inicializado");
     }
 
-    // PASO 1: Enviar ventas pendientes al servidor antes de sincronizar
+    // PASO 1: Enviar bitácoras pendientes
+    if (idUsuario) {
+      try {
+        console.log("[FullSync] Enviando bitácoras pendientes...");
+        await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+      } catch (error) {
+        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
+      }
+    }
+
+    // PASO 2: Enviar ventas pendientes al servidor antes de sincronizar
     if (idUsuario) {
       console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
       const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
@@ -238,71 +286,86 @@ class FullSyncService {
           const tableName = "ClienteFull";
           let last = this.getLastSyncedAr(tableName);
 
-          // Si no hay sincronización previa, usar fecha de hoy menos 1 día para no traer todo
           if (!last) {
             last = new Date();
-            last.setDate(last.getDate() - 2); // Restar 1 día
+            last.setDate(last.getDate() - 2);
           }
 
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
+          );
 
-          console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
-          console.log("[Incremental] URL completa:", url);
+          try {
+            console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
+            console.log("[Incremental] URL completa:", url);
 
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
-            throw new Error(`HTTP ${response.status} Clientes`);
-          }
-
-          const clientes = await response.json();
-          console.log({ clientes });
-          const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          this.realm!.write(() => {
-            for (const cliente of clientes) {
-              const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
-
-              const clienteData: any = {
-                id: cliente.id,
-                nombre: cliente.nombre,
-                longitud: cliente.longitud,
-                latitud: cliente.latitud,
-                idGrupo: cliente.idGrupo,
-                credito: cliente.credito,
-                facturacionMovil: cliente.facturacionMovil,
-                fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
-                correoFactura: cliente.correo_factura || null,
-                syncedAt: new Date(),
-                syncedAr: nowMexico,
-              };
-
-              if (existing) {
-                this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("ClienteFull", clienteData);
-                registrosGuardados++;
-              }
+            const response = await fetch(url, {
+              headers: { accept: "application/octet-stream" },
+            });
+            if (!response.ok) {
+              console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
+              throw new Error(`HTTP ${response.status} Clientes`);
             }
-          });
 
-          // console.log(
-          //   `[Incremental] Clientes leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-          // );
+            const clientes = await response.json();
+            console.log({ clientes });
+            const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+            this.realm!.write(() => {
+              for (const cliente of clientes) {
+                const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
+
+                const clienteData: any = {
+                  id: cliente.id,
+                  nombre: cliente.nombre,
+                  longitud: cliente.longitud,
+                  latitud: cliente.latitud,
+                  idGrupo: cliente.idGrupo,
+                  credito: cliente.credito,
+                  facturacionMovil: cliente.facturacionMovil,
+                  fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
+                  correoFactura: cliente.correo_factura || null,
+                  syncedAt: new Date(),
+                  syncedAr: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("ClienteFull", clienteData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
         },
       },
       {
@@ -310,57 +373,77 @@ class FullSyncService {
         run: async () => {
           const tableName = "Usuario";
           const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
+          );
 
-          console.log("[Incremental] Usuarios full desde", url);
+          try {
+            console.log("[Incremental] Usuarios full desde", url);
 
-          const response = await fetch(url, {
-            headers: { accept: "application/json" },
-          });
-          if (!response.ok) {
-            console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
-            throw new Error(`HTTP ${response.status} Usuarios`);
-          }
-
-          const usuarios = await response.json();
-          const registrosLeidos = Array.isArray(usuarios) ? usuarios.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          this.realm!.write(() => {
-            for (const usuario of usuarios) {
-              const existing = this.realm!.objectForPrimaryKey("Usuario", usuario.id) as any;
-
-              const usuarioData: any = {
-                id: usuario.id,
-                nombre: usuario.nombre,
-                perfil: usuario.perfil,
-                descripcionPerfil: usuario.descripcionPerfil,
-                puesto: usuario.puesto,
-                descripcionPuesto: usuario.descripcionPuesto,
-                claveEmpleado: usuario.claveEmpleado,
-                password: usuario.password,
-                sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
-                metros: usuario.metros,
-                syncedAt: nowMexico,
-              };
-
-              if (existing) {
-                this.realm!.create("Usuario", usuarioData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("Usuario", usuarioData);
-                registrosGuardados++;
-              }
+            const response = await fetch(url, {
+              headers: { accept: "application/json" },
+            });
+            if (!response.ok) {
+              console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
+              throw new Error(`HTTP ${response.status} Usuarios`);
             }
-          });
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+            const usuarios = await response.json();
+            const registrosLeidos = Array.isArray(usuarios) ? usuarios.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            this.realm!.write(() => {
+              for (const usuario of usuarios) {
+                const existing = this.realm!.objectForPrimaryKey("Usuario", usuario.id) as any;
+
+                const usuarioData: any = {
+                  id: usuario.id,
+                  nombre: usuario.nombre,
+                  perfil: usuario.perfil,
+                  descripcionPerfil: usuario.descripcionPerfil,
+                  puesto: usuario.puesto,
+                  descripcionPuesto: usuario.descripcionPuesto,
+                  claveEmpleado: usuario.claveEmpleado,
+                  password: usuario.password,
+                  sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
+                  metros: usuario.metros,
+                  syncedAt: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("Usuario", usuarioData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("Usuario", usuarioData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
         },
       },
       {
@@ -369,7 +452,6 @@ class FullSyncService {
           const tableName = "Precio";
           let last = this.getLastSyncedAr(tableName);
 
-          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
           if (!last) {
             last = new Date();
             last.setDate(last.getDate() - 1);
@@ -377,52 +459,72 @@ class FullSyncService {
 
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
-
-          console.log("[Incremental] Precios desde", fechaInicial, url);
-
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} Precios`);
-          }
-
-          const precios = await response.json();
-          const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          this.realm!.write(() => {
-            for (const precio of precios) {
-              const existing = this.realm!.objectForPrimaryKey("Precio", precio.id) as any;
-
-              const precioData: any = {
-                ...precio,
-                syncedAt: new Date(),
-                syncedAr: nowMexico,
-              };
-
-              if (existing) {
-                this.realm!.create("Precio", precioData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("Precio", precioData);
-                registrosGuardados++;
-              }
-            }
-          });
-
-          console.log(
-            `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
           );
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+          try {
+            console.log("[Incremental] Precios desde", fechaInicial, url);
+
+            const response = await fetch(url, {
+              headers: { accept: "application/octet-stream" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} Precios`);
+            }
+
+            const precios = await response.json();
+            const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            this.realm!.write(() => {
+              for (const precio of precios) {
+                const existing = this.realm!.objectForPrimaryKey("Precio", precio.id) as any;
+
+                const precioData: any = {
+                  ...precio,
+                  syncedAt: new Date(),
+                  syncedAr: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("Precio", precioData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("Precio", precioData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            console.log(
+              `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+            );
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
         },
       },
       {
@@ -431,7 +533,6 @@ class FullSyncService {
           const tableName = "PrecioPromo";
           let last = this.getLastSyncedAr(tableName);
 
-          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
           if (!last) {
             last = new Date();
             last.setDate(last.getDate() - 1);
@@ -441,52 +542,72 @@ class FullSyncService {
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
             fechaInicial
           )}`;
-
-          console.log("[Incremental] PreciosPromo desde", fechaInicial, url);
-
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} PreciosPromo`);
-          }
-
-          const precios = await response.json();
-          const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          this.realm!.write(() => {
-            for (const precio of precios) {
-              const existing = this.realm!.objectForPrimaryKey("PrecioPromo", precio.id) as any;
-
-              const precioData: any = {
-                ...precio,
-                syncedAt: new Date(),
-                syncedAr: nowMexico,
-              };
-
-              if (existing) {
-                this.realm!.create("PrecioPromo", precioData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("PrecioPromo", precioData);
-                registrosGuardados++;
-              }
-            }
-          });
-
-          console.log(
-            `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
           );
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+          try {
+            console.log("[Incremental] PreciosPromo desde", fechaInicial, url);
+
+            const response = await fetch(url, {
+              headers: { accept: "application/octet-stream" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} PreciosPromo`);
+            }
+
+            const precios = await response.json();
+            const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            this.realm!.write(() => {
+              for (const precio of precios) {
+                const existing = this.realm!.objectForPrimaryKey("PrecioPromo", precio.id) as any;
+
+                const precioData: any = {
+                  ...precio,
+                  syncedAt: new Date(),
+                  syncedAr: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("PrecioPromo", precioData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("PrecioPromo", precioData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            console.log(
+              `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+            );
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
         },
       },
       // {
@@ -550,7 +671,6 @@ class FullSyncService {
           const tableName = "Venta";
           let last = this.getLastSyncedAr(tableName);
 
-          // Si no hay sincronización previa, usar fecha de hoy menos 1 día
           if (!last) {
             last = new Date();
             last.setDate(last.getDate() - 1);
@@ -560,8 +680,12 @@ class FullSyncService {
           const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
             fechaInicial
           )}&sucursal=${encodeURIComponent(String(sucursal))}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
+          );
 
-          console.log("[Incremental] Ventas desde", fechaInicial, url);
+          try {
+            console.log("[Incremental] Ventas desde", fechaInicial, url);
 
           const response = await fetch(url, {
             headers: { accept: "application/octet-stream" },
@@ -666,17 +790,139 @@ class FullSyncService {
             }
           });
 
-          console.log(
-            `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+            console.log(
+              `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+            );
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
+        },
+      },
+      {
+        name: "DetalleVisitasArrastre",
+        run: async () => {
+          const tableName = "DetalleVisitas";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${idUsuario}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
           );
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+          try {
+            console.log("[Incremental] DetalleVisitas - Enviando visitas pendientes...");
+
+            const fiveMinutesAgo = new Date(nowMexico.getTime() - 5 * 60 * 1000);
+            const detallesVisitas = this.realm!.objects("DetalleVisitas").filtered("syncedAt < $0", fiveMinutesAgo);
+
+            if (detallesVisitas.length === 0) {
+              console.log("[Incremental] DetalleVisitas - No hay visitas pendientes");
+              
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos: 0,
+                registrosGuardados: 0,
+                registrosActualizados: 0
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos: 0,
+                registrosGuardados: 0,
+                registrosActualizados: 0,
+              };
+            }
+
+            const formatDateForMexico = (date: Date): string => {
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, "0");
+              const day = String(date.getDate()).padStart(2, "0");
+              const hours = String(date.getHours()).padStart(2, "0");
+              const minutes = String(date.getMinutes()).padStart(2, "0");
+              const seconds = String(date.getSeconds()).padStart(2, "0");
+              return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            };
+
+            const visitasArray = Array.from(detallesVisitas).map((detalle: any) => ({
+              fechaInicio: detalle.fechaInicio ? formatDateForMexico(detalle.fechaInicio) : null,
+              fechaFin: detalle.fechaFin ? formatDateForMexico(detalle.fechaFin) : null,
+              idCliente: detalle.idCliente,
+              idUsuario: detalle.idUsuario,
+              idRuta: detalle.idRuta,
+              tipo: detalle.tipoVisita,
+            }));
+
+            console.log(`[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor`);
+
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                accept: "application/octet-stream",
+              },
+              body: JSON.stringify(visitasArray),
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text().catch(() => "");
+              throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+            }
+
+            const nowSync = this.getMexicoNow();
+            this.realm!.write(() => {
+              for (const detalle of detallesVisitas) {
+                (detalle as any).syncedAt = nowSync;
+              }
+            });
+
+            console.log(`[Incremental] DetalleVisitas - ✅ ${visitasArray.length} visitas sincronizadas`);
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos: visitasArray.length,
+              registrosGuardados: 0,
+              registrosActualizados: visitasArray.length
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos: visitasArray.length,
+              registrosGuardados: 0,
+              registrosActualizados: visitasArray.length,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            console.error("[Incremental] DetalleVisitas - Error:", error);
+            
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            
+            throw error;
+          }
         },
       },
       {
@@ -688,53 +934,73 @@ class FullSyncService {
           const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
             String(sucursal)
           )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
-
-          console.log("[Incremental] Inventario desde", url);
-
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} Inventario`);
-          }
-
-          const inventario = await response.json();
-          const registrosLeidos = Array.isArray(inventario) ? inventario.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          this.realm!.write(() => {
-            for (const item of inventario) {
-              const existing = this.realm!.objectForPrimaryKey("Inventario", item.id);
-
-              const inventarioData = {
-                ...item,
-                sucursal: sucursal,
-                syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
-                syncedAr: nowMexico,
-              };
-
-              if (existing) {
-                this.realm!.create("Inventario", inventarioData, UpdateMode.Modified);
-                registrosActualizados++;
-              } else {
-                this.realm!.create("Inventario", inventarioData);
-                registrosGuardados++;
-              }
-            }
-          });
-
-          console.log(
-            `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName, "incremental", "background", idUsuario, sucursal, url
           );
 
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos,
-            registrosGuardados,
-            registrosActualizados,
-          };
+          try {
+            console.log("[Incremental] Inventario desde", url);
+
+            const response = await fetch(url, {
+              headers: { accept: "application/octet-stream" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} Inventario`);
+            }
+
+            const inventario = await response.json();
+            const registrosLeidos = Array.isArray(inventario) ? inventario.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            this.realm!.write(() => {
+              for (const item of inventario) {
+                const existing = this.realm!.objectForPrimaryKey("Inventario", item.id);
+
+                const inventarioData = {
+                  ...item,
+                  sucursal: sucursal,
+                  syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
+                  syncedAr: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("Inventario", inventarioData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("Inventario", inventarioData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            console.log(
+              `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+            );
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500"
+            });
+            throw error;
+          }
         },
       },
     ];
@@ -828,6 +1094,14 @@ class FullSyncService {
     const fechaInicio = new Date();
 
     try {
+      // PASO 1: Enviar bitácoras pendientes al servidor
+      try {
+        console.log("[FullSync] Enviando bitácoras pendientes...");
+        await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+      } catch (error) {
+        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
+      }
+
       // Guardar log inicial
       this.realm.write(() => {
         this.realm!.create("SyncLog", {
@@ -1767,6 +2041,65 @@ class FullSyncService {
     );
   }
 
+  getSyncStatusPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("SyncStatus")
+        .sorted("lastSyncDate", true)
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getSyncLogsPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("SyncLog")
+        .sorted("fechaInicio", true)
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getCierreRutaPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("CierreRuta")
+        .sorted("updatedAt", true)
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getDetalleVisitasPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("DetalleVisitas")
+        .sorted("fechaInicio", true)
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getTipoVisitasPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("TipoVisita")
+        .slice(offset, offset + limit)
+    );
+  }
+
+  getBitacoraSyncPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("BitacoraSync")
+        .sorted("fechaInicio", true)
+        .slice(offset, offset + limit)
+    );
+  }
+
   /**
    * Envía las ventas locales pendientes al servidor.
    * Solo envía ventas con id >= LOCAL_SALE_ID_THRESHOLD y noVenta === 0.
@@ -1863,10 +2196,17 @@ class FullSyncService {
         productos: 0,
         kits: 0,
         precios: 0,
+        preciosPromo: 0,
         inventario: 0,
         cartera: 0,
         clientes: 0,
+        syncStatus: 0,
+        syncLog: 0,
         bitacora: 0,
+        cierreRuta: 0,
+        detalleVisitas: 0,
+        tipoVisita: 0,
+        bitacoraSync: 0,
       };
     }
 
@@ -1876,10 +2216,17 @@ class FullSyncService {
       productos: this.realm.objects("Producto").length,
       kits: this.realm.objects("Kit").length,
       precios: this.realm.objects("Precio").length,
+      preciosPromo: this.realm.objects("PrecioPromo").length,
       inventario: this.realm.objects("Inventario").length,
       cartera: this.realm.objects("Cartera").length,
       clientes: this.realm.objects("ClienteFull").length,
+      syncStatus: this.realm.objects("SyncStatus").length,
+      syncLog: this.realm.objects("SyncLog").length,
       bitacora: this.realm.objects("SyncTableLog").length,
+      cierreRuta: this.realm.objects("CierreRuta").length,
+      detalleVisitas: this.realm.objects("DetalleVisitas").length,
+      tipoVisita: this.realm.objects("TipoVisita").length,
+      bitacoraSync: this.realm.objects("BitacoraSync").length,
     };
   }
 

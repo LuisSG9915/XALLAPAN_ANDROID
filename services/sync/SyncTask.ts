@@ -1,5 +1,6 @@
 import Realm from "realm";
 import { SyncTableLogSchema } from "../RealmSchemas";
+import BitacoraService from "../BitacoraService";
 
 /**
  * Interfaz para el resultado de una sincronización individual
@@ -10,6 +11,8 @@ export interface SyncTaskResult {
   registrosLeidos?: number;
   registrosGuardados?: number;
   registrosActualizados?: number;
+  registrosEliminados?: number;
+  timedOut?: boolean;
   detalles?: any;
 }
 
@@ -32,11 +35,13 @@ export abstract class SyncTask {
   protected realm: Realm;
   protected syncLogId: string;
   protected sucursal?: number;
+  protected idUsuario?: number;
 
-  constructor(realm: Realm, syncLogId: string, sucursal?: number) {
+  constructor(realm: Realm, syncLogId: string, sucursal?: number, idUsuario?: number) {
     this.realm = realm;
     this.syncLogId = syncLogId;
     this.sucursal = sucursal;
+    this.idUsuario = idUsuario;
   }
 
   /**
@@ -115,6 +120,16 @@ export abstract class SyncTask {
     const fechaInicio = new Date();
     console.log(`[${this.getTableName()}] Iniciando sincronización con retry logic...`);
 
+    // Registrar inicio en BitacoraSync
+    const idBitacora = await BitacoraService.registrarInicioSync(
+      this.getTableName(),
+      "full",
+      "manual",
+      this.idUsuario,
+      this.sucursal,
+      this.getEndpoint()
+    );
+
     const maxRetries = 3;
     const baseDelay = 1000; // 1 segundo
     let lastError: Error | null = null;
@@ -133,6 +148,15 @@ export abstract class SyncTask {
         const fechaFinal = new Date();
 
         await this.saveTableLog(result, fechaInicio, fechaFinal);
+
+        // Registrar fin en BitacoraSync
+        await BitacoraService.registrarFinSync(idBitacora, {
+          exitoso: result.success,
+          registrosLeidos: result.registrosLeidos,
+          registrosGuardados: result.registrosGuardados,
+          registrosActualizados: result.registrosActualizados,
+          error: result.error,
+        });
 
         console.log(`[${this.getTableName()}] Sincronización completada:`, {
           success: result.success,
@@ -159,6 +183,13 @@ export abstract class SyncTask {
           };
 
           await this.saveTableLog(errorResult, fechaInicio, fechaFinal);
+
+          // Registrar error en BitacoraSync
+          await BitacoraService.registrarFinSync(idBitacora, {
+            exitoso: false,
+            error: lastError.message,
+            errorCode: "500",
+          });
 
           console.error(
             `[${this.getTableName()}] Sincronización fallida después de ${maxRetries} intentos:`,

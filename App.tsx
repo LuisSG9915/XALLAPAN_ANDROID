@@ -44,7 +44,14 @@ import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
-import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
+import {
+  APP_NAME,
+  COLORS,
+  SPACING,
+  SHADOWS,
+  BORDER_RADIUS,
+  TYPOGRAPHY,
+} from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
@@ -65,7 +72,8 @@ if (__DEV__) {
         return;
       }
 
-      const isArrayLike = Array.isArray(value) || typeof (value as any).length === "number";
+      const isArrayLike =
+        Array.isArray(value) || typeof (value as any).length === "number";
 
       const arr = isArrayLike ? Array.from(value as any).slice(0, limit) : [value];
       const plain = JSON.parse(JSON.stringify(arr));
@@ -121,31 +129,36 @@ function App() {
   const isCheckingRef = useRef(false);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", async (nextAppState: AppStateStatus) => {
-      // Solo re-verificar si la app estaba en background y ahora está activa
-      if (appState.current.match(/inactive|background/) && nextAppState === "active") {
-        // Evitar múltiples verificaciones simultáneas
-        if (isCheckingRef.current) {
-          console.log("[App] Ya hay una verificación en progreso, omitiendo...");
-          return;
-        }
+    const subscription = AppState.addEventListener(
+      "change",
+      async (nextAppState: AppStateStatus) => {
+        // Solo re-verificar si la app estaba en background y ahora está activa
+        if (appState.current.match(/inactive|background/) && nextAppState === "active") {
+          // Evitar múltiples verificaciones simultáneas
+          if (isCheckingRef.current) {
+            console.log("[App] Ya hay una verificación en progreso, omitiendo...");
+            return;
+          }
 
-        isCheckingRef.current = true;
-        console.log("[App] App volvió al foreground, verificando estado de permisos...");
+          isCheckingRef.current = true;
+          console.log(
+            "[App] App volvió al foreground, verificando estado de permisos..."
+          );
 
-        try {
-          // Solicitar el estado del permiso
-          const status = await LocationService.requestPermission();
-          setPermissionStatus(status);
-          console.log(`[App] Estado de permiso de ubicación: ${status}`);
-        } catch (error) {
-          console.error("[App] Error al re-verificar permisos:", error);
-        } finally {
-          isCheckingRef.current = false;
+          try {
+            // Solicitar el estado del permiso
+            const status = await LocationService.requestPermission();
+            setPermissionStatus(status);
+            console.log(`[App] Estado de permiso de ubicación: ${status}`);
+          } catch (error) {
+            console.error("[App] Error al re-verificar permisos:", error);
+          } finally {
+            isCheckingRef.current = false;
+          }
         }
+        appState.current = nextAppState;
       }
-      appState.current = nextAppState;
-    });
+    );
 
     return () => {
       subscription.remove();
@@ -157,6 +170,19 @@ function App() {
     if (permissionStatus !== "granted") return;
 
     console.log("App initialized");
+
+    // CRÍTICO: Inicializar FullSyncService PRIMERO para inyectar Realm a todos los servicios
+    const initializeServices = async () => {
+      try {
+        console.log("[App] Inicializando FullSyncService...");
+        await FullSyncService.initialize();
+        console.log(
+          "[App] ✅ FullSyncService inicializado - Realm inyectado a servicios"
+        );
+      } catch (error) {
+        console.error("[App] ❌ Error al inicializar FullSyncService:", error);
+      }
+    };
 
     // Conectar automáticamente a la última impresora usada
     BluetoothPrinterService.connectToSavedPrinter().catch((err) => {
@@ -171,14 +197,19 @@ function App() {
           console.log("[App] Usuario detectado, iniciando sincronización automática");
           await BackgroundSyncService.start();
         } else {
-          console.log("[App] No hay usuario logueado, sincronización se iniciará después del login");
+          console.log(
+            "[App] No hay usuario logueado, sincronización se iniciará después del login"
+          );
         }
       } catch (error) {
         console.error("[App] Error al verificar sesión para sincronización:", error);
       }
     };
 
-    initBackgroundSync();
+    // Ejecutar inicializaciones en orden
+    initializeServices().then(() => {
+      initBackgroundSync();
+    });
   }, [permissionStatus]);
 
   const handleRetryPermission = async () => {
@@ -226,12 +257,17 @@ function App() {
           <Icon name="location-off" type="material" size={80} color={COLORS.error} />
           <Text style={styles.permissionTitle}>Permiso Bloqueado</Text>
           <Text style={styles.permissionDescription}>
-            Has denegado el permiso de ubicación varias veces. Android ha bloqueado este permiso permanentemente.
+            Has denegado el permiso de ubicación varias veces. Android ha bloqueado este
+            permiso permanentemente.
           </Text>
-          <Text style={[styles.permissionDescription, { fontWeight: "bold", marginTop: 10 }]}>
+          <Text
+            style={[styles.permissionDescription, { fontWeight: "bold", marginTop: 10 }]}
+          >
             Para continuar, debes:
           </Text>
-          <Text style={[styles.permissionDescription, { textAlign: "left", marginTop: 5 }]}>
+          <Text
+            style={[styles.permissionDescription, { textAlign: "left", marginTop: 5 }]}
+          >
             1. Presionar "Abrir Configuración"{"\n"}
             2. Buscar "Permisos" o "Permissions"{"\n"}
             3. Seleccionar "Ubicación" o "Location"{"\n"}
@@ -239,7 +275,13 @@ function App() {
             5. Volver a esta aplicación
           </Text>
           <TouchableOpacity style={styles.permissionButton} onPress={handleOpenSettings}>
-            <Icon name="settings" type="material" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Icon
+              name="settings"
+              type="material"
+              size={20}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
             <Text style={styles.permissionButtonText}>Abrir Configuración</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.exitButton} onPress={handleExitApp}>
@@ -258,10 +300,13 @@ function App() {
           <Icon name="location-off" type="material" size={80} color={COLORS.error} />
           <Text style={styles.permissionTitle}>Permiso de Ubicación Obligatorio</Text>
           <Text style={styles.permissionDescription}>
-            Esta aplicación REQUIERE acceso a la ubicación para funcionar correctamente. Sin este permiso, NO podrás
-            usar la aplicación.
+            Esta aplicación REQUIERE acceso a la ubicación para funcionar correctamente.
+            Sin este permiso, NO podrás usar la aplicación.
           </Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={handleRetryPermission}>
+          <TouchableOpacity
+            style={styles.permissionButton}
+            onPress={handleRetryPermission}
+          >
             <Text style={styles.permissionButtonText}>Otorgar Permiso</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.exitButton} onPress={handleExitApp}>
@@ -288,7 +333,11 @@ function App() {
             },
           }}
         >
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+          <Stack.Screen
+            name="Login"
+            component={LoginScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name="Home"
             component={AppContent}
@@ -297,10 +346,26 @@ function App() {
               headerLeft: () => null,
             }}
           />
-          <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
-          <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
-          <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Inventario" }} />
-          <Stack.Screen name="Traspaso" component={TraspasoRecepcionScreen} options={{ title: " Cargas" }} />
+          <Stack.Screen
+            name="Sales"
+            component={SalesScreen}
+            options={{ title: " Punto de Venta" }}
+          />
+          <Stack.Screen
+            name="Billing"
+            component={BillingScreen}
+            options={{ title: " Cobranza" }}
+          />
+          <Stack.Screen
+            name="Precorte"
+            component={PrecorteScreen}
+            options={{ title: " Inventario" }}
+          />
+          <Stack.Screen
+            name="Traspaso"
+            component={TraspasoRecepcionScreen}
+            options={{ title: " Cargas" }}
+          />
           <Stack.Screen
             name="ReporteVentas"
             component={ReporteVentasScreen}
@@ -311,7 +376,11 @@ function App() {
             component={ClienteGruposScreen}
             options={{ title: ' Grupos de Clientes' }}
           /> */}
-          <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} />
+          <Stack.Screen
+            name="DataView"
+            component={DataViewScreen}
+            options={{ title: "📊 Datos Sincronizados" }}
+          />
           <Stack.Screen
             name="PrinterSettings"
             component={PrinterSettingsScreen}
@@ -343,8 +412,27 @@ function AppContent({ navigation }: { navigation: any }) {
   const [pressProgress, setPressProgress] = useState(0);
   const pressTimerRef = useRef<any>(null);
   const pressStartTimeRef = useRef<number>(0);
+  const [servicesReady, setServicesReady] = useState(false);
+
+  // CRÍTICO: Inicializar FullSyncService ANTES de cargar info del usuario
+  useEffect(() => {
+    const initServices = async () => {
+      try {
+        console.log("[AppContent] Inicializando FullSyncService...");
+        await FullSyncService.initialize();
+        console.log("[AppContent] ✅ FullSyncService listo");
+        setServicesReady(true);
+      } catch (error) {
+        console.error("[AppContent] ❌ Error al inicializar servicios:", error);
+      }
+    };
+    initServices();
+  }, []);
 
   useEffect(() => {
+    // Solo cargar info del usuario cuando los servicios estén listos
+    if (!servicesReady) return;
+
     const loadUserInfo = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
@@ -362,7 +450,7 @@ function AppContent({ navigation }: { navigation: any }) {
       }
     };
     loadUserInfo();
-  }, []);
+  }, [servicesReady]);
 
   const checkPendingTraspasos = useCallback(
     async (user?: any) => {
@@ -387,7 +475,9 @@ function AppContent({ navigation }: { navigation: any }) {
           const data = await response.json();
 
           // Filtramos para obtener solo los que NO (!==) sean "Finalizado"
-          const pending = Array.isArray(data) ? data.filter((item) => item.estatus !== "Finalizado") : [];
+          const pending = Array.isArray(data)
+            ? data.filter((item) => item.estatus !== "Finalizado")
+            : [];
           setHasPendingTraspasos(pending.length > 0);
         }
       } catch (error) {
@@ -415,7 +505,8 @@ function AppContent({ navigation }: { navigation: any }) {
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", async () => {
-      if (currentUser) {
+      // Solo verificar ruta si los servicios están listos y hay usuario
+      if (servicesReady && currentUser) {
         const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
         const vendedor = currentUser.id || 0;
         const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
@@ -424,7 +515,7 @@ function AppContent({ navigation }: { navigation: any }) {
     });
 
     return unsubscribe;
-  }, [navigation, currentUser]);
+  }, [navigation, currentUser, servicesReady]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Cerrar Sesión", "¿Estás seguro de que deseas cerrar sesión?", [
@@ -451,17 +542,33 @@ function AppContent({ navigation }: { navigation: any }) {
       const sucursal = user?.sucursal_origen || user?.sucursal || 1;
       const vendedor = user?.id || 0;
 
-      await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
-        setSyncProgress((prev) => [...prev, progress]);
-      });
+      const result = await FullSyncService.syncAll(
+        sucursal,
+        (progress: SyncProgress) => {
+          setSyncProgress((prev) => [...prev, progress]);
+        },
+        vendedor
+      );
 
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-      Alert.alert(
-        "✅ Sincronización Completa",
-        `Todos los datos han sido actualizados correctamente.\n\nSucursal: ${sucursal}\nVendedor: ${vendedor}`
-      );
+
+      if (result.success) {
+        Alert.alert(
+          "✅ Sincronización Completa",
+          `Todos los datos han sido actualizados correctamente.\n\nSucursal: ${sucursal}\nVendedor: ${vendedor}`
+        );
+      } else {
+        Alert.alert(
+          "⚠️ Sincronización con Errores",
+          `La sincronización completó con errores:\n\n${result.error}\n\nSucursal: ${sucursal}\nVendedor: ${vendedor}`,
+          [{ text: "OK" }]
+        );
+      }
     } catch (error: any) {
-      Alert.alert("❌ Error de Sincronización", error?.message || "No se pudo completar la sincronización");
+      Alert.alert(
+        "❌ Error de Sincronización",
+        error?.message || "No se pudo completar la sincronización"
+      );
     } finally {
       setSyncing(false);
     }
@@ -658,7 +765,11 @@ function AppContent({ navigation }: { navigation: any }) {
                 <Text style={styles.userName}>{userName}</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
               <Icon name="logout" type="material" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -671,7 +782,11 @@ function AppContent({ navigation }: { navigation: any }) {
             return (
               <TouchableOpacity
                 key={item.id}
-                style={[styles.menuCard, { backgroundColor: item.color }, isSalesDisabled && styles.menuCardDisabled]}
+                style={[
+                  styles.menuCard,
+                  { backgroundColor: item.color },
+                  isSalesDisabled && styles.menuCardDisabled,
+                ]}
                 onPress={() => {
                   if (item.customHandler) {
                     item.customHandler();
@@ -689,7 +804,12 @@ function AppContent({ navigation }: { navigation: any }) {
                 <Text style={styles.menuDescription}>{item.description}</Text>
                 {isSalesDisabled && (
                   <View style={styles.disabledOverlay}>
-                    <Icon name="lock" type="material" size={40} color="rgba(255,255,255,0.9)" />
+                    <Icon
+                      name="lock"
+                      type="material"
+                      size={40}
+                      color="rgba(255,255,255,0.9)"
+                    />
                   </View>
                 )}
               </TouchableOpacity>
@@ -705,8 +825,16 @@ function AppContent({ navigation }: { navigation: any }) {
             disabled={syncing}
             activeOpacity={0.85}
           >
-            <Icon name="sync" type="material" size={24} color="#fff" style={syncing ? styles.spinning : {}} />
-            <Text style={styles.syncButtonText}>{syncing ? "Sincronizando..." : "Sincronizar Datos"}</Text>
+            <Icon
+              name="sync"
+              type="material"
+              size={24}
+              color="#fff"
+              style={syncing ? styles.spinning : {}}
+            />
+            <Text style={styles.syncButtonText}>
+              {syncing ? "Sincronizando..." : "Sincronizar Datos"}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -723,10 +851,20 @@ function AppContent({ navigation }: { navigation: any }) {
           >
             {pressingCierre ? (
               <View style={styles.pressProgressContainer}>
-                <View style={[styles.pressProgressBar, { width: `${pressProgress * 100}%` }]} />
+                <View
+                  style={[styles.pressProgressBar, { width: `${pressProgress * 100}%` }]}
+                />
                 <View style={styles.pressProgressContent}>
-                  <Icon name="lock" type="material" size={20} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.syncButtonText}>Mantenga presionado ({Math.ceil((1 - pressProgress) * 5)}s)</Text>
+                  <Icon
+                    name="lock"
+                    type="material"
+                    size={20}
+                    color="#fff"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.syncButtonText}>
+                    Mantenga presionado ({Math.ceil((1 - pressProgress) * 5)}s)
+                  </Text>
                 </View>
               </View>
             ) : (
@@ -738,7 +876,9 @@ function AppContent({ navigation }: { navigation: any }) {
                   color="#fff"
                   style={{ marginRight: 8 }}
                 />
-                <Text style={styles.syncButtonText}>{rutaCerrada ? "Ruta Cerrada" : "Mantener 5s para Cerrar"}</Text>
+                <Text style={styles.syncButtonText}>
+                  {rutaCerrada ? "Ruta Cerrada" : "Mantener 5s para Cerrar"}
+                </Text>
               </>
             )}
           </TouchableOpacity>

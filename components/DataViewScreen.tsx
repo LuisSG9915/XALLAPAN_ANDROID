@@ -22,11 +22,18 @@ type EntityType =
   | "productos"
   | "kits"
   | "precios"
+  | "preciosPromo"
   | "inventario"
   | "cartera"
   | "clientes"
+  | "syncStatus"
+  | "syncLog"
   | "bitacora"
+  | "cierreRuta"
   | "visitas"
+  | "detalleVisitas"
+  | "tipoVisita"
+  | "bitacoraSync"
   | "cumplimiento";
 
 interface EntityTab {
@@ -41,11 +48,18 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "productos", title: "Productos", icon: "inventory" },
   { key: "kits", title: "Kits", icon: "category" },
   { key: "precios", title: "Precios", icon: "price-check" },
+  { key: "preciosPromo", title: "Precios Promo", icon: "local-offer" },
   { key: "inventario", title: "Inventario", icon: "bar-chart" },
   { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
   { key: "usuarios", title: "Usuarios", icon: "person" },
-  { key: "bitacora", title: "Bitácora", icon: "history" },
+  { key: "syncStatus", title: "Sync Status", icon: "sync" },
+  { key: "syncLog", title: "Sync Log", icon: "list-alt" },
+  { key: "bitacora", title: "Bitácora Tabla", icon: "history" },
+  { key: "cierreRuta", title: "Cierre Ruta", icon: "lock" },
   { key: "visitas", title: "Visitas", icon: "calendar-check" },
+  { key: "detalleVisitas", title: "Detalle Visitas", icon: "assignment" },
+  { key: "tipoVisita", title: "Tipo Visita", icon: "label" },
+  { key: "bitacoraSync", title: "Bitácora Sync", icon: "cloud-sync" },
   { key: "cumplimiento", title: "Cumplimiento", icon: "trending-up" },
 ];
 
@@ -103,6 +117,9 @@ export default function DataViewScreen() {
         case "precios":
           setData(FullSyncService.getPreciosPaginated(offset, ITEMS_PER_PAGE));
           break;
+        case "preciosPromo":
+          setData(FullSyncService.getPreciosPromoPaginated(offset, ITEMS_PER_PAGE));
+          break;
         case "inventario":
           setData(FullSyncService.getInventarioPaginated(offset, ITEMS_PER_PAGE));
           break;
@@ -112,8 +129,17 @@ export default function DataViewScreen() {
         case "clientes":
           setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));
           break;
+        case "syncStatus":
+          setData(FullSyncService.getSyncStatusPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "syncLog":
+          setData(FullSyncService.getSyncLogsPaginated(offset, ITEMS_PER_PAGE));
+          break;
         case "bitacora":
           setData(FullSyncService.getSyncTableLogsPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "cierreRuta":
+          setData(FullSyncService.getCierreRutaPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "visitas":
           const visitas = await VisitaSyncService.getInstance().getVisitasByFecha(
@@ -121,6 +147,15 @@ export default function DataViewScreen() {
             currentSucursal
           );
           setData(visitas);
+          break;
+        case "detalleVisitas":
+          setData(FullSyncService.getDetalleVisitasPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "tipoVisita":
+          setData(FullSyncService.getTipoVisitasPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "bitacoraSync":
+          setData(FullSyncService.getBitacoraSyncPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "cumplimiento":
           const stats = await VisitaSyncService.getInstance().getEstadisticasCumplimiento(
@@ -394,6 +429,181 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const renderPrecioPromo = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.descripcion}</Text>
+          <Text style={styles.cardPrice}>${item.precio?.toFixed(2)}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
+          <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
+          <Text style={styles.cardText}>Descuento: {item.descuento || 0}%</Text>
+          <Text style={styles.cardText}>
+            Vigencia: {item.fechaInicio?.toLocaleDateString()} -{" "}
+            {item.fechaFin?.toLocaleDateString()}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderSyncStatus = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.id}</Text>
+          <Text
+            style={[
+              styles.cardSubtitle,
+              { color: item.status === "completed" ? COLORS.success : COLORS.error },
+            ]}
+          >
+            {item.status}
+          </Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>
+            Última Sync: {item.lastSyncDate?.toLocaleString() || "N/A"}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderSyncLog = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Sync #{item.id}</Text>
+          <Text style={styles.cardSubtitle}>{item.tipo}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>
+            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Fin: {item.fechaFinal?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
+          </Text>
+          <Text style={styles.cardText}>Total Registros: {item.totalRegistros || 0}</Text>
+          <Text style={styles.cardText}>
+            Estado:{" "}
+            <Text style={{ color: item.exitoso ? COLORS.success : COLORS.error }}>
+              {item.exitoso ? "Éxito" : "Error"}
+            </Text>
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderCierreRuta = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Ruta {item.id}</Text>
+          <Text
+            style={[
+              styles.cardSubtitle,
+              { color: item.rutaCerrada ? COLORS.error : COLORS.success },
+            ]}
+          >
+            {item.rutaCerrada ? "🔒 Cerrada" : "🔓 Abierta"}
+          </Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
+          <Text style={styles.cardText}>Vendedor: {item.vendedor}</Text>
+          <Text style={styles.cardText}>
+            Fecha Cierre: {item.fechaCierre?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Actualizado: {item.updatedAt?.toLocaleString() || "N/A"}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderDetalleVisitas = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Visita {item.id}</Text>
+          <Text style={styles.cardSubtitle}>Cliente: {item.idCliente}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Usuario: {item.idUsuario}</Text>
+          <Text style={styles.cardText}>Ruta: {item.idRuta}</Text>
+          <Text style={styles.cardText}>Tipo: {item.tipoVisita}</Text>
+          <Text style={styles.cardText}>
+            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Fin: {item.fechaFin?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Sincronizado: {item.syncedAt?.toLocaleString() || "Pendiente"}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderTipoVisita = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.descripcion}</Text>
+          <Text style={styles.cardSubtitle}>ID: {item.id}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderBitacoraSync = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.tabla}</Text>
+          <Text
+            style={[
+              styles.cardSubtitle,
+              { color: item.exitoso ? COLORS.success : COLORS.error },
+            ]}
+          >
+            {item.exitoso ? "✅" : "❌"}
+          </Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Tipo: {item.tipoSync}</Text>
+          <Text style={styles.cardText}>Usuario: {item.nombreUsuario}</Text>
+          <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
+          <Text style={styles.cardText}>
+            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
+          </Text>
+          <Text style={styles.cardText}>
+            Leídos: {item.registrosLeidos || 0} | Guardados:{" "}
+            {item.registrosGuardados || 0}
+          </Text>
+          <Text style={styles.cardText}>Conexión: {item.tipoConexion}</Text>
+          {item.error && (
+            <Text style={[styles.cardText, { color: COLORS.error }]}>
+              Error: {item.error}
+            </Text>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderCumplimiento = ({ item }: { item: any }) => (
     <TouchableOpacity onPress={() => console.log(item)}>
       <View style={styles.card}>
@@ -428,16 +638,30 @@ export default function DataViewScreen() {
         return renderKit({ item });
       case "precios":
         return renderPrecio({ item });
+      case "preciosPromo":
+        return renderPrecioPromo({ item });
       case "inventario":
         return renderInventario({ item });
       case "cartera":
         return renderCartera({ item });
       case "usuarios":
         return renderUsuario({ item });
+      case "syncStatus":
+        return renderSyncStatus({ item });
+      case "syncLog":
+        return renderSyncLog({ item });
       case "bitacora":
         return renderBitacora({ item });
+      case "cierreRuta":
+        return renderCierreRuta({ item });
       case "visitas":
         return renderVisita({ item });
+      case "detalleVisitas":
+        return renderDetalleVisitas({ item });
+      case "tipoVisita":
+        return renderTipoVisita({ item });
+      case "bitacoraSync":
+        return renderBitacoraSync({ item });
       case "cumplimiento":
         return renderCumplimiento({ item });
       default:
@@ -453,20 +677,34 @@ export default function DataViewScreen() {
         return stats.usuarios || 0;
       case "productos":
         return stats.productos || 0;
+      case "kits":
+        return stats.kits || 0;
       case "precios":
         return stats.precios || 0;
+      case "preciosPromo":
+        return stats.preciosPromo || 0;
       case "inventario":
         return stats.inventario || 0;
       case "cartera":
         return stats.cartera || 0;
       case "clientes":
         return stats.clientes || 0;
-      case "kits":
-        return stats.kits || 0;
+      case "syncStatus":
+        return stats.syncStatus || 0;
+      case "syncLog":
+        return stats.syncLog || 0;
       case "bitacora":
         return stats.bitacora || 0;
+      case "cierreRuta":
+        return stats.cierreRuta || 0;
       case "visitas":
         return data.length; // Las visitas vienen de VisitaSyncService
+      case "detalleVisitas":
+        return stats.detalleVisitas || 0;
+      case "tipoVisita":
+        return stats.tipoVisita || 0;
+      case "bitacoraSync":
+        return stats.bitacoraSync || 0;
       case "cumplimiento":
         return data.length; // El cumplimiento es un solo objeto
       default:

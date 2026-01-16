@@ -4,57 +4,36 @@ import { ALL_SCHEMAS } from "./RealmSchemas";
 class CierreRutaService {
   private realm: Realm | null = null;
 
-  async initialize(): Promise<void> {
-    if (this.realm && !this.realm.isClosed) {
-      return;
-    }
+  /**
+   * Inyecta la instancia de Realm desde FullSyncService
+   * Evita abrir múltiples instancias del mismo Realm
+   */
+  setRealm(realm: Realm): void {
+    this.realm = realm;
+    console.log("[CierreRutaService] Realm inyectado correctamente");
+  }
 
-    try {
-      this.realm = await Realm.open({
-        path: "FullSyncDB",
-        schema: ALL_SCHEMAS,
-        schemaVersion: 12,
-        onMigration: (oldRealm: Realm, newRealm: Realm) => {
-          // Migración para Usuario - inicializar campo metros
-          const newUsuarios = newRealm.objects("Usuario");
-          for (let i = 0; i < newUsuarios.length; i++) {
-            const obj: any = newUsuarios[i];
-            if (typeof obj.metros === "undefined" || obj.metros === null) {
-              obj.metros = 31; // Valor por defecto
-            }
-          }
-          // Migración de Visitas: eliminar esquema antiguo
-          if (oldRealm.schemaVersion < 12) {
-            const oldVisitas = oldRealm.objects("Visita");
-            oldRealm.delete(oldVisitas);
-          }
-        },
-      });
-      console.log("✅ CierreRutaService inicializado");
-    } catch (error) {
-      console.error("❌ Error al inicializar CierreRutaService:", error);
-      throw error;
+  private getRealm(): Realm {
+    if (!this.realm || this.realm.isClosed) {
+      throw new Error("[CierreRutaService] Realm no inicializado. Debe llamarse FullSyncService.initialize() primero");
     }
+    return this.realm;
   }
 
   async getRutaStatus(sucursal: number, vendedor: number): Promise<boolean> {
-    await this.initialize();
-    if (!this.realm) return false;
-
+    const realm = this.getRealm();
     const id = `${sucursal}-${vendedor}`;
-    const cierreRuta: any = this.realm.objectForPrimaryKey("CierreRuta", id);
+    const cierreRuta: any = realm.objectForPrimaryKey("CierreRuta", id);
 
     return cierreRuta?.rutaCerrada ?? false;
   }
 
   async setRutaCerrada(sucursal: number, vendedor: number, cerrada: boolean): Promise<void> {
-    await this.initialize();
-    if (!this.realm) return;
-
+    const realm = this.getRealm();
     const id = `${sucursal}-${vendedor}`;
 
-    this.realm.write(() => {
-      this.realm!.create(
+    realm.write(() => {
+      realm.create(
         "CierreRuta",
         {
           id,

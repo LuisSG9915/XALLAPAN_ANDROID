@@ -18,6 +18,7 @@ import FullSyncService from "./FullSyncService";
 import { SyncProgress } from "./sync/SyncTask";
 import AuthService from "./AuthService";
 import BackgroundFetch from "react-native-background-fetch";
+import BitacoraService from "./BitacoraService";
 
 export type SyncStatus =
   | "idle" // No sincronizando
@@ -356,6 +357,14 @@ class BackgroundSyncService {
         console.log(
           `[BackgroundSync] ✅ Sincronización completada exitosamente (Sucursal: ${sucursal}, Usuario: ${idUsuario})`
         );
+        
+        // Enviar bitácoras pendientes al final de sincronización exitosa
+        try {
+          console.log("[BackgroundSync] Enviando bitácoras pendientes al finalizar...");
+          await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        } catch (bitacoraError) {
+          console.warn("[BackgroundSync] Error enviando bitácoras, no es crítico:", bitacoraError);
+        }
       } else {
         this.updateState({
           status: "error",

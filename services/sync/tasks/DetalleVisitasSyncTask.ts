@@ -16,6 +16,7 @@ export class DetalleVisitasSyncTask extends SyncTask {
   getTableName(): string {
     return "DetalleVisitas";
   }
+  // 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=0' \
 
   getEndpoint(): string {
     return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${this.idUsuario}`;
@@ -85,7 +86,9 @@ export class DetalleVisitasSyncTask extends SyncTask {
       console.log(`[DetalleVisitasSyncTask] Response status: ${response.status}`);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.text().catch(() => "");
+        console.error("[DetalleVisitasSyncTask] Error response:", errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
       }
 
       const nowSync = this.getMexicoNow();
