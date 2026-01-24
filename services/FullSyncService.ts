@@ -41,12 +41,14 @@ class FullSyncService {
               obj.metros = 31; // Valor por defecto
             }
           }
-          
+
           // Migración v16: Cambiar Visita.id de int a string compuesto
           // Realm automáticamente recreará la tabla Visita porque cambió el tipo de primary key
           // Las visitas antiguas se perderán y deberán sincronizarse nuevamente
           if (oldRealm.schemaVersion < 16) {
-            console.log("[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse.");
+            console.log(
+              "[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse.",
+            );
           }
         },
       });
@@ -145,7 +147,7 @@ class FullSyncService {
    */
   private async sendPendingVentasArrastre(
     sucursal: number,
-    idUsuario: number
+    idUsuario: number,
   ): Promise<{ success: boolean; sent: number }> {
     console.log("[FullSync] Llamando a sendPendingVentasToServer desde sincronización periódica");
     const result = await this.sendPendingVentasToServer(sucursal, idUsuario);
@@ -160,7 +162,7 @@ class FullSyncService {
   async sendPendingVentasWithTimeout(
     sucursal: number,
     idUsuario: number,
-    timeoutMs: number = 3000
+    timeoutMs: number = 3000,
   ): Promise<{ success: boolean; sent: number; timedOut?: boolean; error?: string }> {
     console.log(`[FullSync] Enviando ventas con timeout de ${timeoutMs}ms`);
 
@@ -206,7 +208,7 @@ class FullSyncService {
   async syncIncremental(
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
-    idUsuario?: number
+    idUsuario?: number,
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -262,7 +264,7 @@ class FullSyncService {
       current: number,
       total: number,
       status: SyncProgress["status"],
-      message: string
+      message: string,
     ) => {
       if (onProgress) {
         onProgress({ current, total, entity, status, message });
@@ -294,7 +296,12 @@ class FullSyncService {
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -347,7 +354,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -362,7 +369,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -374,7 +381,12 @@ class FullSyncService {
           const tableName = "Usuario";
           const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -425,7 +437,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -440,7 +452,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -460,7 +472,12 @@ class FullSyncService {
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -499,14 +516,14 @@ class FullSyncService {
             });
 
             console.log(
-              `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -521,7 +538,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -540,10 +557,15 @@ class FullSyncService {
 
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
-            fechaInicial
+            fechaInicial,
           )}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -582,14 +604,14 @@ class FullSyncService {
             });
 
             console.log(
-              `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -604,7 +626,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -614,55 +636,79 @@ class FullSyncService {
       //   name: "CarteraIncremental",
       //   run: async () => {
       //     const tableName = "Cartera";
-      //     const last = this.getLastSyncedAr(tableName) || new Date(0);
-      //     const fechaInicial = this.formatDateForApi(last);
-      //     const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+      //     const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera/full`;
+      //     const idBitacora = await BitacoraService.registrarInicioSync(
+      //       tableName,
+      //       "incremental",
+      //       "background",
+      //       idUsuario,
+      //       sucursal,
+      //       url,
+      //     );
 
-      //     console.log("[Incremental] Cartera desde", fechaInicial, url);
+      //     try {
+      //       console.log("[Incremental] Cartera full desde", url);
 
-      //     const response = await fetch(url, {
-      //       headers: { accept: "application/octet-stream" },
-      //     });
-      //     if (!response.ok) {
-      //       throw new Error(`HTTP ${response.status} Cartera`);
-      //     }
-
-      //     const cartera = await response.json();
-      //     const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
-      //     let registrosGuardados = 0;
-      //     let registrosActualizados = 0;
-
-      //     this.realm!.write(() => {
-      //       for (const item of cartera) {
-      //         const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
-
-      //         const carteraData: any = {
-      //           ...item,
-      //           syncedAt: new Date(),
-      //           syncedAr: nowMexico,
-      //         };
-
-      //         if (existing) {
-      //           this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
-      //           registrosActualizados++;
-      //         } else {
-      //           this.realm!.create("Cartera", carteraData);
-      //           registrosGuardados++;
-      //         }
+      //       const response = await fetch(url, {
+      //         headers: { accept: "application/octet-stream" },
+      //       });
+      //       if (!response.ok) {
+      //         console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
+      //         throw new Error(`HTTP ${response.status} Cartera`);
       //       }
-      //     });
 
-      //     // console.log(
-      //     //   `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-      //     // );
+      //       const cartera = await response.json();
+      //       const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
+      //       let registrosGuardados = 0;
+      //       let registrosActualizados = 0;
 
-      //     return {
-      //       tabla: tableName,
-      //       endpoint: url,
-      //       registrosLeidos,
-      //       registrosGuardados,
-      //       registrosActualizados,
-      //     };
+      //       this.realm!.write(() => {
+      //         for (const item of cartera) {
+      //           const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
+
+      //           const carteraData: any = {
+      //             ...item,
+      //             syncedAt: new Date(),
+      //             syncedAr: item.fechaLog ? new Date(item.fechaLog) : null,
+      //           };
+
+      //           if (existing) {
+      //             this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
+      //             registrosActualizados++;
+      //           } else {
+      //             this.realm!.create("Cartera", carteraData);
+      //             registrosGuardados++;
+      //           }
+      //         }
+      //       });
+
+      //       console.log(
+      //         `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+      //       );
+
+      //       await BitacoraService.registrarFinSync(idBitacora, {
+      //         exitoso: true,
+      //         registrosLeidos,
+      //         registrosGuardados,
+      //         registrosActualizados,
+      //       });
+
+      //       return {
+      //         tabla: tableName,
+      //         endpoint: url,
+      //         registrosLeidos,
+      //         registrosGuardados,
+      //         registrosActualizados,
+      //       };
+      //     } catch (error) {
+      //       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      //       await BitacoraService.registrarFinSync(idBitacora, {
+      //         exitoso: false,
+      //         error: errorMsg,
+      //         errorCode: "500",
+      //       });
+      //       throw error;
+      //     }
       //   },
       // },
       {
@@ -678,127 +724,132 @@ class FullSyncService {
 
           const fechaInicial = this.formatDateTimeForApi(last);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
-            fechaInicial
+            fechaInicial,
           )}&sucursal=${encodeURIComponent(String(sucursal))}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
             console.log("[Incremental] Ventas desde", fechaInicial, url);
 
-          const response = await fetch(url, {
-            headers: { accept: "application/octet-stream" },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} Ventas`);
-          }
-
-          const ventas = await response.json();
-          console.log(ventas, "Ventas sincronizadas");
-          const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
-          let registrosGuardados = 0;
-          let registrosActualizados = 0;
-
-          // Encontrar el registro con el ás alto del servidor
-          let maxIdVenta = null;
-          let maxId = 0;
-          for (const venta of ventas) {
-            if (venta.id && venta.id > maxId) {
-              maxId = venta.id;
-              maxIdVenta = venta;
+            const response = await fetch(url, {
+              headers: { accept: "application/octet-stream" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} Ventas`);
             }
-          }
 
-          // Obtener el fechaLog del registro con el ID más alto
-          const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
-          console.log(ventas);
-          console.log(`[Incremental] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`);
+            const ventas = await response.json();
+            console.log(ventas, "Ventas sincronizadas");
+            const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
 
-          this.realm!.write(() => {
+            // Encontrar el registro con el ás alto del servidor
+            let maxIdVenta = null;
+            let maxId = 0;
             for (const venta of ventas) {
-              const idMovil = venta.idMovil ?? null;
-
-              // Primero verificar si existe por ID (primary key)
-              const existingById = this.realm!.objectForPrimaryKey("Venta", venta.id);
-
-              if (existingById) {
-                // Actualizar registro existente por ID
-                (existingById as any).noVenta = venta.noVenta;
-                (existingById as any).cantProducto = venta.cantProducto;
-                (existingById as any).precio = venta.precio;
-                (existingById as any).importe = venta.importe;
-                (existingById as any).folioFactura = venta.folioFactura;
-                (existingById as any).facturacionMovil = venta.facturacionMovil;
-                (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
-                registrosActualizados++;
-              } else {
-                // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
-                const localVentas =
-                  idMovil === null
-                    ? []
-                    : this.realm!.objects("Venta").filtered(
-                        "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
-                        idMovil,
-                        venta.claveProd
-                      );
-
-                if (localVentas.length > 0) {
-                  // Actualizar solo los campos específicos en cada registro encontrado
-                  for (const localVenta of localVentas) {
-                    (localVenta as any).noVenta = venta.noVenta;
-                    (localVenta as any).cantProducto = venta.cantProducto;
-                    (localVenta as any).precio = venta.precio;
-                    (localVenta as any).importe = venta.importe;
-                    (localVenta as any).folioFactura = venta.folioFactura;
-                    (localVenta as any).facturacionMovil = venta.facturacionMovil;
-                    (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
-                    registrosActualizados++;
-                  }
-                } else {
-                  // Crear registro porque no existe ni por ID ni por idMovil
-                  this.realm!.create("Venta", {
-                    id: venta.id,
-                    idMovil: venta.idMovil ?? null,
-                    sucursal: venta.sucursal ?? null,
-                    noVenta: venta.noVenta ?? null,
-                    claveProd: venta.claveProd ?? null,
-                    nombreProducto: venta.nombreProducto ?? null,
-                    cantProducto: venta.cantProducto ?? null,
-                    precio: venta.precio ?? null,
-                    importe: venta.importe ?? null,
-                    cveCliente: venta.cveCliente ?? null,
-                    nombreCliente: venta.nombreCliente ?? null,
-                    fecha: venta.fecha ? new Date(venta.fecha) : null,
-                    tipoPago: venta.tipoPago ?? null,
-                    descripcionMedioPago: venta.descripcionMedioPago ?? null,
-                    vendedor: venta.vendedor ?? null,
-                    folioFactura: venta.folioFactura ?? false,
-                    facturacionMovil: venta.facturacionMovil ?? false,
-                    syncedAt: venta.fechaLog ?? nowMexico,
-                    syncedAr: syncedArValue,
-                  });
-                  registrosGuardados++;
-                }
+              if (venta.id && venta.id > maxId) {
+                maxId = venta.id;
+                maxIdVenta = venta;
               }
             }
 
-            // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
-            const allLocalVentas = this.realm!.objects("Venta");
-            for (const localVenta of allLocalVentas) {
-              (localVenta as any).syncedAr = syncedArValue;
-            }
-          });
+            // Obtener el fechaLog del registro con el ID más alto
+            const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
+            console.log(ventas);
+            console.log(`[Incremental] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`);
+
+            this.realm!.write(() => {
+              for (const venta of ventas) {
+                const idMovil = venta.idMovil ?? null;
+
+                // Primero verificar si existe por ID (primary key)
+                const existingById = this.realm!.objectForPrimaryKey("Venta", venta.id);
+
+                if (existingById) {
+                  // Actualizar registro existente por ID
+                  (existingById as any).noVenta = venta.noVenta;
+                  (existingById as any).cantProducto = venta.cantProducto;
+                  (existingById as any).precio = venta.precio;
+                  (existingById as any).importe = venta.importe;
+                  (existingById as any).folioFactura = venta.folioFactura;
+                  (existingById as any).facturacionMovil = venta.facturacionMovil;
+                  (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
+                  registrosActualizados++;
+                } else {
+                  // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
+                  const localVentas =
+                    idMovil === null
+                      ? []
+                      : this.realm!.objects("Venta").filtered(
+                          "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
+                          idMovil,
+                          venta.claveProd,
+                        );
+
+                  if (localVentas.length > 0) {
+                    // Actualizar solo los campos específicos en cada registro encontrado
+                    for (const localVenta of localVentas) {
+                      (localVenta as any).noVenta = venta.noVenta;
+                      (localVenta as any).cantProducto = venta.cantProducto;
+                      (localVenta as any).precio = venta.precio;
+                      (localVenta as any).importe = venta.importe;
+                      (localVenta as any).folioFactura = venta.folioFactura;
+                      (localVenta as any).facturacionMovil = venta.facturacionMovil;
+                      (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
+                      registrosActualizados++;
+                    }
+                  } else {
+                    // Crear registro porque no existe ni por ID ni por idMovil
+                    this.realm!.create("Venta", {
+                      id: venta.id,
+                      idMovil: venta.idMovil ?? null,
+                      sucursal: venta.sucursal ?? null,
+                      noVenta: venta.noVenta ?? null,
+                      claveProd: venta.claveProd ?? null,
+                      nombreProducto: venta.nombreProducto ?? null,
+                      cantProducto: venta.cantProducto ?? null,
+                      precio: venta.precio ?? null,
+                      importe: venta.importe ?? null,
+                      cveCliente: venta.cveCliente ?? null,
+                      nombreCliente: venta.nombreCliente ?? null,
+                      fecha: venta.fecha ? new Date(venta.fecha) : null,
+                      tipoPago: venta.tipoPago ?? null,
+                      descripcionMedioPago: venta.descripcionMedioPago ?? null,
+                      vendedor: venta.vendedor ?? null,
+                      folioFactura: venta.folioFactura ?? false,
+                      facturacionMovil: venta.facturacionMovil ?? false,
+                      syncedAt: venta.fechaLog ?? nowMexico,
+                      syncedAr: syncedArValue,
+                    });
+                    registrosGuardados++;
+                  }
+                }
+              }
+
+              // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
+              const allLocalVentas = this.realm!.objects("Venta");
+              for (const localVenta of allLocalVentas) {
+                (localVenta as any).syncedAr = syncedArValue;
+              }
+            });
 
             console.log(
-              `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -813,7 +864,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -825,7 +876,12 @@ class FullSyncService {
           const tableName = "DetalleVisitas";
           const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${idUsuario}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -836,12 +892,12 @@ class FullSyncService {
 
             if (detallesVisitas.length === 0) {
               console.log("[Incremental] DetalleVisitas - No hay visitas pendientes");
-              
+
               await BitacoraService.registrarFinSync(idBitacora, {
                 exitoso: true,
                 registrosLeidos: 0,
                 registrosGuardados: 0,
-                registrosActualizados: 0
+                registrosActualizados: 0,
               });
 
               return {
@@ -901,7 +957,7 @@ class FullSyncService {
               exitoso: true,
               registrosLeidos: visitasArray.length,
               registrosGuardados: 0,
-              registrosActualizados: visitasArray.length
+              registrosActualizados: visitasArray.length,
             });
 
             return {
@@ -914,13 +970,13 @@ class FullSyncService {
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : "Error desconocido";
             console.error("[Incremental] DetalleVisitas - Error:", error);
-            
+
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
-            
+
             throw error;
           }
         },
@@ -932,10 +988,15 @@ class FullSyncService {
           const nowMexico = this.getMexicoNow();
           const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
           const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
-            String(sucursal)
+            String(sucursal),
           )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName, "incremental", "background", idUsuario, sucursal, url
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
           );
 
           try {
@@ -975,14 +1036,14 @@ class FullSyncService {
             });
 
             console.log(
-              `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
               registrosGuardados,
-              registrosActualizados
+              registrosActualizados,
             });
 
             return {
@@ -997,7 +1058,7 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
               error: errorMsg,
-              errorCode: "500"
+              errorCode: "500",
             });
             throw error;
           }
@@ -1079,7 +1140,7 @@ class FullSyncService {
   async syncAll(
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
-    idUsuario: number = 1
+    idUsuario: number = 1,
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -1125,7 +1186,7 @@ class FullSyncService {
       const fechaFinal = new Date();
       const totalRegistros = Array.from(result.results.values()).reduce(
         (sum, r) => sum + (r.registrosGuardados || 0) + (r.registrosActualizados || 0),
-        0
+        0,
       );
 
       this.realm.write(() => {
@@ -1190,7 +1251,7 @@ class FullSyncService {
     tableName: string,
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
-    idUsuario: number = 1
+    idUsuario: number = 1,
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -1289,7 +1350,7 @@ class FullSyncService {
           lastSyncDate: new Date(),
           status: success ? "completed" : "failed",
         },
-        UpdateMode.Modified
+        UpdateMode.Modified,
       );
     });
   }
@@ -1330,7 +1391,7 @@ class FullSyncService {
       this.realm
         .objects("Venta")
         .sorted("fecha", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -1342,7 +1403,7 @@ class FullSyncService {
   getVentasBySucursal(sucursal: number, limit: number = 10000): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
-      this.realm.objects("Venta").filtered("sucursal == $0", sucursal).sorted("fecha", true).slice(0, limit)
+      this.realm.objects("Venta").filtered("sucursal == $0", sucursal).sorted("fecha", true).slice(0, limit),
     );
   }
 
@@ -1371,7 +1432,7 @@ class FullSyncService {
       facturacionMovil?: boolean | null;
       latitud?: number | null;
       longitud?: number | null;
-    }[]
+    }[],
   ): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -1424,7 +1485,7 @@ class FullSyncService {
       cantidad: number;
       esKit?: boolean;
       idProducto?: number;
-    }[]
+    }[],
   ): Promise<void> {
     console.log("[FullSync] updateInventarioAfterSale called with", {
       itemsCount: items.length,
@@ -1467,7 +1528,7 @@ class FullSyncService {
           const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
 
           console.log(
-            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`,
           );
 
           componentes.forEach((comp: any) => {
@@ -1484,7 +1545,7 @@ class FullSyncService {
             const inventario = this.realm!.objects("Inventario").filtered(
               "sucursal == $0 AND claveProd == $1",
               item.sucursal,
-              idInsumo
+              idInsumo,
             )[0] as any;
 
             if (inventario) {
@@ -1492,7 +1553,7 @@ class FullSyncService {
               inventario.saldo = saldoAnterior + cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
-                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
               );
             } else {
               console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
@@ -1505,10 +1566,10 @@ class FullSyncService {
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND claveProd == $1",
             item.sucursal,
-            idProductoBuscar
+            idProductoBuscar,
           );
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`,
           );
 
           const inventario = inventarioResults[0] as any;
@@ -1518,11 +1579,11 @@ class FullSyncService {
             inventario.saldo = saldoAnterior + item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`
+              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`,
             );
           }
         }
@@ -1538,7 +1599,7 @@ class FullSyncService {
       cantidad: number;
       esKit?: boolean;
       idProducto?: number;
-    }[]
+    }[],
   ): Promise<void> {
     console.log("[FullSync] updateInventarioAfterSaleScreen called with", {
       itemsCount: items.length,
@@ -1578,10 +1639,12 @@ class FullSyncService {
 
         if (item.esKit && item.idProducto) {
           // Es un kit: descontar los insumos según la tabla Kit
+          console.log(item.idProducto, "SAAAA");
+
           const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
 
           console.log(
-            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`,
           );
 
           componentes.forEach((comp: any) => {
@@ -1598,7 +1661,7 @@ class FullSyncService {
             const inventario = this.realm!.objects("Inventario").filtered(
               "sucursal == $0 AND claveProd == $1",
               item.sucursal,
-              idInsumo
+              idInsumo,
             )[0] as any;
 
             if (inventario) {
@@ -1606,7 +1669,7 @@ class FullSyncService {
               inventario.saldo = saldoAnterior - cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
-                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
               );
             } else {
               console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
@@ -1615,14 +1678,14 @@ class FullSyncService {
         } else {
           // No es kit: descontar el producto directamente usando idProducto (id del producto)
           const idProductoBuscar = item.idProducto ?? item.claveProd;
-
+          console.log({ idProductoBuscar });
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND claveProd == $1",
             item.sucursal,
-            idProductoBuscar
+            idProductoBuscar,
           );
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`,
           );
 
           const inventario = inventarioResults[0] as any;
@@ -1632,11 +1695,11 @@ class FullSyncService {
             inventario.saldo = saldoAnterior - item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
+              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`
+              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`,
             );
           }
         }
@@ -1654,7 +1717,7 @@ class FullSyncService {
       sucursal: number;
       claveProd: number;
       cantidad: number;
-    }[]
+    }[],
   ): Promise<void> {
     if (!items.length) return;
 
@@ -1669,7 +1732,7 @@ class FullSyncService {
         const inventario = this.realm!.objects("Inventario").filtered(
           "sucursal == $0 AND claveProd == $1",
           item.sucursal,
-          item.claveProd
+          item.claveProd,
         )[0] as any;
 
         if (inventario) {
@@ -1685,7 +1748,7 @@ class FullSyncService {
           // );
         } else {
           console.warn(
-            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
+            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`,
           );
         }
       });
@@ -1704,7 +1767,7 @@ class FullSyncService {
       saldo: number;
       fechaArrastre?: Date | null;
       descripcion?: string | null;
-    }[]
+    }[],
   ): Promise<void> {
     if (!movimientos.length) return;
 
@@ -1748,7 +1811,7 @@ class FullSyncService {
       idSegmento?: number | null;
       noVenta?: number | null;
       tipoPago?: number | null;
-    }[]
+    }[],
   ): Promise<void> {
     if (!movimientos.length) return;
 
@@ -1806,7 +1869,7 @@ class FullSyncService {
       this.realm
         .objects("Usuario")
         .sorted("nombre")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -1821,7 +1884,7 @@ class FullSyncService {
       this.realm
         .objects("Producto")
         .sorted("descripcion")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -1876,11 +1939,11 @@ class FullSyncService {
       this.realm
         .objects("Precio")
         .sorted("descripcion")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
-  getInventario(limit: number = 100): any[] {
+  getInventario(limit: number = 10000000): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Inventario").slice(0, limit));
   }
@@ -1901,7 +1964,7 @@ class FullSyncService {
       this.realm
         .objects("Cartera")
         .sorted("nombreCliente")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -1961,7 +2024,7 @@ class FullSyncService {
       this.realm
         .objects("ClienteFull")
         .sorted("nombre")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -1992,7 +2055,7 @@ class FullSyncService {
       this.realm
         .objects("PrecioPromo")
         .sorted("descripcion")
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2037,7 +2100,7 @@ class FullSyncService {
       this.realm
         .objects("SyncTableLog")
         .sorted("fechaInicio", true) // Más recientes primero
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2047,7 +2110,7 @@ class FullSyncService {
       this.realm
         .objects("SyncStatus")
         .sorted("lastSyncDate", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2057,7 +2120,7 @@ class FullSyncService {
       this.realm
         .objects("SyncLog")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2067,7 +2130,7 @@ class FullSyncService {
       this.realm
         .objects("CierreRuta")
         .sorted("updatedAt", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2077,17 +2140,13 @@ class FullSyncService {
       this.realm
         .objects("DetalleVisitas")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
   getTipoVisitasPaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(
-      this.realm
-        .objects("TipoVisita")
-        .slice(offset, offset + limit)
-    );
+    return Array.from(this.realm.objects("TipoVisita").slice(offset, offset + limit));
   }
 
   getBitacoraSyncPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -2096,7 +2155,7 @@ class FullSyncService {
       this.realm
         .objects("BitacoraSync")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit)
+        .slice(offset, offset + limit),
     );
   }
 
@@ -2107,7 +2166,7 @@ class FullSyncService {
    */
   async sendPendingVentasToServer(
     sucursal: number,
-    idUsuario: number
+    idUsuario: number,
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     const LOCAL_SALE_ID_THRESHOLD = 1700000000;
 
@@ -2123,7 +2182,7 @@ class FullSyncService {
 
       // Solo enviar ventas locales (id >= threshold) y sin número de venta asignado
       const ventasLocales = ventasRealm.filter(
-        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD
+        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD,
       );
 
       console.log("[FullSyncService] Filtering local sales", {

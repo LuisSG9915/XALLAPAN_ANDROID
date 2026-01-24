@@ -30,7 +30,7 @@ export class SyncOrchestrator {
     syncLogId: string,
     sucursal: number,
     idUsuario: number,
-    onProgress?: (progress: SyncProgress) => void
+    onProgress?: (progress: SyncProgress) => void,
   ) {
     this.realm = realm;
     this.syncLogId = syncLogId;
@@ -51,7 +51,7 @@ export class SyncOrchestrator {
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId, this.sucursal),
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
-      // new CarteraSyncTask(this.realm, this.syncLogId),
+      new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
       new VisitaSyncTask(this.realm, this.syncLogId),
@@ -61,7 +61,7 @@ export class SyncOrchestrator {
     ];
 
     // Asignar idUsuario a todas las tareas
-    tasks.forEach(task => {
+    tasks.forEach((task) => {
       (task as any).idUsuario = this.idUsuario;
     });
 
@@ -129,7 +129,7 @@ export class SyncOrchestrator {
     console.log(`[SyncOrchestrator] Iniciando sincronización de ${sortedTasks.length} tareas`);
     console.log(
       `[SyncOrchestrator] Orden de ejecución:`,
-      sortedTasks.map((t) => t.getTableName())
+      sortedTasks.map((t) => t.getTableName()),
     );
 
     let current = 0;
@@ -155,7 +155,7 @@ export class SyncOrchestrator {
         // Ejecutar con timeout de 10 segundos
         const TIMEOUT_MS = 10000;
         let timeoutId: number | null = null;
-        
+
         const timeoutPromise = new Promise<SyncTaskResult>((resolve) => {
           timeoutId = setTimeout(() => {
             console.warn(`[SyncOrchestrator] ⏱️ Timeout en ${task.getTableName()} (10s), saltando a siguiente tarea`);
@@ -169,18 +169,16 @@ export class SyncOrchestrator {
 
         const taskPromise = task.executeWithLogging();
         const result = await Promise.race([taskPromise, timeoutPromise]);
-        
+
         // Cancelar el timeout si la tarea terminó antes
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
-        
+
         results.set(task.getTableName(), result);
 
         if (!result.success) {
-          const errorMsg = (result as any).timedOut 
-            ? `Timeout (>10s)` 
-            : result.error || "Error desconocido";
+          const errorMsg = (result as any).timedOut ? `Timeout (>10s)` : result.error || "Error desconocido";
           errors.push(`${task.getTableName()}: ${errorMsg}`);
           console.error(`[SyncOrchestrator] Error en ${task.getTableName()}:`, errorMsg);
         } else {
