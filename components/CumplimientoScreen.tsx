@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -71,13 +72,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             if (realmUser && realmUser.metros) {
               console.log(
                 "[Cumplimiento] Metros usuario obtenidos de Realm:",
-                realmUser.metros
+                realmUser.metros,
               );
               setUserMetros(realmUser.metros);
             } else if (user.metros) {
               console.log(
                 "[Cumplimiento] Metros usuario obtenidos de Sesión:",
-                user.metros
+                user.metros,
               );
               setUserMetros(user.metros);
             }
@@ -91,7 +92,16 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
         setCurrentSucursal(sucursal);
 
-        // Cargar datos después de establecer la sucursal
+        // Sincronizar visitas desde el servidor antes de cargar (mismo método que pull-to-refresh)
+        try {
+          console.log("[Cumplimiento] 🔄 Sincronizando visitas al montar...");
+          await VisitaSyncService.getInstance().syncByDate(new Date());
+          console.log("[Cumplimiento] ✅ Visitas sincronizadas al montar");
+        } catch (error) {
+          console.error("[Cumplimiento] ⚠️ Error al sincronizar visitas:", error);
+        }
+
+        // Cargar datos después de sincronizar
         cargarDatos(new Date(), sucursal);
       }
     };
@@ -109,10 +119,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(
-    null
+    null,
   );
   const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(
-    null
+    null,
   );
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
   const [userMetros, setUserMetros] = useState<number | null>(null);
@@ -131,7 +141,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     lat1: number,
     lon1: number,
     lat2: number,
-    lon2: number
+    lon2: number,
   ): number => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
@@ -187,7 +197,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               longitud: datosCliente.longitud,
               metros: datosCliente.metros,
             }));
-          })
+          }),
         ).then((visitasConNombres) => {
           console.log("[Cumplimiento] 📋 Visitas cargadas:", visitasConNombres);
           setVisitas(visitasConNombres);
@@ -203,6 +213,16 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         setRefreshing(false);
       });
   }, []);
+
+  // Recargar visitas cuando la pantalla recibe foco (al regresar de SalesScreen)
+  useFocusEffect(
+    useCallback(() => {
+      if (currentSucursal > 0) {
+        console.log("[Cumplimiento] 🔄 Pantalla recibió foco, recargando visitas...");
+        cargarDatos(fechaSeleccionada, currentSucursal);
+      }
+    }, [fechaSeleccionada, currentSucursal, cargarDatos]),
+  );
 
   const handleMarcarVisitado = async (idVisita: number) => {
     const visita = visitas.find((v) => v.id === idVisita);
@@ -245,12 +265,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             ubicacionVendedor.latitude,
             ubicacionVendedor.longitude,
             visita.latitud,
-            visita.longitud
+            visita.longitud,
           );
           console.log(
             "[Cumplimiento] Distancia calculada:",
             Math.round(distancia),
-            "metros"
+            "metros",
           );
 
           const metrosPermitidos = userMetros || visita.metros || 100; // Prioridad: Usuario > Cliente > Default (100)
@@ -259,22 +279,22 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             Alert.alert(
               "Ubicación inválida",
               `Estás a ${Math.round(
-                distancia
-              )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.`
+                distancia,
+              )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.`,
             );
             setValidandoUbicacion(false);
             return;
           }
 
           console.log(
-            "[Cumplimiento] Validación exitosa, seteando validandoUbicacion = false"
+            "[Cumplimiento] Validación exitosa, seteando validandoUbicacion = false",
           );
           setValidandoUbicacion(false);
         } else {
           setValidandoUbicacion(false);
           Alert.alert(
             "Ubicación no disponible",
-            "No se pudo obtener tu ubicación. Verifica que el GPS esté activado."
+            "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.",
           );
           return;
         }
@@ -283,14 +303,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         console.error("[Cumplimiento] ⚠️ Error al obtener ubicación:", locationError);
         Alert.alert(
           "Error de ubicación",
-          "No se pudo verificar tu ubicación. Verifica que el GPS esté activado."
+          "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.",
         );
         return;
       }
     } else {
       Alert.alert(
         "Cliente sin ubicación",
-        "El cliente no tiene registrada su ubicación geográfica."
+        "El cliente no tiene registrada su ubicación geográfica.",
       );
       return;
     }
@@ -318,7 +338,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const exito = await VisitaSyncService.getInstance().marcarVisitado(
       visitaSeleccionada.id,
       tipoVisitaSeleccionado,
-      fechaSeleccionada
+      fechaSeleccionada,
     );
 
     if (exito) {
@@ -330,10 +350,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           visitaSeleccionada.idCliente,
           user?.id || 0,
           sucursal,
-          tipoVisitaSeleccionado
+          tipoVisitaSeleccionado,
         );
         console.log(
-          `[Cumplimiento] Visita registrada en DetalleVisitas para cliente ${visitaSeleccionada.idCliente} con tipo ${tipoVisitaSeleccionado}`
+          `[Cumplimiento] Visita registrada en DetalleVisitas para cliente ${visitaSeleccionada.idCliente} con tipo ${tipoVisitaSeleccionado}`,
         );
       } catch (error) {
         console.error("[Cumplimiento] Error al registrar en DetalleVisitas:", error);
@@ -355,12 +375,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             console.log(
               `[Cumplimiento] ✅ Actualizando visita local: Cliente ${
                 v.idCliente
-              }, Fecha ${visitaFecha.toISOString().split("T")[0]}`
+              }, Fecha ${visitaFecha.toISOString().split("T")[0]}`,
             );
             return { ...v, visitado: 1, tipo: tipoVisitaSeleccionado };
           }
           return v;
-        })
+        }),
       );
 
       // Actualizar estadísticas localmente

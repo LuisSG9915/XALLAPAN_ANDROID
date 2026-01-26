@@ -76,6 +76,17 @@ class VisitaSyncService {
           startOfDay,
           endOfDay
         );
+        
+        // CRÍTICO: Preservar el estado 'visitado' de las visitas locales antes de borrarlas
+        const estadoVisitadoLocal: { [key: string]: number } = {};
+        existingVisitas.forEach((v: any) => {
+          if (v.visitado === 1) {
+            // Guardar por idOriginal para preservar el estado
+            estadoVisitadoLocal[v.idOriginal] = 1;
+            console.log(`[VisitaSync] 💾 Preservando visitado=1 para visita ${v.idOriginal}`);
+          }
+        });
+        
         console.log(`[VisitaSync] Eliminando ${existingVisitas.length} visitas existentes de la fecha`);
         realm.delete(existingVisitas);
         console.log({visitasData})
@@ -84,6 +95,15 @@ class VisitaSyncService {
           const fechaVisita = new Date(visita.fecha);
           const fechaStr = fechaVisita.toISOString().split('T')[0]; // YYYY-MM-DD
           const idCompuesto = `${visita.id}-${fechaStr}`; // ID único por fecha
+          
+          // Preservar el estado local de 'visitado' si existía
+          const visitadoFinal = estadoVisitadoLocal[visita.id] === 1 
+            ? 1 
+            : (typeof visita.visitado === 'boolean' ? (visita.visitado ? 1 : 0) : Number(visita.visitado));
+          
+          if (estadoVisitadoLocal[visita.id] === 1) {
+            console.log(`[VisitaSync] ✅ Restaurando visitado=1 para visita ${visita.id}`);
+          }
           
           // Usar UpdateMode.Modified para actualizar si ya existe
           realm.create("Visita", {
@@ -94,7 +114,7 @@ class VisitaSyncService {
             fecha: fechaVisita,
             orden: Number(visita.orden),
             tipo: Number(visita.tipo),
-            visitado: typeof visita.visitado === 'boolean' ? (visita.visitado ? 1 : 0) : Number(visita.visitado),
+            visitado: visitadoFinal,
             syncedAt: new Date(),
           }, Realm.UpdateMode.Modified);
           nuevos++;

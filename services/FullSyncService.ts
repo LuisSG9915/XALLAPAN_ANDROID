@@ -1657,9 +1657,9 @@ class FullSyncService {
               return;
             }
 
-            // Buscar el inventario del insumo por idInsumo (que es claveProd)
+            // Buscar el inventario del insumo por idInsumo (que es claveProd) con ID < 10000
             const inventario = this.realm!.objects("Inventario").filtered(
-              "sucursal == $0 AND claveProd == $1",
+              "sucursal == $0 AND claveProd == $1 AND id < 10000",
               item.sucursal,
               idInsumo,
             )[0] as any;
@@ -1672,20 +1672,20 @@ class FullSyncService {
                 `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
               );
             } else {
-              console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
+              console.warn(`[FullSync] No se encontró inventario (ID<10000) para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
             }
           });
         } else {
-          // No es kit: descontar el producto directamente usando idProducto (id del producto)
+          // No es kit: descontar el producto directamente
+          // Buscar por claveProd y SOLO registros con ID < 10000 (sincronizados del servidor)
           const idProductoBuscar = item.idProducto ?? item.claveProd;
-          console.log({ idProductoBuscar });
-          const inventarioResults = this.realm!.objects("Inventario").filtered(
-            "sucursal == $0 AND claveProd == $1",
-            item.sucursal,
-            idProductoBuscar,
-          );
+          console.log(`[FullSync] Buscando inventario por claveProd: ${idProductoBuscar} (ID < 10000)`);
+          
+          const inventarioResults = this.realm!.objects("Inventario")
+            .filtered("sucursal == $0 AND claveProd == $1 AND id < 10000", item.sucursal, idProductoBuscar);
+          
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`,
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, claveProd=${idProductoBuscar}, ID<10000, encontrados: ${inventarioResults.length}`,
           );
 
           const inventario = inventarioResults[0] as any;
@@ -1695,11 +1695,11 @@ class FullSyncService {
             inventario.saldo = saldoAnterior - item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) RESTADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`,
+              `[FullSync] No se encontró inventario con claveProd=${idProductoBuscar} en Sucursal ${item.sucursal}`,
             );
           }
         }
@@ -1753,6 +1753,166 @@ class FullSyncService {
         }
       });
     });
+  }
+
+  /**
+   * Actualiza el inventario SUMANDO las cantidades recibidas en un traspaso.
+   * Usa el ID del producto (no claveProd) como índice.
+   * Si el producto es un kit, suma los insumos según la tabla Kit.
+   * Si no es kit, suma el producto directamente.
+   * CREA el renglón si no existe.
+   */
+  async updateInventarioAfterTraspaso(
+    items: {
+      sucursal: number;
+      claveProd: number;
+      cantidad: number;
+      esKit?: boolean;
+      idProducto?: number;
+    }[],
+  ): Promise<void> {
+    console.log("[FullSync] updateInventarioAfterTraspaso called with", {
+      itemsCount: items.length,
+      items: items.map((i) => ({
+        sucursal: i.sucursal,
+        claveProd: i.claveProd,
+        cantidad: i.cantidad,
+        esKit: i.esKit,
+        idProducto: i.idProducto,
+      })),
+    });
+
+    if (!items.length) {
+      console.log("[FullSync] updateInventarioAfterTraspaso: No items to process");
+      return;
+    }
+
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      console.log("[FullSync] updateInventarioAfterTraspaso: Initializing realm...");
+      await this.initialize();
+    }
+    if (!this.realm || this.realm.isClosed) {
+      console.error("[FullSync] updateInventarioAfterTraspaso: Realm not available after init!");
+      return;
+    }
+
+    console.log("[FullSync] updateInventarioAfterTraspaso: Starting realm.write()");
+    this.realm.write(() => {
+      items.forEach((item, index) => {
+        console.log(`[FullSync] Processing traspaso item ${index + 1}/${items.length}:`, {
+          sucursal: item.sucursal,
+          claveProd: item.claveProd,
+          cantidad: item.cantidad,
+          esKit: item.esKit,
+          idProducto: item.idProducto,
+        });
+
+        if (item.esKit && item.idProducto) {
+          // Es un kit: SUMAR los insumos según la tabla Kit
+          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
+
+          console.log(
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), sumando ${componentes.length} insumos`,
+          );
+
+          componentes.forEach((comp: any) => {
+            const idInsumo = comp.idInsumo;
+            const cantidadInsumo = comp.cantidad || 0;
+            const cantidadTotal = cantidadInsumo * item.cantidad;
+
+            if (!idInsumo || cantidadInsumo <= 0) {
+              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
+              return;
+            }
+
+            // Buscar inventario del insumo con ID < 10000 (sincronizado del servidor)
+            const inventario = this.realm!.objects("Inventario").filtered(
+              "sucursal == $0 AND claveProd == $1 AND id < 10000",
+              item.sucursal,
+              idInsumo,
+            )[0] as any;
+
+            if (inventario) {
+              const saldoAnterior = inventario.saldo || 0;
+              inventario.saldo = saldoAnterior + cantidadTotal;
+              inventario.fechaArrastre = new Date();
+              console.log(
+                `[FullSync] Insumo ${idInsumo} SUMADO: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+              );
+            } else {
+              // Crear renglón si no existe
+              // IMPORTANTE: El ID del inventario debe ser igual al idInsumo (claveProd)
+              this.realm!.create("Inventario", {
+                id: idInsumo,
+                sucursal: item.sucursal,
+                claveProd: idInsumo,
+                saldo: cantidadTotal,
+                fechaArrastre: new Date(),
+                descripcion: null,
+                syncedAt: new Date(0),
+              });
+              console.log(
+                `[FullSync] Insumo ${idInsumo} CREADO con saldo: ${cantidadTotal} (ID inventario: ${idInsumo})`,
+              );
+            }
+          });
+        } else {
+          // No es kit: SUMAR el producto directamente
+          // Buscar por ID del inventario (que debe ser igual al ID del producto)
+          const idInventarioBuscar = item.idProducto;
+          console.log(`[FullSync] Buscando inventario por ID: ${idInventarioBuscar} (idProducto: ${item.idProducto})`);
+          
+          const inventarioResults = this.realm!.objects("Inventario").filtered(
+            "sucursal == $0 AND id == $1",
+            item.sucursal,
+            idInventarioBuscar,
+          );
+          console.log(
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, id=${idInventarioBuscar}, encontrados: ${inventarioResults.length}`,
+          );
+
+          const inventario = inventarioResults[0] as any;
+
+          if (inventario) {
+            const saldoAnterior = inventario.saldo || 0;
+            inventario.saldo = saldoAnterior + item.cantidad;
+            inventario.fechaArrastre = new Date();
+            
+            // Actualizar descripción si no existe
+            if (!inventario.descripcion) {
+              const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
+              if (producto) {
+                inventario.descripcion = producto.descripcion || null;
+              }
+            }
+            
+            console.log(
+              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) SUMADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+            );
+          } else {
+            // Crear renglón si no existe
+            // IMPORTANTE: El ID del inventario debe ser igual al ID del producto
+            // Buscar descripción del producto
+            const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
+            const descripcion = producto?.descripcion || null;
+            
+            this.realm!.create("Inventario", {
+              id: idInventarioBuscar,
+              sucursal: item.sucursal,
+              claveProd: idInventarioBuscar,
+              saldo: item.cantidad,
+              fechaArrastre: new Date(),
+              descripcion: descripcion,
+              syncedAt: new Date(0),
+            });
+            console.log(
+              `[FullSync] Inventario ID=${idInventarioBuscar} CREADO con saldo: ${item.cantidad}, descripcion: ${descripcion}`,
+            );
+          }
+        }
+      });
+    });
+    console.log("[FullSync] updateInventarioAfterTraspaso: realm.write() completed successfully");
   }
 
   /**
@@ -2061,7 +2221,13 @@ class FullSyncService {
 
   getPreciosPromoByCliente(idCliente: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("PrecioPromo").filtered("idCliente == $0", idCliente));
+    // Incluir precios promo específicos del cliente Y precios promo generales (idCliente == null o 0)
+    return Array.from(
+      this.realm.objects("PrecioPromo").filtered(
+        "idCliente == $0 OR idCliente == null OR idCliente == 0", 
+        idCliente
+      )
+    );
   }
 
   getPreciosPromoByProducto(claveProd: number): any[] {
@@ -2245,6 +2411,65 @@ class FullSyncService {
       console.error("[FullSyncService] Error sending ventas arrastre", error);
       return { success: false, sent: 0, error: errorMsg };
     }
+  }
+
+  /**
+   * Sincroniza el inventario incremental desde el servidor
+   * Usado después de recibir traspasos para actualizar el inventario local
+   */
+  async syncInventarioIncremental(sucursal: number, idUsuario: number): Promise<void> {
+    if (!this.isInitialized || !this.realm) {
+      await this.initialize();
+    }
+    if (!this.realm) {
+      throw new Error("Realm no disponible");
+    }
+
+    const tableName = "Inventario";
+    const nowMexico = this.getMexicoNow();
+    const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
+    const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+      String(sucursal),
+    )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
+
+    console.log(`[FullSync] Sincronizando inventario incremental desde: ${url}`);
+
+    const response = await fetch(url, {
+      headers: { accept: "application/octet-stream" },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} al sincronizar inventario`);
+    }
+
+    const inventario = await response.json();
+    const registrosLeidos = Array.isArray(inventario) ? inventario.length : 0;
+    let registrosGuardados = 0;
+    let registrosActualizados = 0;
+
+    this.realm.write(() => {
+      for (const item of inventario) {
+        const existing = this.realm!.objectForPrimaryKey("Inventario", item.id);
+
+        const inventarioData = {
+          ...item,
+          sucursal: sucursal,
+          syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
+        };
+
+        if (existing) {
+          this.realm!.create("Inventario", inventarioData, UpdateMode.Modified);
+          registrosActualizados++;
+        } else {
+          this.realm!.create("Inventario", inventarioData);
+          registrosGuardados++;
+        }
+      }
+    });
+
+    console.log(
+      `[FullSync] Inventario sincronizado: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+    );
   }
 
   getStats(): any {
