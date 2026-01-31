@@ -25,7 +25,7 @@ type ReporteItem = {
   fecha: string;
   nombre: string;
   importe: number;
-  tipoPago: "Efectivo" | "Credito" | "Transferencia";
+  tipoPago: "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "";
   facturacion?: boolean;
   timbrado?: "0" | "1";
   folioFactura?: boolean;
@@ -44,7 +44,7 @@ type GroupedSale = {
   fecha: string;
   nombre: string;
   totalImporte: number;
-  tipoPago: "Efectivo" | "Credito" | "Transferencia";
+  tipoPago: "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "";
   sucursal?: number;
   cve_cliente?: number;
   caja?: number;
@@ -89,12 +89,12 @@ export default function ReporteVentasScreen() {
   const totalEfectivo = useMemo(
     () =>
       items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
-    [items]
+    [items],
   );
   const totalCredito = useMemo(
     () =>
       items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
-    [items]
+    [items],
   );
 
   useEffect(() => {
@@ -131,12 +131,13 @@ export default function ReporteVentasScreen() {
   };
 
   const mapTipoPago = (
-    tipo: number | undefined
-  ): "Efectivo" | "Credito" | "Transferencia" => {
+    tipo: number | undefined,
+  ): "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "" => {
     if (tipo === 1) return "Efectivo";
-    if (tipo === 2) return "Credito";
-    if (tipo === 3) return "Transferencia";
-    return "Efectivo";
+    if (tipo === 2) return "Transferencia";
+    if (tipo === 3) return "Credito";
+    if (tipo === 4) return "Cupon";
+    return "";
   };
 
   const filtrarVentas = (soloLocales: boolean) => {
@@ -184,8 +185,8 @@ export default function ReporteVentasScreen() {
           return inDateRange && inSucursal && venta.noVenta > 0;
         }
       });
-      console.log("[Reporte] Filtered results", { count: filtered.length });
-
+      console.log("[Reporte] Filtered results", { count: filtered });
+      // consoleRealm("pagos", filtered);
       const mapped: ReporteItem[] = filtered.map((venta) => ({
         id: venta.id,
         idMovil: venta.idMovil,
@@ -206,7 +207,7 @@ export default function ReporteVentasScreen() {
         cantProducto: venta.cantProducto,
         precio: venta.precio,
       }));
-
+      console.log({ mapped });
       setItems(mapped);
 
       // Agrupar ventas por idMovil (locales) o por noVenta+sucursal (remotas)
@@ -280,7 +281,7 @@ export default function ReporteVentasScreen() {
         "Error al consultar",
         `No se pudieron filtrar las ventas: ${errorMsg}\n\nVentas disponibles: ${
           allVentas?.length || 0
-        }\nThreshold: ${LOCAL_SALE_ID_THRESHOLD}\n\nIntenta sincronizar de nuevo desde el menú principal.`
+        }\nThreshold: ${LOCAL_SALE_ID_THRESHOLD}\n\nIntenta sincronizar de nuevo desde el menú principal.`,
       );
     } finally {
       setLoading(false);
@@ -415,7 +416,7 @@ export default function ReporteVentasScreen() {
           row.no_venta,
           row.sucursal,
           row.caja || 2,
-          () => loadVentas()
+          () => loadVentas(),
         );
         return;
       }
@@ -444,7 +445,7 @@ export default function ReporteVentasScreen() {
         await FacturaService.getInstance().generarFactura(
           [facturaItem],
           fechaFactura,
-          () => loadVentas()
+          () => loadVentas(),
         );
         return;
       }

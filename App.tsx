@@ -165,6 +165,8 @@ function App() {
     };
   }, [permissionStatus]);
 
+  const [servicesReady, setServicesReady] = useState(false);
+
   useEffect(() => {
     // App initialization - solo si hay permisos de ubicación
     if (permissionStatus !== "granted") return;
@@ -179,6 +181,7 @@ function App() {
         console.log(
           "[App] ✅ FullSyncService inicializado - Realm inyectado a servicios",
         );
+        setServicesReady(true);
       } catch (error) {
         console.error("[App] ❌ Error al inicializar FullSyncService:", error);
       }
@@ -340,12 +343,13 @@ function App() {
           />
           <Stack.Screen
             name="Home"
-            component={AppContent}
             options={{
               title: "Panel Principal",
               headerLeft: () => null,
             }}
-          />
+          >
+            {(props) => <AppContent {...props} servicesReady={servicesReady} />}
+          </Stack.Screen>
           <Stack.Screen
             name="Sales"
             component={SalesScreen}
@@ -397,7 +401,13 @@ function App() {
   );
 }
 
-function AppContent({ navigation }: { navigation: any }) {
+function AppContent({
+  navigation,
+  servicesReady,
+}: {
+  navigation: any;
+  servicesReady: boolean;
+}) {
   const isDarkMode = useColorScheme() === "dark";
   const [syncing, setSyncing] = useState(false);
   const [sucursalName, setSucursalName] = useState("");
@@ -412,22 +422,6 @@ function AppContent({ navigation }: { navigation: any }) {
   const [pressProgress, setPressProgress] = useState(0);
   const pressTimerRef = useRef<any>(null);
   const pressStartTimeRef = useRef<number>(0);
-  const [servicesReady, setServicesReady] = useState(false);
-
-  // CRÍTICO: Inicializar FullSyncService ANTES de cargar info del usuario
-  useEffect(() => {
-    const initServices = async () => {
-      try {
-        console.log("[AppContent] Inicializando FullSyncService...");
-        await FullSyncService.initialize();
-        console.log("[AppContent] ✅ FullSyncService listo");
-        setServicesReady(true);
-      } catch (error) {
-        console.error("[AppContent] ❌ Error al inicializar servicios:", error);
-      }
-    };
-    initServices();
-  }, []);
 
   useEffect(() => {
     // Solo cargar info del usuario cuando los servicios estén listos

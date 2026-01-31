@@ -152,6 +152,7 @@ class TicketPrinter {
     let metodoLabel = "EFECTIVO";
     if (metodo.includes("cred")) metodoLabel = "CREDITO";
     else if (metodo.includes("trans")) metodoLabel = "TRANSFERENCIA";
+    else if (metodo.includes("cup")) metodoLabel = "CUPON";
 
     lines.push(this.center("FORMA DE PAGO", width));
     lines.push(this.leftRight(metodoLabel, `$${data.total.toFixed(2)}`, width));

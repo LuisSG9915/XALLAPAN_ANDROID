@@ -646,9 +646,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       }
 
       const inventario = FullSyncService.getInventario();
-      consoleRealm("Inventario", inventario);
+      // consoleRealm("Inventario", inventario);
       const inventarioFiltrado = inventario.filter((i: any) => i.id < 10000);
-      consoleRealm("Inventario filtrado", inventarioFiltrado);
+      // consoleRealm("Inventario filtrado", inventarioFiltrado);
 
       console.log(`Total items en inventario: ${inventario.length}`);
       console.log(`Items con ID < 10000: ${inventarioFiltrado.length}`);
@@ -687,7 +687,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Obtener detalle de visitas (usar paginación para obtener todos)
       const detalleVisitas = FullSyncService.getDetalleVisitasPaginated(0, 1000);
-      consoleRealm("Detalle Visitas", detalleVisitas);
+      // consoleRealm("Detalle Visitas", detalleVisitas);
 
       console.log(`Total items en detalle_visitas: ${detalleVisitas.length}`);
 
@@ -1362,7 +1362,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* Header con estado de impresora y botón debug */}
-        <View style={styles.headerRow}>
+        {/* <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Punto de Venta</Text>
           <View style={styles.headerButtons}>
             <TouchableOpacity style={styles.debugBtn} onPress={handleDebugInventory}>
@@ -1377,7 +1377,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               </View>
             )}
           </View>
-        </View>
+        </View> */}
 
         {!printerConnected && (
           <View style={styles.warningCard}>
@@ -1815,7 +1815,11 @@ export default function SalesScreen({ route }: { route?: any }) {
                       console.log("producto seleccionado:", item);
                       addToCart(item);
                       setSearchProductoQuery("");
-                      setFilteredProductos(productos);
+                      // Aplicar el filtro correcto según showOnlyPromotions
+                      const productosFiltrados = showOnlyPromotions
+                        ? productos.filter((p) => p.esKit || p.esPromocion)
+                        : productos.filter((p) => !p.esKit && !p.esPromocion);
+                      setFilteredProductos(productosFiltrados);
                     }}
                   >
                     <View style={{ flex: 1 }}>

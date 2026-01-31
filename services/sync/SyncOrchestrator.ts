@@ -51,7 +51,7 @@ export class SyncOrchestrator {
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId, this.sucursal),
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
-      new CarteraSyncTask(this.realm, this.syncLogId),
+      // new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
       new VisitaSyncTask(this.realm, this.syncLogId),
