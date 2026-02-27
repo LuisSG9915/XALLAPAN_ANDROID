@@ -1,11 +1,13 @@
 import { Platform, PermissionsAndroid, Alert, Linking } from "react-native";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
+import GpsBitacoraService from "./GpsBitacoraService";
 
 export type PermissionStatus = "granted" | "denied" | "blocked";
 
 export type LocationCoordinates = {
   latitude: number;
   longitude: number;
+  accuracy?: number; // precisión en metros (cuanto menor, mejor)
 };
 
 class LocationService {
@@ -49,7 +51,7 @@ class LocationService {
         });
 
         const timeoutPromise = new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout al solicitar permisos")), 10000)
+          setTimeout(() => reject(new Error("Timeout al solicitar permisos")), 10000),
         );
 
         const granted = (await Promise.race([requestPromise, timeoutPromise])) as string;
@@ -145,9 +147,18 @@ class LocationService {
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
           });
+
+          // Registrar en bitácora GPS para debugging y trazabilidad
+          GpsBitacoraService.registrarUbicacion(
+            position.coords.latitude,
+            position.coords.longitude,
+            position.coords.accuracy,
+          );
+
           resolve({
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
           });
         },
         (error: GeoError) => {
@@ -156,9 +167,9 @@ class LocationService {
         },
         {
           enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 10000,
-        }
+          timeout: 20000,
+          maximumAge: 0,
+        },
       );
     });
   }
@@ -168,6 +179,82 @@ class LocationService {
    */
   getPermissionStatus(): boolean {
     return this.hasPermission;
+  }
+
+  /**
+   * Obtiene la mejor ubicación disponible tomando hasta `intentos` lecturas
+   * y devolviendo la que tenga menor valor de accuracy (más precisa).
+   *
+   * Ideal para validar si el vendedor está dentro del rango de un cliente,
+   * ya que el GPS de bajo costo puede tener errores de 50-200 m en el primer intento.
+   *
+   * @param intentos  Número máximo de lecturas (default 3)
+   * @param timeoutMs Timeout por lectura en ms (default 8000)
+   * @param onProgreso Callback opcional para notificar cada intento
+   */
+  async getBestLocation(
+    intentos: number = 5,
+    timeoutMs: number = 10000,
+    onProgreso?: (intento: number, total: number, accuracy: number) => void,
+  ): Promise<LocationCoordinates | null> {
+    if (!this.hasPermission) {
+      const granted = await this.checkPermission();
+      if (!granted) {
+        console.warn("[LocationService] No hay permisos de ubicación");
+        return null;
+      }
+    }
+
+    const lecturas: LocationCoordinates[] = [];
+
+    const obtenerLectura = (): Promise<LocationCoordinates | null> =>
+      new Promise((resolve) => {
+        Geolocation.getCurrentPosition(
+          (position: GeoPosition) => {
+            const coords: LocationCoordinates = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            };
+            console.log(
+              `[LocationService] Lectura GPS: lat=${coords.latitude.toFixed(6)},` +
+                ` lng=${coords.longitude.toFixed(6)}, accuracy=${Math.round(coords.accuracy ?? 999)} m`,
+            );
+            GpsBitacoraService.registrarUbicacion(coords.latitude, coords.longitude, coords.accuracy);
+            resolve(coords);
+          },
+          (error: GeoError) => {
+            console.warn("[LocationService] Error en lectura GPS:", error.message);
+            resolve(null);
+          },
+          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0, forceRequestLocation: true } as any,
+        );
+      });
+
+    for (let i = 1; i <= intentos; i++) {
+      const lectura = await obtenerLectura();
+      if (lectura) {
+        lecturas.push(lectura);
+        onProgreso?.(i, intentos, lectura.accuracy ?? 999);
+        // Si ya tenemos buena precisión (<= 15 m) no necesitamos más lecturas
+        if ((lectura.accuracy ?? 999) <= 15) {
+          console.log(`[LocationService] Precisión óptima en intento ${i}: ${lectura.accuracy} m`);
+          break;
+        }
+      }
+    }
+
+    if (lecturas.length === 0) return null;
+
+    // Elegir la lectura con menor accuracy (más precisa)
+    const mejor = lecturas.reduce((prev, curr) => ((curr.accuracy ?? 999) < (prev.accuracy ?? 999) ? curr : prev));
+
+    console.log(
+      `[LocationService] Mejor lectura de ${lecturas.length} intentos:` +
+        ` accuracy=${Math.round(mejor.accuracy ?? 999)} m`,
+    );
+
+    return mejor;
   }
 }
 

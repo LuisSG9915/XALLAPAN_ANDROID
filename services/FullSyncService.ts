@@ -4,6 +4,7 @@ import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 import BitacoraService from "./BitacoraService";
+import GpsBitacoraService from "./GpsBitacoraService";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
@@ -22,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 16,
+        schemaVersion: 20,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -77,6 +78,9 @@ class FullSyncService {
     try {
       // Inyectar a BitacoraService
       BitacoraService.setRealm(this.realm);
+
+      // Inyectar a GpsBitacoraService
+      GpsBitacoraService.setRealm(this.realm);
 
       // Inyectar a DetalleVisitasService
       const DetalleVisitasService = (await import("./DetalleVisitasService")).default;
@@ -223,12 +227,52 @@ class FullSyncService {
       try {
         console.log("[FullSync] Enviando bitácoras pendientes...");
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras GPS pendientes...");
+        await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
       } catch (error) {
         console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
       }
     }
 
-    // PASO 2: Enviar ventas pendientes al servidor antes de sincronizar
+    // PASO 2: Enviar InventarioEnvase pendientes ANTES de ventas
+    if (idUsuario) {
+      try {
+        const envasesPendientes = this.getInventarioEnvasesPendientes();
+        if (envasesPendientes.length > 0) {
+          console.log(`[FullSync] Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
+          const envasePayload = envasesPendientes.map((r: any) => ({
+            sucursal: r.sucursal ?? sucursal,
+            clave_prod: r.claveProd ?? 0,
+            folio_movto: r.folioMovto ?? 1,
+            cantidad_entrada: r.cantidadEntrada ?? 0,
+            cantidad_salida: r.cantidadSalida ?? 0,
+            costo: r.costo ?? 0,
+            tipo_movto: r.tipoMovto ?? 0,
+            fecha_alta: (r.fechaAlta ?? new Date()).toISOString(),
+            fecha_act: (r.fechaAct ?? new Date()).toISOString(),
+            id_movil: r.idMovil ?? 0,
+            observacion: r.observacion ?? "",
+          }));
+          const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          const envaseResp = await fetch(envaseUrl, {
+            method: "POST",
+            headers: { accept: "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify(envasePayload),
+          });
+          if (envaseResp.ok) {
+            console.log(`[FullSync] ✅ ${envasePayload.length} InventarioEnvase enviados`);
+            const ids = envasesPendientes.map((r: any) => r.id as string);
+            this.marcarInventarioEnvaseSincronizado(ids);
+          } else {
+            console.warn(`[FullSync] ⚠️ Error HTTP ${envaseResp.status} enviando InventarioEnvase`);
+          }
+        }
+      } catch (envaseError) {
+        console.warn("[FullSync] ⚠️ Error enviando InventarioEnvase, continuando:", envaseError);
+      }
+    }
+
+    // PASO 3: Enviar ventas pendientes al servidor antes de sincronizar
     if (idUsuario) {
       console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
       const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
@@ -909,6 +953,13 @@ class FullSyncService {
               };
             }
 
+            const isValidDate = (date: Date | null | undefined): boolean => {
+              if (!date) return false;
+              const year = date.getFullYear();
+              // Validar que la fecha esté en un rango razonable para evitar DATEDIFF overflow
+              return year >= 1900 && year <= 2100;
+            };
+
             const formatDateForMexico = (date: Date): string => {
               const year = date.getFullYear();
               const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -919,9 +970,10 @@ class FullSyncService {
               return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
             };
 
+            const nowStr = formatDateForMexico(nowMexico);
             const visitasArray = Array.from(detallesVisitas).map((detalle: any) => ({
-              fechaInicio: detalle.fechaInicio ? formatDateForMexico(detalle.fechaInicio) : null,
-              fechaFin: detalle.fechaFin ? formatDateForMexico(detalle.fechaFin) : null,
+              fechaInicio: isValidDate(detalle.fechaInicio) ? formatDateForMexico(detalle.fechaInicio) : nowStr,
+              fechaFin: isValidDate(detalle.fechaFin) ? formatDateForMexico(detalle.fechaFin) : nowStr,
               idCliente: detalle.idCliente,
               idUsuario: detalle.idUsuario,
               idRuta: detalle.idRuta,
@@ -929,6 +981,7 @@ class FullSyncService {
             }));
 
             console.log(`[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor`);
+            console.log("[Incremental] DetalleVisitas - Payload:", JSON.stringify(visitasArray));
 
             const response = await fetch(url, {
               method: "POST",
@@ -1159,6 +1212,8 @@ class FullSyncService {
       try {
         console.log("[FullSync] Enviando bitácoras pendientes...");
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras GPS pendientes...");
+        await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
       } catch (error) {
         console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
       }
@@ -1432,6 +1487,7 @@ class FullSyncService {
       facturacionMovil?: boolean | null;
       latitud?: number | null;
       longitud?: number | null;
+      observacion?: string | null;
     }[],
   ): Promise<void> {
     if (!this.isInitialized) {
@@ -1461,6 +1517,7 @@ class FullSyncService {
           facturacionMovil: v.facturacionMovil ?? false,
           latitud: v.latitud ?? null,
           longitud: v.longitud ?? null,
+          observacion: v.observacion ?? null,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -1672,7 +1729,9 @@ class FullSyncService {
                 `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
               );
             } else {
-              console.warn(`[FullSync] No se encontró inventario (ID<10000) para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
+              console.warn(
+                `[FullSync] No se encontró inventario (ID<10000) para Insumo ${idInsumo} en Sucursal ${item.sucursal}`,
+              );
             }
           });
         } else {
@@ -1680,10 +1739,13 @@ class FullSyncService {
           // Buscar por claveProd y SOLO registros con ID < 10000 (sincronizados del servidor)
           const idProductoBuscar = item.idProducto ?? item.claveProd;
           console.log(`[FullSync] Buscando inventario por claveProd: ${idProductoBuscar} (ID < 10000)`);
-          
-          const inventarioResults = this.realm!.objects("Inventario")
-            .filtered("sucursal == $0 AND claveProd == $1 AND id < 10000", item.sucursal, idProductoBuscar);
-          
+
+          const inventarioResults = this.realm!.objects("Inventario").filtered(
+            "sucursal == $0 AND claveProd == $1 AND id < 10000",
+            item.sucursal,
+            idProductoBuscar,
+          );
+
           console.log(
             `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, claveProd=${idProductoBuscar}, ID<10000, encontrados: ${inventarioResults.length}`,
           );
@@ -1861,7 +1923,7 @@ class FullSyncService {
           // Buscar por ID del inventario (que debe ser igual al ID del producto)
           const idInventarioBuscar = item.idProducto;
           console.log(`[FullSync] Buscando inventario por ID: ${idInventarioBuscar} (idProducto: ${item.idProducto})`);
-          
+
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND id == $1",
             item.sucursal,
@@ -1877,7 +1939,7 @@ class FullSyncService {
             const saldoAnterior = inventario.saldo || 0;
             inventario.saldo = saldoAnterior + item.cantidad;
             inventario.fechaArrastre = new Date();
-            
+
             // Actualizar descripción si no existe
             if (!inventario.descripcion) {
               const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
@@ -1885,7 +1947,7 @@ class FullSyncService {
                 inventario.descripcion = producto.descripcion || null;
               }
             }
-            
+
             console.log(
               `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) SUMADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
             );
@@ -1895,7 +1957,7 @@ class FullSyncService {
             // Buscar descripción del producto
             const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
             const descripcion = producto?.descripcion || null;
-            
+
             this.realm!.create("Inventario", {
               id: idInventarioBuscar,
               sucursal: item.sucursal,
@@ -2223,10 +2285,7 @@ class FullSyncService {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     // Incluir precios promo específicos del cliente Y precios promo generales (idCliente == null o 0)
     return Array.from(
-      this.realm.objects("PrecioPromo").filtered(
-        "idCliente == $0 OR idCliente == null OR idCliente == 0", 
-        idCliente
-      )
+      this.realm.objects("PrecioPromo").filtered("idCliente == $0 OR idCliente == null OR idCliente == 0", idCliente),
     );
   }
 
@@ -2378,6 +2437,7 @@ class FullSyncService {
           latitud: venta?.latitud ?? 0,
           id_movil: venta.idMovil,
           fechaTransfer: new Date().toISOString(),
+          observacion: venta.observacion ?? "",
         };
       });
 
@@ -2472,6 +2532,104 @@ class FullSyncService {
     );
   }
 
+  /**
+   * Crea registros locales de InventarioEnvase en Realm.
+   * Se usa para registrar movimientos de envases (intercambio/préstamo).
+   */
+  async createLocalInventarioEnvase(
+    items: {
+      sucursal: number;
+      claveProd: number;
+      folioMovto: number;
+      cantidadEntrada: number;
+      cantidadSalida: number;
+      costo: number;
+      tipoMovto: number;
+      idMovil: number;
+      observacion: string;
+    }[],
+  ): Promise<void> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+    if (!this.realm || this.realm.isClosed) return;
+
+    const nowMexico = this.getMexicoNow();
+    this.realm.write(() => {
+      items.forEach((item) => {
+        const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        this.realm!.create("InventarioEnvase", {
+          id,
+          sucursal: item.sucursal,
+          claveProd: item.claveProd,
+          folioMovto: item.folioMovto,
+          cantidadEntrada: item.cantidadEntrada,
+          cantidadSalida: item.cantidadSalida,
+          costo: item.costo,
+          tipoMovto: item.tipoMovto,
+          fechaAlta: nowMexico,
+          fechaAct: nowMexico,
+          idMovil: item.idMovil,
+          observacion: item.observacion || null,
+          syncedAt: new Date(0),
+        });
+      });
+    });
+
+    console.log(`[FullSync] ✅ ${items.length} registros de InventarioEnvase creados`);
+  }
+
+  /**
+   * Obtiene registros de InventarioEnvase pendientes de sincronizar.
+   * (syncedAt = epoch 0 indica que no se ha sincronizado)
+   */
+  getInventarioEnvasesPendientes(): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    const epoch = new Date(0);
+    return Array.from(this.realm.objects("InventarioEnvase").filtered("syncedAt == $0", epoch));
+  }
+
+  /**
+   * Marca registros de InventarioEnvase como sincronizados.
+   */
+  marcarInventarioEnvaseSincronizado(ids: string[]): void {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return;
+    const now = new Date();
+    this.realm.write(() => {
+      ids.forEach((id) => {
+        const record = this.realm!.objectForPrimaryKey("InventarioEnvase", id) as any;
+        if (record) {
+          record.syncedAt = now;
+        }
+      });
+    });
+  }
+
+  /**
+   * Busca productos cuya descripción contenga un texto dado (case-insensitive).
+   */
+  getProductosByDescripcion(texto: string, limit: number = 100): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("Producto").filtered("descripcion CONTAINS[c] $0", texto).slice(0, limit));
+  }
+
+  /**
+   * Obtiene productos que tienen envaseRecibe = true (productos que pueden recibirse en intercambio).
+   */
+  getProductosEnvaseRecibe(limit: number = 100): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("Producto").filtered("envaseRecibe == true").slice(0, limit));
+  }
+
+  /**
+   * Busca un producto por su claveProd.
+   */
+  getProductoByClaveProd(claveProd: string): any | null {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    const productos = this.realm.objects("Producto").filtered("claveProd == $0", claveProd);
+    return productos.length > 0 ? productos[0] : null;
+  }
+
   getStats(): any {
     if (!this.isInitialized || !this.realm) {
       return {
@@ -2491,6 +2649,7 @@ class FullSyncService {
         detalleVisitas: 0,
         tipoVisita: 0,
         bitacoraSync: 0,
+        inventarioEnvase: 0,
       };
     }
 
@@ -2511,6 +2670,7 @@ class FullSyncService {
       detalleVisitas: this.realm.objects("DetalleVisitas").length,
       tipoVisita: this.realm.objects("TipoVisita").length,
       bitacoraSync: this.realm.objects("BitacoraSync").length,
+      inventarioEnvase: this.realm.objects("InventarioEnvase").length,
     };
   }
 

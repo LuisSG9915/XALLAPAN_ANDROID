@@ -39,7 +39,7 @@ export class VentasArrastreSyncTask extends SyncTask {
       // Obtener ventas locales pendientes
       const ventasRealm = this.realm.objects("Venta");
       const ventasLocales = Array.from(ventasRealm).filter(
-        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD
+        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD,
       );
 
       console.log(`[VentasArrastre] Ventas pendientes encontradas: ${ventasLocales.length}`);
@@ -66,6 +66,7 @@ export class VentasArrastreSyncTask extends SyncTask {
         latitud: venta?.latitud ?? 0,
         id_movil: venta.idMovil,
         fechaTransfer: new Date().toISOString(),
+        observacion: venta.observacion ?? "",
       }));
 
       // Enviar al servidor

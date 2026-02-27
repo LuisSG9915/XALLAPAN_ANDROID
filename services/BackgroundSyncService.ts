@@ -19,6 +19,7 @@ import { SyncProgress } from "./sync/SyncTask";
 import AuthService from "./AuthService";
 import BackgroundFetch from "react-native-background-fetch";
 import BitacoraService from "./BitacoraService";
+import GpsBitacoraService from "./GpsBitacoraService";
 
 export type SyncStatus =
   | "idle" // No sincronizando
@@ -362,6 +363,8 @@ class BackgroundSyncService {
         try {
           console.log("[BackgroundSync] Enviando bitácoras pendientes al finalizar...");
           await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+          console.log("[BackgroundSync] Enviando bitácoras GPS pendientes al finalizar...");
+          await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         } catch (bitacoraError) {
           console.warn("[BackgroundSync] Error enviando bitácoras, no es crítico:", bitacoraError);
         }

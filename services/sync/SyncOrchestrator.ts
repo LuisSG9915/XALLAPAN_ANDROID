@@ -13,6 +13,7 @@ import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
 import { DetalleVisitasSyncTask } from "./tasks/DetalleVisitasSyncTask";
 import { TipoVisitaSyncTask } from "./tasks/TipoVisitaSyncTask";
 import { VentasArrastreSyncTask } from "./tasks/VentasArrastreSyncTask";
+import { InventarioEnvaseSyncTask } from "./tasks/InventarioEnvaseSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -56,6 +57,8 @@ export class SyncOrchestrator {
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
       new VisitaSyncTask(this.realm, this.syncLogId),
       new DetalleVisitasSyncTask(this.realm, this.syncLogId, this.idUsuario),
+      // Arrastre de envases antes de ventas - prioridad 95
+      new InventarioEnvaseSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Arrastre al final - prioridad 100
       new VentasArrastreSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
     ];

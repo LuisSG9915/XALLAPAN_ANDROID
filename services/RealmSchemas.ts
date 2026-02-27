@@ -22,6 +22,7 @@ export const VentaSchema = {
     facturacionMovil: "bool?",
     latitud: "double?",
     longitud: "double?",
+    observacion: "string?",
     syncedAt: "date",
     syncedAr: "date?",
   },
@@ -53,6 +54,7 @@ export const ProductoSchema = {
     claveProd: "string?",
     descripcion: "string?",
     esKit: "bool?",
+    envaseRecibe: "bool?",
     fechaAct: "date?",
     syncedAt: "date",
   },
@@ -277,51 +279,92 @@ export const BitacoraSyncSchema = {
     fechaInicio: "date",
     fechaFinal: "date?",
     duracionMs: "int?",
-    
+
     // Contexto Usuario
     idUsuario: "int?",
     nombreUsuario: "string?",
     sucursal: "int?",
-    
+
     // Contexto Dispositivo
     ipDispositivo: "string?",
-    nombreDispositivo: "string?", 
+    nombreDispositivo: "string?",
     sistemaOperativo: "string?",
     versionApp: "string?",
-    
+
     // Contexto Red
     tipoConexion: "string?", // "wifi", "cellular", "none", "unknown"
     tipoConexionDetallado: "string?", // "2g", "3g", "4g", "5g", etc.
     estadoConexion: "int?", // 1 = conectado, 0 = desconectado
-    intensidadSenal: "int?", 
+    intensidadSenal: "int?",
     velocidadDescargaMbps: "double?",
     velocidadCargaMbps: "double?",
     latenciaMs: "int?",
     esConexionMetered: "bool?",
-    
+
     // Contexto App
     appState: "string?", // "active", "background", "inactive"
     origenSync: "string?", // "manual" | "background"
     endpoint: "string?",
     detallesJSON: "string?",
-    
+
     // Resultados
     exitoso: "bool",
     registrosLeidos: "int?",
-    registrosGuardados: "int?", 
+    registrosGuardados: "int?",
     registrosActualizados: "int?",
     registrosEliminados: "int?",
-    
+
     // Errores
     error: "string?",
     codigoError: "string?",
     descripcionError: "string?",
     stackTrace: "string?",
-    
+
     // Estado de envío
     enviado: "bool",
   },
   primaryKey: "idBitacoraMovil",
+};
+
+/**
+ * Schema para bitácora de posiciones GPS del usuario.
+ * Guarda cada lectura de ubicación para debugging y trazabilidad.
+ */
+export const BitacoraGpsSchema = {
+  name: "BitacoraGps",
+  properties: {
+    id: "string", // UUID único: timestamp-random
+    idUsuario: "int",
+    sucursal: "int",
+    latitud: "float",
+    longitud: "float",
+    precision: "float?", // Precisión GPS en metros
+    bateria: "float?", // Metros permitidos para validación del usuario
+    id_movil: "int?",
+    fecha: "date", // Hora en que se toma el GPS
+    enviado: "bool", // true = ya sincronizado al servidor
+  },
+  primaryKey: "id",
+};
+
+export const InventarioEnvaseSchema = {
+  name: "InventarioEnvase",
+  properties: {
+    id: "string",
+    sucursal: "int?",
+    claveProd: "int?",
+    folioMovto: "int?",
+    cantidadEntrada: "float?",
+    cantidadSalida: "float?",
+    costo: "float?",
+    tipoMovto: "int?",
+    fechaAlta: "date?",
+    fechaAct: "date?",
+    idMovil: "int?",
+    observacion: "string?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
 };
 
 export const ALL_SCHEMAS = [
@@ -342,4 +385,6 @@ export const ALL_SCHEMAS = [
   DetalleVisitasSchema,
   TipoVisitaSchema,
   BitacoraSyncSchema,
+  BitacoraGpsSchema,
+  InventarioEnvaseSchema,
 ];

@@ -87,13 +87,19 @@ export default function ReporteVentasScreen() {
 
   const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
   const totalEfectivo = useMemo(
-    () =>
-      items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
+    () => items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
     [items],
   );
   const totalCredito = useMemo(
-    () =>
-      items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
+    () => items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
+    [items],
+  );
+  const totalTransferencia = useMemo(
+    () => items.filter((i) => i.tipoPago === "Transferencia").reduce((s, i) => s + i.importe, 0),
+    [items],
+  );
+  const totalCupones = useMemo(
+    () => items.filter((i) => i.tipoPago === "Cupon").reduce((s, i) => s + i.importe, 0),
     [items],
   );
 
@@ -130,9 +136,7 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const mapTipoPago = (
-    tipo: number | undefined,
-  ): "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "" => {
+  const mapTipoPago = (tipo: number | undefined): "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "" => {
     if (tipo === 1) return "Efectivo";
     if (tipo === 2) return "Transferencia";
     if (tipo === 3) return "Credito";
@@ -174,15 +178,18 @@ export default function ReporteVentasScreen() {
         const inDateRange = ventaDate >= fecha1Parsed && ventaDate <= fecha2Parsed;
 
         // Filtrar por sucursal del usuario (si está definida)
-        const inSucursal =
-          sucursalUsuario === undefined || venta.sucursal === sucursalUsuario;
+        const inSucursal = sucursalUsuario === undefined || venta.sucursal === sucursalUsuario;
 
         if (soloLocales) {
           // Consultar Local: solo ventas con id >= threshold (ventas locales)
-          return inDateRange && inSucursal && venta.noVenta == 0;
+          return (
+            inDateRange && inSucursal && venta.noVenta == 0 && venta.claveProd !== 0 // ✅ FILTRO ADICIONAL
+          );
         } else {
           // Consultar: solo ventas con id < threshold (ventas remotas/API)
-          return inDateRange && inSucursal && venta.noVenta > 0;
+          return (
+            inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 // ✅ FILTRO ADICIONAL
+          );
         }
       });
       console.log("[Reporte] Filtered results", { count: filtered });
@@ -191,9 +198,7 @@ export default function ReporteVentasScreen() {
         id: venta.id,
         idMovil: venta.idMovil,
         no_venta: venta.noVenta || 0,
-        fecha: venta.fecha
-          ? new Date(venta.fecha).toISOString()
-          : new Date().toISOString(),
+        fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
         nombre: venta.nombreCliente || "Sin nombre",
         importe: venta.importe || 0,
         tipoPago: mapTipoPago(venta.tipoPago),
@@ -234,9 +239,7 @@ export default function ReporteVentasScreen() {
           groupedMap.set(groupKey, {
             idMovil: displayId,
             no_venta: venta.noVenta || displayId,
-            fecha: venta.fecha
-              ? new Date(venta.fecha).toISOString()
-              : new Date().toISOString(),
+            fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
             nombre: venta.nombreCliente || "Sin nombre",
             totalImporte: 0,
             tipoPago: mapTipoPago(venta.tipoPago),
@@ -366,10 +369,7 @@ export default function ReporteVentasScreen() {
           ]
         : [];
 
-    const total =
-      items.length > 0
-        ? items.reduce((sum, item) => sum + item.total, 0)
-        : reporteRow.importe;
+    const total = items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : reporteRow.importe;
 
     const saleTicketData: SaleTicketData = {
       clientName,
@@ -412,11 +412,8 @@ export default function ReporteVentasScreen() {
           return;
         }
 
-        await FacturaService.getInstance().imprimirFacturaExistente(
-          row.no_venta,
-          row.sucursal,
-          row.caja || 2,
-          () => loadVentas(),
+        await FacturaService.getInstance().imprimirFacturaExistente(row.no_venta, row.sucursal, row.caja || 2, () =>
+          loadVentas(),
         );
         return;
       }
@@ -442,11 +439,7 @@ export default function ReporteVentasScreen() {
           usoCFDI: "G03", // Gastos en general
         };
 
-        await FacturaService.getInstance().generarFactura(
-          [facturaItem],
-          fechaFactura,
-          () => loadVentas(),
-        );
+        await FacturaService.getInstance().generarFactura([facturaItem], fechaFactura, () => loadVentas());
         return;
       }
 
@@ -467,16 +460,8 @@ export default function ReporteVentasScreen() {
 
       {allVentas.length > 0 && (
         <View style={styles.infoCard}>
-          <Icon
-            name="info"
-            type="material"
-            color={COLORS.primary}
-            size={20}
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.infoText}>
-            {allVentas.length} ventas sincronizadas en la base local
-          </Text>
+          <Icon name="info" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
+          <Text style={styles.infoText}>{allVentas.length} ventas sincronizadas en la base local</Text>
         </View>
       )}
 
@@ -484,8 +469,7 @@ export default function ReporteVentasScreen() {
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={24} />
           <Text style={styles.warningText}>
-            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el
-            menú principal.
+            No hay ventas sincronizadas. Inicia sesión nuevamente o sincroniza desde el menú principal.
           </Text>
         </View>
       )}
@@ -494,33 +478,15 @@ export default function ReporteVentasScreen() {
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha inicial</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker1(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker1(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha1)}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.col}>
             <Text style={styles.formLabel}>Fecha final</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowPicker2(true)}
-            >
-              <Icon
-                name="event"
-                type="material"
-                color={COLORS.primary}
-                size={20}
-                style={{ marginRight: 8 }}
-              />
+            <TouchableOpacity style={styles.dateInput} onPress={() => setShowPicker2(true)}>
+              <Icon name="event" type="material" color={COLORS.primary} size={20} style={{ marginRight: 8 }} />
               <Text style={styles.dateText}>{formatDate(fecha2)}</Text>
             </TouchableOpacity>
           </View>
@@ -587,23 +553,11 @@ export default function ReporteVentasScreen() {
             )}
           </>
         )}
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultar}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? "Cargando..." : "Consultar"}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultar} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar"}</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={consultarLocal}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {loading ? "Cargando..." : "Consultar local"}
-          </Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={consultarLocal} disabled={loading}>
+          <Text style={styles.secondaryBtnText}>{loading ? "Cargando..." : "Consultar local"}</Text>
         </TouchableOpacity>
       </View>
 
@@ -630,27 +584,11 @@ export default function ReporteVentasScreen() {
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.money}>${item.totalImporte.toFixed(2)}</Text>
                   <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      onPress={() => imprimirTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="print"
-                        type="material"
-                        color={COLORS.primary}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
+                      <Icon name="print" type="material" color={COLORS.primary} size={20} />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => visualizarTicket(item)}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="visibility"
-                        type="material"
-                        color={COLORS.info}
-                        size={20}
-                      />
+                    <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
+                      <Icon name="visibility" type="material" color={COLORS.info} size={20} />
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => console.log(item)}>
                       <Text>Caja {item?.caja}</Text>
@@ -663,11 +601,7 @@ export default function ReporteVentasScreen() {
                       <Icon
                         name="receipt"
                         type="material"
-                        color={
-                          !item.folioFactura && !item.facturacionMovil
-                            ? COLORS.muted
-                            : COLORS.success
-                        }
+                        color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
                         size={20}
                       />
                     </TouchableOpacity>
@@ -691,6 +625,14 @@ export default function ReporteVentasScreen() {
             <View style={styles.rowBetween}>
               <Text style={styles.totalLabel}>Total Créditos</Text>
               <Text style={styles.moneySmall}>${totalCredito.toFixed(2)}</Text>
+            </View>
+            <View style={styles.rowBetween}>
+              <Text style={styles.totalLabel}>Total Transferencias</Text>
+              <Text style={styles.moneySmall}>${totalTransferencia.toFixed(2)}</Text>
+            </View>
+            <View style={styles.rowBetween}>
+              <Text style={styles.totalLabel}>Total Cupones</Text>
+              <Text style={styles.moneySmall}>${totalCupones.toFixed(2)}</Text>
             </View>
           </View>
         )}

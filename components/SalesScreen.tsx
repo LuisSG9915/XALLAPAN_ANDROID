@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -19,14 +20,9 @@ import AuthService, { Usuario } from "../services/AuthService";
 import LocationService, { LocationCoordinates } from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "../theme/theme";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
+import IntercambioEnvaseModal from "./IntercambioEnvaseModal";
+import PrestamoEnvaseModal from "./PrestamoEnvaseModal";
 
 type Cliente = {
   id: number;
@@ -65,17 +61,13 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [clienteModalOpen, setClienteModalOpen] = useState(false);
   const [productoModalOpen, setProductoModalOpen] = useState(false);
   const [visitaConfirmModalOpen, setVisitaConfirmModalOpen] = useState(false);
-  const [clientePendienteVisita, setClientePendienteVisita] = useState<Cliente | null>(
-    null,
-  );
+  const [clientePendienteVisita, setClientePendienteVisita] = useState<Cliente | null>(null);
 
   const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<
-    "efectivo" | "transferencia" | "credito" | "cupon" | null
-  >(null);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -85,11 +77,52 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [productosBase, setProductosBase] = useState<any[]>([]);
   const [processingVenta, setProcessingVenta] = useState(false);
   const [clientesEntregaDia, setClientesEntregaDia] = useState<Cliente[]>([]);
-  const [currentDetalleVisitaId, setCurrentDetalleVisitaId] = useState<string | null>(
-    null,
-  );
+  const [currentDetalleVisitaId, setCurrentDetalleVisitaId] = useState<string | null>(null);
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
   const [userMetros, setUserMetros] = useState<number | null>(null);
+
+  // Tabs del modal de clientes: 'agendados' | 'cercanos' | 'todos'
+  const [clienteTabActivo, setClienteTabActivo] = useState<"agendados" | "cercanos" | "todos">("agendados");
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
+  const [loadingCercanos, setLoadingCercanos] = useState(false);
+
+  // Visitar flow (tipo visita modal, como CumplimientoScreen)
+  const [tipoVisitaModalOpen, setTipoVisitaModalOpen] = useState(false);
+  const [clienteParaVisitar, setClienteParaVisitar] = useState<Cliente | null>(null);
+  const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
+  const [visitasDelDiaIds, setVisitasDelDiaIds] = useState<Set<number>>(new Set());
+  const [visitasDelDiaMap, setVisitasDelDiaMap] = useState<Map<number, any>>(new Map());
+
+  // Intercambio de envases (clave 1000)
+  const [intercambioModalOpen, setIntercambioModalOpen] = useState(false);
+  const [intercambioData, setIntercambioData] = useState<{
+    envaseEntregadoClave: number;
+    envaseEntregadoDesc: string;
+    envaseRecibidoClave: number;
+    envaseRecibidoDesc: string;
+    observacion: string;
+  } | null>(null);
+  const intercambioDataRef = useRef<{
+    envaseEntregadoClave: number;
+    envaseEntregadoDesc: string;
+    envaseRecibidoClave: number;
+    envaseRecibidoDesc: string;
+    observacion: string;
+  } | null>(null);
+  const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
+
+  // Prestamo de envases (clave 1001)
+  const [prestamoModalOpen, setPrestamoModalOpen] = useState(false);
+  const [prestamoData, setPrestamoData] = useState<{
+    idProdPrestado: number;
+    claveProdPrestado: number;
+    descProdPrestado: string;
+    observacion: string;
+    fechaDevolucion: string;
+  } | null>(null);
+  const [pendingPrestamoCantidad, setPendingPrestamoCantidad] = useState(0);
+  const [pendingPrestamoProducto, setPendingPrestamoProducto] = useState<Producto | null>(null);
 
   // Ref para evitar que el useEffect de route.params se ejecute dos veces
   const clienteParamsProcessed = useRef(false);
@@ -104,17 +137,12 @@ export default function SalesScreen({ route }: { route?: any }) {
       preciosPromo?: any[],
     ): Producto[] => {
       console.log({ productosData });
-      console.log(
-        inventarioData.filter((i: any) => i.sucursal == currentSucursal && i.id < 10000),
-      );
+      console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal && i.id < 10000));
       // Mapa de precios promocionales (PRIMERA JERARQUÍA)
       const preciosPromoMap = new Map<number, number>();
       if (preciosPromo) {
         preciosPromo.forEach((p: any) => {
-          const clave =
-            p.claveProd !== undefined && p.claveProd !== null
-              ? parseInt(p.claveProd, 10)
-              : NaN;
+          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
           if (Number.isNaN(clave)) return;
           preciosPromoMap.set(clave, p.precio || 0);
         });
@@ -123,10 +151,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Mapa de precios por claveProd de la lista del cliente (SEGUNDA JERARQUÍA)
       const preciosMap = new Map<number, number>();
       preciosSource.forEach((p: any) => {
-        const clave =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         if (Number.isNaN(clave)) return;
         preciosMap.set(clave, p.precio || 0);
       });
@@ -135,10 +160,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const preciosDefaultMap = new Map<number, number>();
       if (preciosDefault) {
         preciosDefault.forEach((p: any) => {
-          const clave =
-            p.claveProd !== undefined && p.claveProd !== null
-              ? parseInt(p.claveProd, 10)
-              : NaN;
+          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
           if (Number.isNaN(clave)) return;
           preciosDefaultMap.set(clave, p.precio || 0);
         });
@@ -149,10 +171,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const productosPorClave = new Map<number, any>();
       productosData.forEach((p: any) => {
         productosPorId.set(p.id, p);
-        const clave =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         if (!Number.isNaN(clave)) {
           productosPorClave.set(clave, p);
         }
@@ -178,11 +197,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         kitsPorProducto.set(k.idProducto, arr);
       });
 
-      const calcularExistencia = (
-        productoId: number | undefined,
-        claveProd: number | undefined,
-        esKit: boolean,
-      ) => {
+      const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
         if (esKit && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
@@ -217,18 +232,12 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Crear un Set de todas las claves de productos disponibles
       const todasLasClaves = new Set<number>();
       preciosSource.forEach((p: any) => {
-        const clave =
-          p.claveProd !== undefined && p.claveProd !== null
-            ? parseInt(p.claveProd, 10)
-            : NaN;
+        const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
         if (!Number.isNaN(clave)) todasLasClaves.add(clave);
       });
       if (preciosDefault) {
         preciosDefault.forEach((p: any) => {
-          const clave =
-            p.claveProd !== undefined && p.claveProd !== null
-              ? parseInt(p.claveProd, 10)
-              : NaN;
+          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
           if (!Number.isNaN(clave)) todasLasClaves.add(clave);
         });
       }
@@ -236,18 +245,22 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Agregar claves de precios promocionales
       if (preciosPromo) {
         preciosPromo.forEach((p: any) => {
-          const clave =
-            p.claveProd !== undefined && p.claveProd !== null
-              ? parseInt(p.claveProd, 10)
-              : NaN;
+          const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
           if (!Number.isNaN(clave)) todasLasClaves.add(clave);
         });
       }
 
+      // Forzar inclusión de productos especiales (INTERCAMBIO 1000 y PRESTAMO 1001)
+      // aunque no tengan precio en ninguna lista
+      [1000, 1001].forEach((claveEspecial) => {
+        if (productosPorClave.has(claveEspecial)) {
+          todasLasClaves.add(claveEspecial);
+        }
+      });
+
       // Mapear todos los productos disponibles
       return Array.from(todasLasClaves).map((claveNum) => {
-        const productoBase =
-          productosPorClave.get(claveNum) || productosPorId.get(claveNum);
+        const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
         const productoId = productoBase?.id ?? claveNum;
         const descripcion = productoBase?.descripcion || "Sin descripción";
@@ -310,14 +323,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         const user = await AuthService.restoreSession();
         if (user) {
           setCurrentUser(user);
-          const vendedor =
-            (user.claveEmpleado as string | undefined) ||
-            (user.nombre as string | undefined) ||
-            "";
+          const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ??
-            (user.sucursal as number | null | undefined) ??
-            1;
+            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
           setCurrentSucursal(sucursal);
 
           // Intentar obtener metros desde Realm (tabla de usuarios)
@@ -329,10 +337,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             if (user.id) {
               const realmUser = FullSyncService.getUsuarioById(user.id);
               if (realmUser && realmUser.metros) {
-                console.log(
-                  "[Sales] Metros usuario obtenidos de Realm:",
-                  realmUser.metros,
-                );
+                console.log("[Sales] Metros usuario obtenidos de Realm:", realmUser.metros);
                 setUserMetros(realmUser.metros);
               } else if (user.metros) {
                 console.log("[Sales] Metros usuario obtenidos de Sesión:", user.metros);
@@ -359,12 +364,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   useEffect(() => {
     // Solo procesar el cliente de route.params UNA VEZ
-    if (
-      route?.params?.clienteId &&
-      clientes.length > 0 &&
-      !selectedClient &&
-      !clienteParamsProcessed.current
-    ) {
+    if (route?.params?.clienteId && clientes.length > 0 && !selectedClient && !clienteParamsProcessed.current) {
       const cliente = clientes.find((c) => c.id === route.params.clienteId);
       if (cliente) {
         // Marcar como procesado para evitar que se ejecute de nuevo
@@ -395,12 +395,84 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
   }, [route?.params, clientes, selectedClient]);
 
+  const reloadVisitasDelDia = useCallback(
+    async (sucursal: number) => {
+      if (!sucursal) return;
+      try {
+        const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
+        console.log(`[Sales] useFocusEffect - Visitas recargadas: ${visitasDelDia.length}`);
+        const clientesData = FullSyncService.getClientesFull(10000);
+        const clientesFormateados = clientesData.map((c: any) => ({
+          id: c.id,
+          nombre: c.nombre || "Sin nombre",
+          credito: c.credito || false,
+          idGrupo: c.idGrupo,
+          listaPrecio: c.listaPrecio,
+          latitud: c.latitud,
+          longitud: c.longitud,
+          metros: c.metros,
+        }));
+        setClientes(clientesFormateados);
+        // Actualizar agendados (solo visitado === 0)
+        const idsClientesVisitaHoy = new Set(
+          visitasDelDia.filter((v: any) => v.visitado === 0).map((v: any) => v.idCliente),
+        );
+        const clientesConVisitaHoy = clientesFormateados.filter((c) => idsClientesVisitaHoy.has(c.id));
+        setClientesEntregaDia(clientesConVisitaHoy);
+        // Actualizar filteredClientes según tab activo para que la lista se refresque
+        if (clienteTabActivo === "agendados") {
+          setFilteredClientes(clientesConVisitaHoy);
+        } else if (clienteTabActivo === "todos") {
+          setFilteredClientes(clientesFormateados);
+        }
+        // Mapa de visitas
+        const allAgendadosIds = new Set(visitasDelDia.map((v: any) => v.idCliente as number));
+        setVisitasDelDiaIds(allAgendadosIds);
+        const visitaMap = new Map<number, any>();
+        visitasDelDia.forEach((v: any) => visitaMap.set(v.idCliente, v));
+        setVisitasDelDiaMap(visitaMap);
+      } catch (error) {
+        console.error("[Sales] Error al recargar visitas:", error);
+      }
+    },
+    [clienteTabActivo],
+  );
+
+  // Actualizar clientes y visitas cada vez que la pantalla recibe foco
+  useFocusEffect(
+    useCallback(() => {
+      if (currentSucursal > 0) {
+        console.log("[Sales] 🔄 Pantalla recibió foco, recargando visitas y clientes...");
+        reloadVisitasDelDia(currentSucursal);
+      }
+    }, [currentSucursal, reloadVisitasDelDia]),
+  );
+
   const loadDataFromRealm = async (sucursal: number) => {
     try {
       await FullSyncService.initialize();
 
       // Cargar clientes
       const clientesData = FullSyncService.getClientesFull(10000);
+      // Debug: inspeccionar primer cliente crudo de Realm
+      if (clientesData.length > 0) {
+        const sample = clientesData[0];
+        console.log("[Sales] Cliente crudo Realm keys:", Object.keys(sample));
+        console.log(
+          "[Sales] Cliente crudo Realm sample:",
+          JSON.stringify({
+            id: sample.id,
+            nombre: sample.nombre,
+            latitud: sample.latitud,
+            longitud: sample.longitud,
+            lat: sample.lat,
+            lng: sample.lng,
+            lon: sample.lon,
+            latitude: sample.latitude,
+            longitude: sample.longitude,
+          }),
+        );
+      }
       const clientesFormateados = clientesData.map((c: any) => ({
         id: c.id,
         nombre: c.nombre || "Sin nombre",
@@ -415,18 +487,39 @@ export default function SalesScreen({ route }: { route?: any }) {
       setClientes(clientesFormateados);
       setFilteredClientes(clientesFormateados);
 
+      // Debug: cuántos clientes tienen coordenadas
+      const clientesConCoords = clientesFormateados.filter(
+        (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
+      );
+      console.log(
+        `[Sales] Total clientes: ${clientesFormateados.length}, con coordenadas válidas: ${clientesConCoords.length}`,
+      );
+      console.log("clientesFormateados", clientesFormateados);
+      if (clientesConCoords.length > 0) {
+        console.log("[Sales] Ejemplo cliente con coords:", JSON.stringify(clientesConCoords[0]));
+      }
+
       // Cargar visitas del día para filtro de entrega
-      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(
-        new Date(),
-        sucursal,
-      );
+      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
+      console.log(`[Sales] Visitas del día (sucursal ${sucursal}): ${visitasDelDia.length}`);
+      if (visitasDelDia.length > 0) {
+        console.log("[Sales] Ejemplo visita:", JSON.stringify(visitasDelDia[0]));
+      }
+      // Solo clientes con visita PENDIENTE (visitado === 0) para la pestaña Agendados
       const idsClientesVisitaHoy = new Set(
-        visitasDelDia.filter((f) => f.visitado === 0).map((v: any) => v.idCliente),
+        visitasDelDia.filter((v: any) => v.visitado === 0).map((v: any) => v.idCliente),
       );
-      const clientesConVisitaHoy = clientesFormateados.filter((c) =>
-        idsClientesVisitaHoy.has(c.id),
-      );
+      console.log(`[Sales] Clientes agendados pendientes (visitado===0): ${idsClientesVisitaHoy.size}`);
+      const clientesConVisitaHoy = clientesFormateados.filter((c) => idsClientesVisitaHoy.has(c.id));
+      console.log(`[Sales] clientesEntregaDia (match con clientes): ${clientesConVisitaHoy.length}`);
       setClientesEntregaDia(clientesConVisitaHoy);
+
+      // Guardar IDs de todos los clientes agendados hoy (visitados o no)
+      const allAgendadosIds = new Set(visitasDelDia.map((v: any) => v.idCliente as number));
+      setVisitasDelDiaIds(allAgendadosIds);
+      const visitaMap = new Map<number, any>();
+      visitasDelDia.forEach((v: any) => visitaMap.set(v.idCliente, v));
+      setVisitasDelDiaMap(visitaMap);
 
       // Cargar clientes con precios
       const productosData = FullSyncService.getProductos(100000);
@@ -445,14 +538,16 @@ export default function SalesScreen({ route }: { route?: any }) {
         kitsData,
         undefined,
         preciosPromoData,
-      ).filter((p) => p.existencia > 0);
+      ).filter((p) => {
+        const claveProdNum = parseInt(p.claveProd || "0", 10);
+        if (claveProdNum === 1000 || claveProdNum === 1001) return true;
+        return p.existencia > 0;
+      });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
       console.log(preciosData);
       setProductos(productosFormateados);
       // Por defecto mostrar solo productos normales (sin kits ni promociones)
-      setFilteredProductos(
-        productosFormateados.filter((p) => !p.esKit && !p.esPromocion),
-      );
+      setFilteredProductos(productosFormateados.filter((p) => !p.esKit && !p.esPromocion));
     } catch (error) {
       console.error("Error al cargar datos de Realm:", error);
       Alert.alert("Error", "No se pudieron cargar los datos. Sincroniza primero.");
@@ -463,20 +558,21 @@ export default function SalesScreen({ route }: { route?: any }) {
     (query: string) => {
       setSearchQuery(query);
 
+      const baseList = clienteTabActivo === "agendados" ? clientesEntregaDia : clientes;
+
       if (!query.trim()) {
-        setFilteredClientes(clientes);
+        setFilteredClientes(baseList);
         return;
       }
 
       const lowerQuery = query.toLowerCase();
-      const filtered = clientes.filter(
-        (c) =>
-          c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query),
+      const filtered = baseList.filter(
+        (c) => c.nombre.toLowerCase().includes(lowerQuery) || c.id.toString().includes(query),
       );
 
       setFilteredClientes(filtered);
     },
-    [clientes],
+    [clientes, clientesEntregaDia, clienteTabActivo],
   );
 
   const handleClienteSeleccionado = (cliente: Cliente) => {
@@ -486,31 +582,196 @@ export default function SalesScreen({ route }: { route?: any }) {
     setVisitaConfirmModalOpen(true);
   };
 
-  const calcularDistancia = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number,
-  ): number => {
+  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
     const φ2 = (lat2 * Math.PI) / 180;
     const Δφ = ((lat2 - lat1) * Math.PI) / 180;
     const Δλ = ((lon2 - lon1) * Math.PI) / 180;
 
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c;
   };
 
+  // Obtener tipos de visita desde Realm (como CumplimientoScreen)
+  const getTipoVisitas = () => {
+    if (!FullSyncService.isServiceInitialized()) return [];
+    const tipos = FullSyncService.getTipoVisitas();
+    return Array.isArray(tipos) ? tipos : [];
+  };
+
+  const tiposVisita = getTipoVisitas();
+
+  // Actualizar coordenadas del usuario y recalcular cercanos
+  const actualizarCoordenadas = async () => {
+    setLoadingCercanos(true);
+    try {
+      const ubicacion = await LocationService.getBestLocation();
+      if (ubicacion) {
+        setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude });
+        // Calcular top 5 más cercanos
+        const clientesConCoords = clientes.filter(
+          (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
+        );
+        console.log(
+          `[Sales] Cercanos: ${clientes.length} clientes total, ${clientesConCoords.length} con coordenadas válidas`,
+        );
+        const clientesConDistancia = clientesConCoords
+          .map((c) => ({
+            ...c,
+            distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, c.latitud!, c.longitud!),
+          }))
+          .sort((a, b) => a.distanciaMetros - b.distanciaMetros)
+          .slice(0, 5);
+        console.log(
+          `[Sales] Top 5 cercanos:`,
+          clientesConDistancia.map((c) => ({ id: c.id, nombre: c.nombre, dist: Math.round(c.distanciaMetros) })),
+        );
+        setNearestClientes(clientesConDistancia);
+      } else {
+        Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+      }
+    } catch (error) {
+      console.error("[Sales] Error al obtener ubicación:", error);
+      Alert.alert("Error de ubicación", "No se pudo obtener tu ubicación.");
+    } finally {
+      setLoadingCercanos(false);
+    }
+  };
+
+  // Iniciar flujo de "Visitar" (como CumplimientoScreen: validar ubicación → seleccionar tipo → marcar visitado)
+  const handleVisitarCliente = async (cliente: Cliente) => {
+    console.log("[Sales] handleVisitarCliente:", cliente.nombre);
+
+    // Verificar ubicación
+    if (cliente.latitud && cliente.longitud) {
+      try {
+        setValidandoUbicacion(true);
+        const ubicacionVendedor = await LocationService.getBestLocation();
+
+        if (ubicacionVendedor) {
+          const distancia = calcularDistancia(
+            ubicacionVendedor.latitude,
+            ubicacionVendedor.longitude,
+            cliente.latitud,
+            cliente.longitud,
+          );
+          const accuracyInfo = ubicacionVendedor.accuracy
+            ? ` (precisión GPS: ±${Math.round(ubicacionVendedor.accuracy)} m)`
+            : "";
+          console.log(`[Sales] Distancia al cliente: ${Math.round(distancia)} m${accuracyInfo}`);
+
+          const metrosPermitidos = userMetros || cliente.metros || 100;
+          // Considerar la imprecisión del GPS en el cálculo
+          const distanciaEfectiva = distancia - (ubicacionVendedor.accuracy ?? 0);
+          if (distanciaEfectiva > metrosPermitidos) {
+            Alert.alert(
+              "Ubicación inválida",
+              `Estás a ${Math.round(
+                distancia,
+              )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.${accuracyInfo}`,
+            );
+            setValidandoUbicacion(false);
+            return;
+          }
+          setValidandoUbicacion(false);
+        } else {
+          setValidandoUbicacion(false);
+          Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+          return;
+        }
+      } catch (locationError) {
+        setValidandoUbicacion(false);
+        console.error("[Sales] Error al obtener ubicación:", locationError);
+        Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación.");
+        return;
+      }
+    } else {
+      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
+      return;
+    }
+
+    // Abrir modal de tipo de visita
+    setClienteParaVisitar(cliente);
+    setTipoVisitaSeleccionado(null);
+    setTipoVisitaModalOpen(true);
+  };
+
+  // Confirmar visita con tipo seleccionado (como CumplimientoScreen.confirmarMarcarVisitado)
+  const confirmarVisitarCliente = async () => {
+    if (!clienteParaVisitar || tipoVisitaSeleccionado === null) {
+      Alert.alert("Error", "Debe seleccionar un tipo de visita");
+      return;
+    }
+
+    setTipoVisitaModalOpen(false);
+
+    // Buscar la visita del día para este cliente
+    const visitaDelCliente = visitasDelDiaMap.get(clienteParaVisitar.id);
+
+    if (visitaDelCliente) {
+      // Marcar visitado en el servicio de visitas
+      const exito = await VisitaSyncService.getInstance().marcarVisitado(
+        visitaDelCliente.id,
+        tipoVisitaSeleccionado,
+        new Date(),
+      );
+
+      if (exito) {
+        // Registrar visita completa en DetalleVisitas
+        try {
+          await DetalleVisitasService.getInstance().registrarVisitaCompleta(
+            clienteParaVisitar.id,
+            currentUser?.id || 0,
+            currentSucursal,
+            tipoVisitaSeleccionado,
+          );
+          console.log(
+            `[Sales] Visita registrada para cliente ${clienteParaVisitar.id} con tipo ${tipoVisitaSeleccionado}`,
+          );
+        } catch (error) {
+          console.error("[Sales] Error al registrar en DetalleVisitas:", error);
+        }
+
+        // Actualizar estado local
+        setVisitasDelDiaMap((prev) => {
+          const newMap = new Map(prev);
+          const v = newMap.get(clienteParaVisitar!.id);
+          if (v) newMap.set(clienteParaVisitar!.id, { ...v, visitado: 1, tipo: tipoVisitaSeleccionado });
+          return newMap;
+        });
+
+        // Recargar agendados para que el cliente visitado desaparezca de la lista
+        reloadVisitasDelDia(currentSucursal);
+
+        Alert.alert("Éxito", "Visita marcada como realizada");
+      } else {
+        Alert.alert("Error", "No se pudo marcar la visita");
+      }
+    } else {
+      // Cliente no agendado: solo registrar en DetalleVisitas
+      try {
+        await DetalleVisitasService.getInstance().registrarVisitaCompleta(
+          clienteParaVisitar.id,
+          currentUser?.id || 0,
+          currentSucursal,
+          tipoVisitaSeleccionado,
+        );
+        console.log(`[Sales] Visita registrada (no agendado) para cliente ${clienteParaVisitar.id}`);
+        Alert.alert("Éxito", "Visita registrada correctamente");
+      } catch (error) {
+        console.error("[Sales] Error al registrar visita:", error);
+        Alert.alert("Error", "No se pudo registrar la visita");
+      }
+    }
+
+    setClienteParaVisitar(null);
+  };
+
   const handleConfirmarVisita = async (desdeaIniciarVisita: boolean) => {
-    console.log(
-      "[Sales] handleConfirmarVisita iniciado. desdeaIniciarVisita:",
-      desdeaIniciarVisita,
-    );
+    console.log("[Sales] handleConfirmarVisita iniciado. desdeaIniciarVisita:", desdeaIniciarVisita);
     console.log("[Sales] Estado validandoUbicacion al inicio:", validandoUbicacion);
 
     if (!desdeaIniciarVisita) {
@@ -528,8 +789,8 @@ export default function SalesScreen({ route }: { route?: any }) {
         try {
           console.log("[Sales] Seteando validandoUbicacion = true");
           setValidandoUbicacion(true);
-          console.log("[Sales] 📍 Obteniendo ubicación del vendedor...");
-          const ubicacionVendedor = await LocationService.getCurrentLocation();
+          console.log("[Sales] 📍 Obteniendo mejor lectura GPS...");
+          const ubicacionVendedor = await LocationService.getBestLocation();
 
           if (ubicacionVendedor) {
             console.log("[Sales] Ubicación obtenida:", ubicacionVendedor);
@@ -539,24 +800,27 @@ export default function SalesScreen({ route }: { route?: any }) {
               clientePendienteVisita.latitud,
               clientePendienteVisita.longitud,
             );
-            console.log("[Sales] Distancia calculada:", Math.round(distancia), "metros");
+            const accuracyInfo = ubicacionVendedor.accuracy
+              ? ` (precisión GPS: ±${Math.round(ubicacionVendedor.accuracy)} m)`
+              : "";
+            console.log(`[Sales] Distancia calculada: ${Math.round(distancia)} m${accuracyInfo}`);
 
-            const metrosPermitidos = userMetros || clientePendienteVisita.metros || 100; // Prioridad: Usuario > Cliente > Default (100)
-            if (distancia > metrosPermitidos) {
+            const metrosPermitidos = userMetros || clientePendienteVisita.metros || 100;
+            // Descontar la imprecisión del GPS antes de comparar
+            const distanciaEfectiva = distancia - (ubicacionVendedor.accuracy ?? 0);
+            if (distanciaEfectiva > metrosPermitidos) {
               console.log("[Sales] Distancia excede el límite permitido");
               Alert.alert(
                 "Ubicación inválida",
                 `Estás a ${Math.round(
                   distancia,
-                )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.`,
+                )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.${accuracyInfo}`,
               );
               setValidandoUbicacion(false);
               return;
             }
 
-            console.log(
-              "[Sales] Validación exitosa, seteando validandoUbicacion = false",
-            );
+            console.log("[Sales] Validación exitosa");
             setValidandoUbicacion(false);
           } else {
             setValidandoUbicacion(false);
@@ -570,17 +834,12 @@ export default function SalesScreen({ route }: { route?: any }) {
         } catch (locationError) {
           setValidandoUbicacion(false);
           console.error("[Sales] ⚠️ Error al obtener ubicación:", locationError);
-          Alert.alert(
-            "Error de ubicación",
-            "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.",
-          );
+          Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.");
           setVisitaConfirmModalOpen(false);
           return;
         }
       } else {
-        console.log(
-          "[Sales] Cliente sin ubicación, permitiendo venta sin validación GPS",
-        );
+        console.log("[Sales] Cliente sin ubicación, permitiendo venta sin validación GPS");
         // Si el cliente no tiene ubicación, permitir la venta sin validación
         // Registrar inicio de visita en DetalleVisitas
         console.log("[Sales] Registrando inicio de visita en DetalleVisitas...");
@@ -654,21 +913,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log(`Items con ID < 10000: ${inventarioFiltrado.length}`);
 
       // También mostrar por sucursal actual
-      const inventarioSucursal = inventarioFiltrado.filter(
-        (i: any) => i.sucursal == currentSucursal,
-      );
-      console.log(
-        `Items sucursal ${currentSucursal} con ID < 10000: ${inventarioSucursal.length}`,
-      );
+      const inventarioSucursal = inventarioFiltrado.filter((i: any) => i.sucursal == currentSucursal);
+      console.log(`Items sucursal ${currentSucursal} con ID < 10000: ${inventarioSucursal.length}`);
       console.log("Inventario por sucursal:", inventarioSucursal);
 
       // Mostrar algunos datos clave de los primeros 10 items
       console.log("Primeros 10 items:");
       inventarioFiltrado.slice(0, 10).forEach((item: any, index: number) => {
         console.log(
-          `${index + 1}. ID: ${item.id}, Clave: ${item.claveProd}, Sucursal: ${
-            item.sucursal
-          }, Saldo: ${item.saldo}`,
+          `${index + 1}. ID: ${item.id}, Clave: ${item.claveProd}, Sucursal: ${item.sucursal}, Saldo: ${item.saldo}`,
         );
       });
     } catch (error) {
@@ -692,22 +945,16 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log(`Total items en detalle_visitas: ${detalleVisitas.length}`);
 
       // Filtrar por sucursal actual si existe
-      const visitasSucursalActual = detalleVisitas.filter(
-        (dv: any) => dv.sucursal == currentSucursal,
-      );
-      console.log(
-        `Visitas para sucursal ${currentSucursal}: ${visitasSucursalActual.length}`,
-      );
+      const visitasSucursalActual = detalleVisitas.filter((dv: any) => dv.sucursal == currentSucursal);
+      console.log(`Visitas para sucursal ${currentSucursal}: ${visitasSucursalActual.length}`);
 
       // Mostrar últimas 10 visitas
       console.log("Últimas 10 visitas:");
       detalleVisitas.slice(0, 10).forEach((visita: any, index: number) => {
         console.log(
-          `${index + 1}. ID: ${visita.id}, Ruta: ${visita.idRuta}, Cliente: ${
-            visita.idCliente
-          }, Sucursal: ${visita.sucursal}, Fecha: ${visita.fechaInicio}, Estado: ${
-            visita.estado
-          }`,
+          `${index + 1}. ID: ${visita.id}, Ruta: ${visita.idRuta}, Cliente: ${visita.idCliente}, Sucursal: ${
+            visita.sucursal
+          }, Fecha: ${visita.fechaInicio}, Estado: ${visita.estado}`,
         );
       });
 
@@ -784,17 +1031,11 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
   };
 
-  const total = useMemo(
-    () => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0),
-    [cart],
-  );
+  const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
   const addProduct = (p: Producto) => {
     console.log("[Sales] Agregando producto:", p.descripcion);
-    console.log(
-      "[Sales] Estado validandoUbicacion al agregar producto:",
-      validandoUbicacion,
-    );
+    console.log("[Sales] Estado validandoUbicacion al agregar producto:", validandoUbicacion);
     setCart((prev) => {
       const idx = prev.findIndex((item) => item.id === p.id);
       if (idx > -1) {
@@ -808,6 +1049,16 @@ export default function SalesScreen({ route }: { route?: any }) {
   };
 
   const addToCart = (p: Producto) => {
+    // Interceptar producto PRESTAMO (clave 1001) para mostrar modal
+    if (p.claveProd === "1001" || p.id === 56) {
+      console.log("[Sales] Producto PRESTAMO detectado, mostrando modal de prestamo");
+      setPendingPrestamoProducto(p);
+      setPendingPrestamoCantidad(1);
+      setProductoModalOpen(false);
+      setPrestamoModalOpen(true);
+      return;
+    }
+
     setCart((prev) => {
       const idx = prev.findIndex((ci) => ci.id === p.id);
       if (idx >= 0) {
@@ -822,9 +1073,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   const updateQuantity = (id: number, cantidad: number) => {
     if (cantidad <= 0) {
-      console.warn(
-        `[Sales] ⚠️ Intento de actualizar cantidad a ${cantidad} para producto ${id}, bloqueado`,
-      );
+      console.warn(`[Sales] ⚠️ Intento de actualizar cantidad a ${cantidad} para producto ${id}, bloqueado`);
       return;
     }
     setCart((prev) => prev.map((ci) => (ci.id === id ? { ...ci, cantidad } : ci)));
@@ -858,9 +1107,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       }
 
       const inventario = FullSyncService.getInventario();
-      const productosData = productosBase.length
-        ? productosBase
-        : FullSyncService.getProductos(1000000);
+      const productosData = productosBase.length ? productosBase : FullSyncService.getProductos(1000000);
       const kitsData = kits.length ? kits : FullSyncService.getKits(5000);
 
       const productosFormateados = buildProductosFormateados(
@@ -870,7 +1117,16 @@ export default function SalesScreen({ route }: { route?: any }) {
         kitsData,
         preciosDefault,
         preciosPromo,
-      ).filter((p) => p.existencia > 0);
+      ).filter((p) => {
+        // Productos especiales (INTERCAMBIO y PRESTAMO) siempre visibles
+        const claveProdNum = parseInt(p.claveProd || "0", 10);
+        if (claveProdNum === 1000 || claveProdNum === 1001) {
+          return true;
+        }
+        // Resto de productos solo si tienen existencia
+        return p.existencia > 0;
+      });
+      console.log(productosData);
       console.log("2PRODUCTOSFORMATEADOS", productosFormateados);
       console.log("preciosCliente", preciosCliente);
       console.log("preciosDefault", preciosDefault);
@@ -882,18 +1138,21 @@ export default function SalesScreen({ route }: { route?: any }) {
         : productosFormateados.filter((p) => !p.esKit && !p.esPromocion);
       setFilteredProductos(productosFiltrados);
     }
-  }, [
-    selectedClient,
-    buildProductosFormateados,
-    productosBase,
-    kits,
-    showOnlyPromotions,
-  ]);
+  }, [selectedClient, buildProductosFormateados, productosBase, kits, showOnlyPromotions]);
 
   const processSale = async () => {
     // Protección contra doble-clic
     if (processingVenta) {
       console.log("[Sales] ⚠️ Venta ya en proceso, ignorando clic duplicado");
+      return;
+    }
+
+    // Verificar si el carrito tiene producto INTERCAMBIO (clave 1000) y aún no se ha llenado el modal
+    const itemIntercambio = cart.find((ci) => ci.claveProd === "1000" || ci.id === 55);
+    if (itemIntercambio && !intercambioData && !intercambioDataRef.current) {
+      console.log("[Sales] Producto INTERCAMBIO detectado, mostrando modal de intercambio");
+      setPendingIntercambioCantidad(itemIntercambio.cantidad);
+      setIntercambioModalOpen(true);
       return;
     }
 
@@ -919,7 +1178,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
     // Verificar que la ubicación GPS esté activa antes de procesar la venta
     try {
-      const locationAvailable = await LocationService.getCurrentLocation();
+      const locationAvailable = await LocationService.getBestLocation();
       if (!locationAvailable) {
         Alert.alert(
           "Ubicación Requerida",
@@ -952,18 +1211,14 @@ export default function SalesScreen({ route }: { route?: any }) {
           item.cantidad = n; // Actualizar cantidad
         } else {
           // Input inválido, eliminar
-          console.warn(
-            `[Sales] Input inválido "${pendingInput}" para producto ${item.id}, eliminando`,
-          );
+          console.warn(`[Sales] Input inválido "${pendingInput}" para producto ${item.id}, eliminando`);
           return false;
         }
       }
 
       // Verificar cantidad actual del item (con o sin input pendiente)
       if (item.cantidad <= 0) {
-        console.warn(
-          `[Sales] Eliminando producto ${item.id} con cantidad ${item.cantidad}`,
-        );
+        console.warn(`[Sales] Eliminando producto ${item.id} con cantidad ${item.cantidad}`);
         return false;
       }
 
@@ -1009,30 +1264,24 @@ export default function SalesScreen({ route }: { route?: any }) {
       Alert.alert(
         "Error",
         `Hay productos con datos inválidos en el carrito:\n${invalidItems
-          .map(
-            (i) =>
-              `- ${i.descripcion || "Sin nombre"}: cantidad=${i.cantidad}, precio=${
-                i.precio
-              }`,
-          )
+          .map((i) => `- ${i.descripcion || "Sin nombre"}: cantidad=${i.cantidad}, precio=${i.precio}`)
           .join("\n")}`,
       );
       return;
     }
 
-    // Validar inventario suficiente
-    const insufficientStock = updatedCart.filter(
-      (item) => item.existencia < item.cantidad,
-    );
+    // Validar inventario suficiente (excluir productos especiales sin inventario)
+    const insufficientStock = updatedCart.filter((item) => {
+      const claveProdNum = parseInt(item.claveProd || "0", 10);
+      if (claveProdNum === 1000 || claveProdNum === 1001) return false;
+      return item.existencia < item.cantidad;
+    });
     if (insufficientStock.length > 0) {
       console.warn("[Sales] ⚠️ Inventario insuficiente:", insufficientStock);
       Alert.alert(
         "Inventario Insuficiente",
         `Los siguientes productos no tienen suficiente inventario:\n${insufficientStock
-          .map(
-            (i) =>
-              `- ${i.descripcion} (disponible: ${i.existencia}, solicitado: ${i.cantidad})`,
-          )
+          .map((i) => `- ${i.descripcion} (disponible: ${i.existencia}, solicitado: ${i.cantidad})`)
           .join("\n")}`,
       );
       setProcessingVenta(false);
@@ -1042,9 +1291,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     // Actualizar el carrito con los cambios procesados
     if (updatedCart.length !== cart.length) {
       console.log(
-        `[Sales] ⚠️ Se eliminaron ${
-          cart.length - updatedCart.length
-        } productos con cantidad 0 desde inputs pendientes`,
+        `[Sales] ⚠️ Se eliminaron ${cart.length - updatedCart.length} productos con cantidad 0 desde inputs pendientes`,
       );
       setCart(updatedCart);
     }
@@ -1053,10 +1300,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     setQuantityInputs({});
 
     // Recalcular total con el carrito actualizado
-    const updatedTotal = updatedCart.reduce(
-      (acc, item) => acc + item.precio * item.cantidad,
-      0,
-    );
+    const updatedTotal = updatedCart.reduce((acc, item) => acc + item.precio * item.cantidad, 0);
 
     console.log("[Sales] 🚀 Iniciando proceso de venta", {
       cliente: client.nombre,
@@ -1073,14 +1317,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode =
-        metodoPago === "efectivo"
-          ? 1
-          : metodoPago == "cupon"
-          ? 4
-          : metodoPago === "credito"
-          ? 3
-          : 2; // transferencia
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago == "cupon" ? 4 : metodoPago === "credito" ? 3 : 2; // transferencia
       const descripcionMedioPago =
         metodoPago === "efectivo"
           ? "Efectivo"
@@ -1090,9 +1327,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           ? "Credito"
           : "Transferencia";
       const vendedor =
-        (currentUser?.claveEmpleado as string | undefined) ||
-        (currentUser?.nombre as string | undefined) ||
-        "";
+        (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = new Date();
 
       // Filtrar productos con cantidad válida (última línea de defensa)
@@ -1110,21 +1345,23 @@ export default function SalesScreen({ route }: { route?: any }) {
         return;
       }
 
-      // Obtener coordenadas GPS para la venta
-      console.log("[Sales] 📍 Obteniendo ubicación GPS...");
+      // Obtener coordenadas GPS para la venta (mejor lectura de hasta 3 intentos)
+      console.log("[Sales] 📍 Obteniendo mejor ubicación GPS para venta...");
       let coordinates: LocationCoordinates | null = null;
       try {
-        coordinates = await LocationService.getCurrentLocation();
+        coordinates = await LocationService.getBestLocation();
         if (coordinates) {
-          console.log("[Sales] ✅ Ubicación obtenida:", coordinates);
+          console.log("[Sales] ✅ Ubicación obtenida para venta:", {
+            lat: coordinates.latitude,
+            lng: coordinates.longitude,
+            accuracy: Math.round(coordinates.accuracy ?? 999),
+            metrosValidacion: userMetros,
+          });
         } else {
           console.warn("[Sales] ⚠️ No se pudo obtener la ubicación GPS");
         }
       } catch (locationError) {
-        console.error(
-          "[Sales] ⚠️ Error al obtener ubicación (no crítico):",
-          locationError,
-        );
+        console.error("[Sales] ⚠️ Error al obtener ubicación (no crítico):", locationError);
       }
 
       // Intentar imprimir ticket (no crítico si falla)
@@ -1155,6 +1392,21 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Crear ventas locales (operación crítica)
       console.log("[Sales] 💾 Guardando ventas en base de datos local...");
+
+      // Construir observación desde los modales (solo el texto de observación)
+      const currentIntercambioData = intercambioData || intercambioDataRef.current;
+      let observacionVenta = "";
+
+      if (currentIntercambioData && currentIntercambioData.observacion) {
+        observacionVenta = currentIntercambioData.observacion;
+      }
+
+      if (prestamoData && prestamoData.observacion) {
+        observacionVenta = observacionVenta
+          ? `${observacionVenta} | ${prestamoData.observacion}`
+          : prestamoData.observacion;
+      }
+
       await FullSyncService.createLocalVentas(
         validCart.map((item, index) => ({
           id: saleIdMovil + index,
@@ -1176,19 +1428,106 @@ export default function SalesScreen({ route }: { route?: any }) {
           facturacionMovil: false,
           latitud: coordinates?.latitude ?? null,
           longitud: coordinates?.longitude ?? null,
+          observacion: observacionVenta,
         })),
       );
       ventasCreadas = true;
       console.log("[Sales] ✅ Ventas locales creadas exitosamente");
 
+      // Crear registros de InventarioEnvase si hay datos de intercambio o préstamo
+      try {
+        const envaseItems: {
+          sucursal: number;
+          claveProd: number;
+          folioMovto: number;
+          cantidadEntrada: number;
+          cantidadSalida: number;
+          costo: number;
+          tipoMovto: number;
+          idMovil: number;
+          observacion: string;
+        }[] = [];
+
+        // Helper: buscar ID de producto por claveProd
+        const getProductIdByClave = (claveProd: number): number => {
+          const producto = productosBase.find((p: any) => parseInt(p.claveProd || "0", 10) === claveProd);
+          return producto?.id || claveProd;
+        };
+
+        // INTERCAMBIO (clave 1000): salida de XALLAPAN + entrada de envase recibido
+        const currentIntercambioData = intercambioData || intercambioDataRef.current;
+        if (currentIntercambioData) {
+          const cantIntercambio = validCart.find((ci) => ci.claveProd === "1000" || ci.id === 55)?.cantidad || 1;
+          // SALIDA: envase XALLAPAN entregado
+          envaseItems.push({
+            sucursal,
+            claveProd: getProductIdByClave(currentIntercambioData.envaseEntregadoClave),
+            folioMovto: 1,
+            cantidadEntrada: 0,
+            cantidadSalida: cantIntercambio,
+            costo: 0,
+            tipoMovto: 1100,
+            idMovil: saleIdMovil,
+            observacion: currentIntercambioData.observacion || "",
+          });
+          // ENTRADA: envase recibido
+          envaseItems.push({
+            sucursal,
+            claveProd: getProductIdByClave(currentIntercambioData.envaseRecibidoClave),
+            folioMovto: 1,
+            cantidadEntrada: cantIntercambio,
+            cantidadSalida: 0,
+            costo: 0,
+            tipoMovto: 1000,
+            idMovil: saleIdMovil,
+            observacion: currentIntercambioData.observacion || "",
+          });
+        }
+
+        // PRESTAMO (clave 1001): salida del producto prestado
+        if (prestamoData) {
+          const cantPrestamo = validCart.find((ci) => ci.claveProd === "1001" || ci.id === 56)?.cantidad || 1;
+          const obsCompleta = [
+            prestamoData.observacion,
+            prestamoData.fechaDevolucion ? `Fecha devolucion: ${prestamoData.fechaDevolucion}` : "",
+          ]
+            .filter(Boolean)
+            .join(" | ");
+          envaseItems.push({
+            sucursal,
+            claveProd: prestamoData.idProdPrestado,
+            folioMovto: 1,
+            cantidadEntrada: 0,
+            cantidadSalida: cantPrestamo,
+            costo: 0,
+            tipoMovto: 1200,
+            idMovil: saleIdMovil,
+            observacion: obsCompleta,
+          });
+        }
+
+        if (envaseItems.length > 0) {
+          console.log("[Sales] 📦 Guardando InventarioEnvase:", envaseItems.length, "registros");
+          await FullSyncService.createLocalInventarioEnvase(envaseItems);
+          console.log("[Sales] ✅ InventarioEnvase guardado exitosamente");
+        }
+      } catch (envaseError) {
+        console.error("[Sales] ⚠️ Error al guardar InventarioEnvase (no crítico):", envaseError);
+      }
+
       // Actualizar inventario restando las cantidades vendidas (operación crítica)
-      const inventarioUpdateItems = validCart.map((item) => ({
-        sucursal,
-        claveProd: parseInt(item.claveProd || "0", 10), // Código del producto para buscar en inventario
-        cantidad: item.cantidad,
-        esKit: item.esKit || false,
-        idProducto: item.id, // ID del producto para buscar componentes de kits
-      }));
+      const inventarioUpdateItems = validCart
+        .filter((item) => {
+          const claveProdNum = parseInt(item.claveProd || "0", 10);
+          return claveProdNum !== 1000 && claveProdNum !== 1001;
+        })
+        .map((item) => ({
+          sucursal,
+          claveProd: parseInt(item.claveProd || "0", 10), // Código del producto para buscar en inventario
+          cantidad: item.cantidad,
+          esKit: item.esKit || false,
+          idProducto: item.id, // ID del producto para buscar componentes de kits
+        }));
       console.log("[Sales] DEBUG - Updating inventory after sale", {
         rows: validCart.length,
         sucursal,
@@ -1214,37 +1553,25 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Marcar visita como visitada si existe
       console.log(`[Sales] 📍 Buscando visita para cliente ${client.id}...`);
       try {
-        const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(
-          new Date(),
-          currentSucursal,
-        );
+        const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), currentSucursal);
         console.log({ visitasDelDia });
-        const visitaCliente = visitasDelDia
-          .filter((f) => f.visitado === 0)
-          .find((v: any) => v.idCliente === client.id);
+        const visitaCliente = visitasDelDia.filter((f) => f.visitado === 0).find((v: any) => v.idCliente === client.id);
 
         if (visitaCliente) {
-          console.log(
-            `[Sales] ✅ Visita encontrada para cliente ${client.id}, marcando como visitada...`,
-          );
+          console.log(`[Sales] ✅ Visita encontrada para cliente ${client.id}, marcando como visitada...`);
           console.log(`[Sales] DEBUG - Visita a marcar como visitada:`, visitaCliente);
           await VisitaSyncService.getInstance().marcarVisitado(visitaCliente.id);
           console.log(`[Sales] ✅ Visita ${visitaCliente.id} marcada como visitada`);
 
           // Recargar clientes de entregas del día para excluir el recién visitado
-          const visitasActualizadas =
-            await VisitaSyncService.getInstance().getVisitasByFecha(
-              new Date(),
-              currentSucursal,
-            );
+          const visitasActualizadas = await VisitaSyncService.getInstance().getVisitasByFecha(
+            new Date(),
+            currentSucursal,
+          );
           const idsClientesPendientes = new Set(
-            visitasActualizadas
-              .filter((f) => f.visitado === 0)
-              .map((v: any) => v.idCliente),
+            visitasActualizadas.filter((f) => f.visitado === 0).map((v: any) => v.idCliente),
           );
-          const clientesPendientes = clientes.filter((c) =>
-            idsClientesPendientes.has(c.id),
-          );
+          const clientesPendientes = clientes.filter((c) => idsClientesPendientes.has(c.id));
           setClientesEntregaDia(clientesPendientes);
           console.log(
             `[Sales] ✅ Lista de entregas del día actualizada: ${clientesPendientes.length} clientes pendientes`,
@@ -1253,10 +1580,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           console.log(`[Sales] ℹ️ No hay visita programada para cliente ${client.id}`);
         }
       } catch (visitaError) {
-        console.error(
-          "[Sales] ⚠️ Error al marcar visita como visitada (no crítico):",
-          visitaError,
-        );
+        console.error("[Sales] ⚠️ Error al marcar visita como visitada (no crítico):", visitaError);
         // No interrumpir el flujo de venta si hay error al marcar visita
       }
 
@@ -1267,29 +1591,22 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(
-            2,
-          )}\nPago: ${metodoPago}\n\nTicket enviado a: ${status.printer?.name}`,
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
+            status.printer?.name
+          }`,
         );
       } else {
         Alert.alert(
           "✅ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(
-            2,
-          )}\nPago: ${metodoPago}`,
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${metodoPago}`,
         );
       }
 
       // Finalizar visita si existe con tipoVisita=1 (Venta)
       if (currentDetalleVisitaId) {
         try {
-          await DetalleVisitasService.getInstance().finalizarVisita(
-            currentDetalleVisitaId,
-            1,
-          );
-          console.log(
-            `[Sales] ✅ Visita finalizada con tipo Venta: ${currentDetalleVisitaId}`,
-          );
+          await DetalleVisitasService.getInstance().finalizarVisita(currentDetalleVisitaId, 1);
+          console.log(`[Sales] ✅ Visita finalizada con tipo Venta: ${currentDetalleVisitaId}`);
           setCurrentDetalleVisitaId(null);
         } catch (error) {
           console.error("[Sales] ⚠️ Error al finalizar visita:", error);
@@ -1300,6 +1617,10 @@ export default function SalesScreen({ route }: { route?: any }) {
       setCart([]);
       setMetodoPago(null);
       setSelectedClient(null);
+      setIntercambioData(null);
+      intercambioDataRef.current = null;
+      setPrestamoData(null);
+      setPendingPrestamoProducto(null);
 
       console.log("[Sales] ✅ Venta procesada completamente", {
         ventasCreadas,
@@ -1317,21 +1638,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.error("[Sales] Estado de la operación:", {
         ventasCreadas,
         inventarioActualizado,
-        errorType: isNetworkError
-          ? "red"
-          : isDatabaseError
-          ? "base de datos"
-          : "desconocido",
+        errorType: isNetworkError ? "red" : isDatabaseError ? "base de datos" : "desconocido",
       });
 
       // Mensaje de error específico
       let userMessage = "No se pudo procesar la venta.";
       if (ventasCreadas && !inventarioActualizado) {
-        userMessage +=
-          "\n\n⚠️ La venta se registró pero el inventario no se actualizó. Contacta al administrador.";
+        userMessage += "\n\n⚠️ La venta se registró pero el inventario no se actualizó. Contacta al administrador.";
       } else if (isNetworkError) {
-        userMessage +=
-          "\n\nProblema de conexión. La venta se guardó localmente y se sincronizará automáticamente.";
+        userMessage += "\n\nProblema de conexión. La venta se guardó localmente y se sincronizará automáticamente.";
       } else if (isDatabaseError) {
         userMessage += "\n\nError en la base de datos local. Por favor intenta de nuevo.";
       }
@@ -1349,9 +1664,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>
-              Preparando conexión con la impresora...
-            </Text>
+            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
           </View>
         </ScrollView>
       </View>
@@ -1382,9 +1695,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>
-              Sin impresora. Los tickets se compartirán o deberás configurar una.
-            </Text>
+            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
           </View>
         )}
 
@@ -1426,17 +1737,14 @@ export default function SalesScreen({ route }: { route?: any }) {
               style={styles.smallBtn}
               onPress={() => {
                 setClienteModalOpen(true);
-                setFilteredClientes(
-                  clientesEntregaDia.length > 0 ? clientesEntregaDia : clientes,
-                );
+                setClienteTabActivo("agendados");
+                setFilteredClientes(clientesEntregaDia);
               }}
             >
               <Text style={styles.smallBtnText}>Cambiar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.valueText}>
-            {selectedClient ? selectedClient.nombre : "Sin seleccionar"}
-          </Text>
+          <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
         </View>
 
         {/* Productos */}
@@ -1460,21 +1768,10 @@ export default function SalesScreen({ route }: { route?: any }) {
           ) : (
             <View style={styles.cartList}>
               {cart.map((item) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.cartRow,
-                    item.usandoPrecioDefault && styles.cartRowPrecioDefault,
-                  ]}
-                >
+                <View key={item.id} style={[styles.cartRow, item.usandoPrecioDefault && styles.cartRowPrecioDefault]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cartTitle}>{item.descripcion}</Text>
-                    <Text
-                      style={[
-                        styles.muted,
-                        item.usandoPrecioDefault && styles.cartPriceDefault,
-                      ]}
-                    >
+                    <Text style={[styles.muted, item.usandoPrecioDefault && styles.cartPriceDefault]}>
                       ${item.precio.toFixed(2)}
                       {item.usandoPrecioDefault && " ⚠️"}
                     </Text>
@@ -1500,9 +1797,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                         }
                       }}
                       onBlur={() => {
-                        console.log(
-                          `[Sales] 📝 onBlur ejecutado para producto ${item.id}`,
-                        );
+                        console.log(`[Sales] 📝 onBlur ejecutado para producto ${item.id}`);
                         // Al salir del campo, validar cantidad
                         const currentText = quantityInputs[item.id];
                         console.log(
@@ -1510,9 +1805,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                         );
                         if (!currentText || currentText === "0") {
                           // Si está vacío o es 0, eliminar del carrito
-                          console.log(
-                            `[Sales] Eliminando producto ${item.id} del carrito (cantidad 0)`,
-                          );
+                          console.log(`[Sales] Eliminando producto ${item.id} del carrito (cantidad 0)`);
                           removeFromCart(item.id);
                         } else {
                           const n = parseInt(currentText, 10);
@@ -1520,9 +1813,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                             updateQuantity(item.id, n);
                           } else {
                             // Número inválido, restaurar cantidad anterior
-                            console.warn(
-                              `[Sales] Cantidad inválida: ${currentText}, restaurando a ${item.cantidad}`,
-                            );
+                            console.warn(`[Sales] Cantidad inválida: ${currentText}, restaurando a ${item.cantidad}`);
                           }
                         }
                         setQuantityInputs((prev) => {
@@ -1533,13 +1824,8 @@ export default function SalesScreen({ route }: { route?: any }) {
                       }}
                     />
                   </View>
-                  <Text style={styles.lineTotal}>
-                    ${(item.precio * item.cantidad).toFixed(2)}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.removeBtn}
-                    onPress={() => removeFromCart(item.id)}
-                  >
+                  <Text style={styles.lineTotal}>${(item.precio * item.cantidad).toFixed(2)}</Text>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromCart(item.id)}>
                     <Text style={styles.removeBtnText}>✕</Text>
                   </TouchableOpacity>
                 </View>
@@ -1552,11 +1838,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip
-              label="Efectivo"
-              selected={metodoPago === "efectivo"}
-              onPress={() => setMetodoPago("efectivo")}
-            />
+            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
             <PayChip
               label="Transferencia"
               selected={metodoPago === "transferencia"}
@@ -1568,11 +1850,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               onPress={() => setMetodoPago("credito")}
               disabled={selectedClient ? !selectedClient.credito : true}
             />
-            <PayChip
-              label="Cupon"
-              selected={metodoPago === "cupon"}
-              onPress={() => setMetodoPago("cupon")}
-            />
+            <PayChip label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
           </View>
 
           <View style={styles.totalRow}>
@@ -1583,8 +1861,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           <TouchableOpacity
             style={[
               styles.primaryBtn,
-              (!selectedClient || !cart.length || !metodoPago || processingVenta) &&
-                styles.primaryBtnDisabled,
+              (!selectedClient || !cart.length || !metodoPago || processingVenta) && styles.primaryBtnDisabled,
             ]}
             onPress={processSale}
             disabled={!selectedClient || !cart.length || !metodoPago || processingVenta}
@@ -1620,75 +1897,277 @@ export default function SalesScreen({ route }: { route?: any }) {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchCliente("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchCliente("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
               </View>
 
-              {/* Botones de filtro */}
-              <View style={styles.filterButtonsRow}>
+              {/* Tabs: Agendados | Cercanos | Todos */}
+              <View style={styles.tabBar}>
                 <TouchableOpacity
-                  style={[
-                    styles.filterBtn,
-                    clientesEntregaDia.length === 0 && styles.filterBtnDisabled,
-                  ]}
+                  style={[styles.tabItem, clienteTabActivo === "agendados" && styles.tabItemActive]}
                   onPress={() => {
+                    setClienteTabActivo("agendados");
                     setSearchQuery("");
                     setFilteredClientes(clientesEntregaDia);
                   }}
-                  disabled={clientesEntregaDia.length === 0}
                 >
-                  <Text style={styles.filterBtnText}>📋 Entrega día</Text>
+                  <Text style={[styles.tabItemText, clienteTabActivo === "agendados" && styles.tabItemTextActive]}>
+                    Agendados ({clientesEntregaDia.length})
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.filterBtn]}
+                  style={[styles.tabItem, clienteTabActivo === "cercanos" && styles.tabItemActive]}
                   onPress={() => {
+                    setClienteTabActivo("cercanos");
+                    setSearchQuery("");
+                    if (nearestClientes.length === 0) {
+                      actualizarCoordenadas();
+                    }
+                  }}
+                >
+                  <Text style={[styles.tabItemText, clienteTabActivo === "cercanos" && styles.tabItemTextActive]}>
+                    Cercanos
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tabItem, clienteTabActivo === "todos" && styles.tabItemActive]}
+                  onPress={() => {
+                    setClienteTabActivo("todos");
                     setSearchQuery("");
                     setFilteredClientes(clientes);
                   }}
                 >
-                  <Text style={styles.filterBtnText}>Todos</Text>
+                  <Text style={[styles.tabItemText, clienteTabActivo === "todos" && styles.tabItemTextActive]}>
+                    Todos
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              {/* Contador de resultados */}
-              <Text style={styles.resultCount}>
-                {filteredClientes.length} cliente
-                {filteredClientes.length !== 1 ? "s" : ""}{" "}
-                {filteredClientes.length === 1 ? "encontrado" : "encontrados"}
-              </Text>
-
-              <FlatList
-                data={filteredClientes}
-                keyExtractor={(i) => String(i.id)}
-                renderItem={({ item }) => (
+              {/* Tab: Cercanos */}
+              {clienteTabActivo === "cercanos" && (
+                <View>
                   <TouchableOpacity
-                    style={styles.listItem}
-                    onPress={() => handleClienteSeleccionado(item)}
+                    style={styles.refreshCoordsBtn}
+                    onPress={actualizarCoordenadas}
+                    disabled={loadingCercanos}
                   >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>{item.nombre}</Text>
-                      <Text style={styles.listSubtitle}>ID: {item.id}</Text>
-                    </View>
-                    {item.credito ? <Text style={styles.badge}>Crédito</Text> : null}
+                    {loadingCercanos ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Icon name="my-location" type="material" size={16} color="#fff" />
+                    )}
+                    <Text style={styles.refreshCoordsBtnText}>
+                      {loadingCercanos ? "Obteniendo ubicación..." : "Actualizar mis coordenadas"}
+                    </Text>
                   </TouchableOpacity>
-                )}
-                ListEmptyComponent={
-                  <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>No se encontraron clientes</Text>
-                  </View>
-                }
-              />
+                  {userCoords && (
+                    <Text style={styles.coordsInfo}>
+                      Lat: {userCoords.latitude.toFixed(5)}, Lon: {userCoords.longitude.toFixed(5)}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Contador de resultados */}
+              {clienteTabActivo === "cercanos" ? (
+                nearestClientes.length > 0 && (
+                  <Text style={styles.resultCount}>
+                    {nearestClientes.length} cliente{nearestClientes.length !== 1 ? "s" : ""} cercano
+                    {nearestClientes.length !== 1 ? "s" : ""}
+                  </Text>
+                )
+              ) : (
+                <Text style={styles.resultCount}>
+                  {filteredClientes.length} cliente{filteredClientes.length !== 1 ? "s" : ""}{" "}
+                  {filteredClientes.length === 1 ? "encontrado" : "encontrados"}
+                </Text>
+              )}
+
+              {/* Lista de clientes según tab activo */}
+              {clienteTabActivo === "cercanos" ? (
+                <FlatList
+                  data={nearestClientes.filter((c) => visitasDelDiaMap.get(c.id)?.visitado !== 1)}
+                  keyExtractor={(i) => String(i.id)}
+                  renderItem={({ item }) => {
+                    const esAgendado = visitasDelDiaIds.has(item.id);
+                    const visitaInfo = visitasDelDiaMap.get(item.id);
+                    const yaVisitado = visitaInfo?.visitado === 1;
+
+                    // Calcular si el usuario está fuera del rango del cliente
+                    let fueraDeRango = false;
+                    let distanciaActual: number | null = null;
+                    if (userCoords && item.latitud && item.longitud) {
+                      distanciaActual = calcularDistancia(
+                        userCoords.latitude,
+                        userCoords.longitude,
+                        item.latitud,
+                        item.longitud,
+                      );
+                      const metrosPermitidos = userMetros || item.metros || 100;
+                      fueraDeRango = distanciaActual > metrosPermitidos;
+                    }
+
+                    const btnDisabled = yaVisitado || validandoUbicacion || fueraDeRango;
+
+                    return (
+                      <View style={styles.clienteListRow}>
+                        <TouchableOpacity
+                          style={styles.clienteListInfo}
+                          onPress={() => handleClienteSeleccionado(item)}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.listTitle}>{item.nombre}</Text>
+                            <Text style={styles.listSubtitle}>ID: {item.id}</Text>
+                            <Text style={styles.distanciaText}>
+                              {item.distanciaMetros < 1000
+                                ? `${Math.round(item.distanciaMetros)} m`
+                                : `${(item.distanciaMetros / 1000).toFixed(1)} km`}
+                            </Text>
+                            {fueraDeRango && distanciaActual !== null && (
+                              <Text style={styles.fueraDeRangoText}>
+                                ⚠️ A {Math.round(distanciaActual)} m (máx. {userMetros || item.metros || 100} m)
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.badgesColumn}>
+                            {esAgendado && (
+                              <Text style={[styles.agendadoBadge, yaVisitado && styles.agendadoBadgeVisitado]}>
+                                {yaVisitado ? "Visitado" : "Agendado"}
+                              </Text>
+                            )}
+                            {item.credito && <Text style={styles.badge}>Crédito</Text>}
+                          </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.visitarBtn,
+                            btnDisabled && styles.visitarBtnDisabled,
+                            fueraDeRango && !yaVisitado && styles.visitarBtnFueraRango,
+                          ]}
+                          onPress={() => handleVisitarCliente(item)}
+                          disabled={btnDisabled}
+                        >
+                          {validandoUbicacion ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Icon
+                              name={yaVisitado ? "check" : fueraDeRango ? "location-off" : "directions-walk"}
+                              type="material"
+                              size={14}
+                              color="#fff"
+                            />
+                          )}
+                          <Text style={styles.visitarBtnText}>
+                            {yaVisitado ? "Listo" : fueraDeRango ? "Lejos" : "Visitar"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={styles.emptySearch}>
+                      <Text style={styles.emptySearchText}>
+                        {loadingCercanos
+                          ? "Buscando clientes cercanos..."
+                          : userCoords
+                          ? "Ningún cliente tiene coordenadas registradas. Verifique que la API envíe latitud/longitud."
+                          : "Presiona 'Actualizar mis coordenadas' para ver los 5 más cercanos"}
+                      </Text>
+                    </View>
+                  }
+                />
+              ) : (
+                <FlatList
+                  data={filteredClientes}
+                  keyExtractor={(i) => String(i.id)}
+                  renderItem={({ item }) => {
+                    const esAgendado = visitasDelDiaIds.has(item.id);
+                    const visitaInfo = visitasDelDiaMap.get(item.id);
+                    const yaVisitado = visitaInfo?.visitado === 1;
+
+                    // Calcular si el usuario está fuera del rango del cliente
+                    let fueraDeRango = false;
+                    let distanciaActual: number | null = null;
+                    if (userCoords && item.latitud && item.longitud) {
+                      distanciaActual = calcularDistancia(
+                        userCoords.latitude,
+                        userCoords.longitude,
+                        item.latitud,
+                        item.longitud,
+                      );
+                      const metrosPermitidos = userMetros || item.metros || 100;
+                      fueraDeRango = distanciaActual > metrosPermitidos;
+                    }
+
+                    const btnDisabled = yaVisitado || validandoUbicacion || fueraDeRango;
+
+                    return (
+                      <View style={styles.clienteListRow}>
+                        <TouchableOpacity
+                          style={styles.clienteListInfo}
+                          onPress={() => handleClienteSeleccionado(item)}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.listTitle}>{item.nombre}</Text>
+                            <Text style={styles.listSubtitle}>ID: {item.id}</Text>
+                            {fueraDeRango && distanciaActual !== null && (
+                              <Text style={styles.fueraDeRangoText}>
+                                ⚠️ A {Math.round(distanciaActual)} m (máx. {userMetros || item.metros || 100} m)
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.badgesColumn}>
+                            {esAgendado && (
+                              <Text style={[styles.agendadoBadge, yaVisitado && styles.agendadoBadgeVisitado]}>
+                                {yaVisitado ? "Visitado" : "Agendado"}
+                              </Text>
+                            )}
+                            {item.credito && <Text style={styles.badge}>Crédito</Text>}
+                          </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.visitarBtn,
+                            btnDisabled && styles.visitarBtnDisabled,
+                            fueraDeRango && !yaVisitado && styles.visitarBtnFueraRango,
+                          ]}
+                          onPress={() => handleVisitarCliente(item)}
+                          disabled={btnDisabled}
+                        >
+                          {validandoUbicacion ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Icon
+                              name={yaVisitado ? "check" : fueraDeRango ? "location-off" : "directions-walk"}
+                              type="material"
+                              size={14}
+                              color="#fff"
+                            />
+                          )}
+                          <Text style={styles.visitarBtnText}>
+                            {yaVisitado ? "Listo" : fueraDeRango ? "Lejos" : "Visitar"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={styles.emptySearch}>
+                      <Text style={styles.emptySearchText}>No se encontraron clientes</Text>
+                    </View>
+                  }
+                />
+              )}
+
               <TouchableOpacity
                 style={styles.secondaryBtn}
                 onPress={() => {
                   setClienteModalOpen(false);
                   setSearchQuery("");
                   setFilteredClientes(clientes);
+                  setClienteTabActivo("agendados");
                 }}
               >
                 <Text style={styles.secondaryBtnText}>Cerrar</Text>
@@ -1710,16 +2189,12 @@ export default function SalesScreen({ route }: { route?: any }) {
           <View style={styles.modalBackdrop}>
             <View style={styles.confirmModalCard}>
               <Text style={styles.confirmModalTitle}>¿Desea iniciar visita?</Text>
-              <Text style={styles.confirmModalSubtitle}>
-                Cliente: {clientePendienteVisita?.nombre}
-              </Text>
+              <Text style={styles.confirmModalSubtitle}>Cliente: {clientePendienteVisita?.nombre}</Text>
 
               {validandoUbicacion ? (
                 <View style={{ paddingVertical: 20, alignItems: "center" }}>
                   <ActivityIndicator size="large" color={COLORS.primary} />
-                  <Text style={{ marginTop: 12, color: COLORS.textSecondary }}>
-                    Validando ubicación...
-                  </Text>
+                  <Text style={{ marginTop: 12, color: COLORS.textSecondary }}>Validando ubicación...</Text>
                 </View>
               ) : (
                 <View style={styles.confirmModalButtonsRow}>
@@ -1764,10 +2239,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                   autoCorrect={false}
                 />
                 {searchProductoQuery.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleSearchProducto("")}
-                    style={styles.clearButton}
-                  >
+                  <TouchableOpacity onPress={() => handleSearchProducto("")} style={styles.clearButton}>
                     <Text style={styles.clearButtonText}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -1781,10 +2253,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                   {filteredProductos.length === 1 ? "encontrado" : "encontrados"}
                 </Text>
                 <TouchableOpacity
-                  style={[
-                    styles.promotionsBtnSmall,
-                    showOnlyPromotions && styles.promotionsBtnSmallActive,
-                  ]}
+                  style={[styles.promotionsBtnSmall, showOnlyPromotions && styles.promotionsBtnSmallActive]}
                   onPress={togglePromotions}
                 >
                   <Icon
@@ -1795,10 +2264,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                     style={{ marginRight: 4 }}
                   />
                   <Text
-                    style={[
-                      styles.promotionsBtnSmallText,
-                      showOnlyPromotions && styles.promotionsBtnSmallTextActive,
-                    ]}
+                    style={[styles.promotionsBtnSmallText, showOnlyPromotions && styles.promotionsBtnSmallTextActive]}
                   >
                     {showOnlyPromotions ? "Todo" : "Promociones o combos"}
                   </Text>
@@ -1828,9 +2294,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                       <Text style={styles.listSubtitle}>
                         Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
                       </Text>
-                      {item.esPromocion && (
-                        <Text style={styles.precioPromoBadge}>🎉 PRECIO ESPECIAL</Text>
-                      )}
+                      {item.esPromocion && <Text style={styles.precioPromoBadge}>🎉 PRECIO ESPECIAL</Text>}
                       {item.usandoPrecioDefault && !item.esPromocion && (
                         <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>
                       )}
@@ -1839,9 +2303,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                       style={[
                         styles.productPrice,
                         item.esPromocion && styles.productPricePromo,
-                        item.usandoPrecioDefault &&
-                          !item.esPromocion &&
-                          styles.productPriceDefault,
+                        item.usandoPrecioDefault && !item.esPromocion && styles.productPriceDefault,
                       ]}
                     >
                       ${item.precio.toFixed(2)}
@@ -1850,9 +2312,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptySearch}>
-                    <Text style={styles.emptySearchText}>
-                      No se encontraron productos
-                    </Text>
+                    <Text style={styles.emptySearchText}>No se encontraron productos</Text>
                   </View>
                 }
               />
@@ -1860,10 +2320,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 style={styles.secondaryBtn}
                 onPress={() => {
                   console.log("[Sales] Cerrando modal de productos");
-                  console.log(
-                    "[Sales] Estado validandoUbicacion al cerrar productos:",
-                    validandoUbicacion,
-                  );
+                  console.log("[Sales] Estado validandoUbicacion al cerrar productos:", validandoUbicacion);
                   setProductoModalOpen(false);
                   setSearchProductoQuery("");
                   setShowOnlyPromotions(false);
@@ -1874,6 +2331,157 @@ export default function SalesScreen({ route }: { route?: any }) {
             </View>
           </View>
         </Modal>
+
+        {/* Modal Tipo de Visita (como CumplimientoScreen) */}
+        <Modal visible={tipoVisitaModalOpen} animationType="fade" transparent>
+          <View style={styles.tipoVisitaBackdrop}>
+            <View style={styles.tipoVisitaCard}>
+              <View style={styles.tipoVisitaHeader}>
+                <Icon name="assignment" type="material" size={28} color={COLORS.primary} />
+                <Text style={styles.tipoVisitaTitle}>Tipo de Visita</Text>
+              </View>
+              <View style={styles.tipoVisitaContent}>
+                <View style={styles.tipoVisitaClienteInfo}>
+                  <Icon name="person" type="material" size={20} color={COLORS.textSecondary} />
+                  <Text style={styles.tipoVisitaSubtitle}>{clienteParaVisitar?.nombre || "Cliente"}</Text>
+                </View>
+
+                <ScrollView style={styles.tipoVisitaListContainer} showsVerticalScrollIndicator={false}>
+                  {tiposVisita
+                    .filter((tipo) => tipo.id !== 1)
+                    .map((tipo) => {
+                      const icons: { [key: number]: string } = {
+                        2: "account-balance-wallet",
+                        3: "local-offer",
+                        4: "visibility",
+                        5: "local-shipping",
+                      };
+                      return (
+                        <TouchableOpacity
+                          key={tipo.id}
+                          style={[
+                            styles.tipoVisitaOption,
+                            tipoVisitaSeleccionado === tipo.id && styles.tipoVisitaOptionSelected,
+                          ]}
+                          onPress={() => setTipoVisitaSeleccionado(tipo.id)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.tipoVisitaOptionContent}>
+                            <Icon
+                              name={icons[tipo.id] || "label"}
+                              type="material"
+                              size={24}
+                              color={tipoVisitaSeleccionado === tipo.id ? COLORS.primary : COLORS.textSecondary}
+                            />
+                            <Text
+                              style={[
+                                styles.tipoVisitaOptionText,
+                                tipoVisitaSeleccionado === tipo.id && styles.tipoVisitaOptionTextSelected,
+                              ]}
+                            >
+                              {tipo.descripcion}
+                            </Text>
+                          </View>
+                          {tipoVisitaSeleccionado === tipo.id && (
+                            <View style={styles.tipoVisitaCheck}>
+                              <Icon name="check" type="material" size={20} color="white" />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                </ScrollView>
+
+                <View style={styles.tipoVisitaButtons}>
+                  <TouchableOpacity
+                    style={[styles.tipoVisitaBtn, styles.tipoVisitaBtnCancel]}
+                    onPress={() => {
+                      setTipoVisitaModalOpen(false);
+                      setClienteParaVisitar(null);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.tipoVisitaBtnCancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.tipoVisitaBtn,
+                      styles.tipoVisitaBtnConfirm,
+                      tipoVisitaSeleccionado === null && styles.tipoVisitaBtnDisabled,
+                    ]}
+                    onPress={confirmarVisitarCliente}
+                    disabled={tipoVisitaSeleccionado === null}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="check" type="material" size={20} color="white" />
+                    <Text style={styles.tipoVisitaBtnConfirmText}>Confirmar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal Intercambio de Envases (clave 1000) */}
+        <IntercambioEnvaseModal
+          visible={intercambioModalOpen}
+          cantidad={pendingIntercambioCantidad}
+          onAccept={(data) => {
+            console.log("[Sales] Intercambio aceptado:", data);
+            const dataObj = {
+              envaseEntregadoClave: data.envaseEntregadoClave,
+              envaseEntregadoDesc: data.envaseEntregadoDesc,
+              envaseRecibidoClave: data.envaseRecibidoClave,
+              envaseRecibidoDesc: data.envaseRecibidoDesc,
+              observacion: data.observacion,
+            };
+            // Set ref synchronously so processSale can read it immediately
+            intercambioDataRef.current = dataObj;
+            setIntercambioData(dataObj);
+            setIntercambioModalOpen(false);
+            // Continuar con processSale ahora que tenemos los datos (ref ya tiene el valor)
+            setTimeout(() => processSale(), 200);
+          }}
+          onCancel={() => {
+            console.log("[Sales] Intercambio cancelado");
+            setIntercambioModalOpen(false);
+          }}
+        />
+
+        {/* Modal Préstamo de Envases (clave 1001) */}
+        <PrestamoEnvaseModal
+          visible={prestamoModalOpen}
+          clienteNombre={selectedClient?.nombre || "Sin cliente"}
+          cantidad={pendingPrestamoCantidad}
+          onAccept={(data) => {
+            console.log("[Sales] Préstamo aceptado:", data);
+            setPrestamoData({
+              idProdPrestado: data.idProdPrestado,
+              claveProdPrestado: data.claveProdPrestado,
+              descProdPrestado: data.descProdPrestado,
+              observacion: data.observacion,
+              fechaDevolucion: data.fechaDevolucion,
+            });
+            setPrestamoModalOpen(false);
+            // Agregar el producto al carrito después de aceptar
+            if (pendingPrestamoProducto) {
+              setCart((prev) => {
+                const idx = prev.findIndex((ci) => ci.id === pendingPrestamoProducto!.id);
+                if (idx >= 0) {
+                  const cp = [...prev];
+                  cp[idx] = { ...cp[idx], cantidad: cp[idx].cantidad + 1 };
+                  return cp;
+                }
+                return [...prev, { ...pendingPrestamoProducto!, cantidad: 1 }];
+              });
+            }
+          }}
+          onCancel={() => {
+            console.log("[Sales] Préstamo cancelado");
+            setPrestamoModalOpen(false);
+            setPendingPrestamoProducto(null);
+          }}
+        />
       </ScrollView>
     </View>
   );
@@ -1894,11 +2502,7 @@ function PayChip({
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.chip,
-        selected && styles.chipSelected,
-        disabled && styles.chipDisabled,
-      ]}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
     >
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>
@@ -2364,5 +2968,248 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
     fontWeight: "600",
+  },
+  // --- Tabs del modal de clientes ---
+  tabBar: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    marginBottom: SPACING.s,
+  },
+  tabItem: {
+    flex: 1,
+    paddingVertical: SPACING.s,
+    alignItems: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabItemActive: {
+    borderBottomColor: COLORS.primary,
+  },
+  tabItemText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.textSecondary,
+  },
+  tabItemTextActive: {
+    color: COLORS.primary,
+  },
+  // --- Botón actualizar coordenadas ---
+  refreshCoordsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primary,
+    paddingVertical: SPACING.s,
+    paddingHorizontal: SPACING.m,
+    borderRadius: BORDER_RADIUS.m,
+    marginVertical: SPACING.s,
+    gap: SPACING.s,
+  },
+  refreshCoordsBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  coordsInfo: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: SPACING.s,
+  },
+  // --- Fila de cliente con botón visitar ---
+  clienteListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingVertical: SPACING.s,
+  },
+  clienteListInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  badgesColumn: {
+    alignItems: "flex-end",
+    gap: 4,
+    marginLeft: SPACING.s,
+  },
+  agendadoBadge: {
+    backgroundColor: "#E3F2FD",
+    color: COLORS.primary,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.s,
+    fontSize: 10,
+    fontWeight: "bold",
+    overflow: "hidden",
+  },
+  agendadoBadgeVisitado: {
+    backgroundColor: "#E8F5E9",
+    color: "#2E7D32",
+  },
+  distanciaText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  visitarBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.l,
+    marginLeft: SPACING.s,
+    gap: 4,
+  },
+  visitarBtnDisabled: {
+    backgroundColor: "#34C759",
+    opacity: 0.8,
+  },
+  visitarBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  // --- Modal Tipo de Visita ---
+  tipoVisitaBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tipoVisitaCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.xl,
+    width: "90%",
+    maxWidth: 400,
+    maxHeight: "80%",
+    ...SHADOWS.large,
+    overflow: "hidden",
+  },
+  tipoVisitaHeader: {
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tipoVisitaTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: COLORS.textPrimary,
+    marginTop: 8,
+  },
+  tipoVisitaContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  tipoVisitaClienteInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: 20,
+    marginTop: 16,
+  },
+  tipoVisitaSubtitle: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    marginLeft: 8,
+    fontWeight: "500",
+  },
+  tipoVisitaListContainer: {
+    maxHeight: 300,
+  },
+  tipoVisitaOption: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: 8,
+    backgroundColor: COLORS.background,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  tipoVisitaOptionSelected: {
+    backgroundColor: "#E3F2FD",
+    borderColor: COLORS.primary,
+  },
+  tipoVisitaOptionContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  tipoVisitaOptionText: {
+    fontSize: 16,
+    color: COLORS.textPrimary,
+    marginLeft: 12,
+    fontWeight: "500",
+  },
+  tipoVisitaOptionTextSelected: {
+    color: COLORS.primary,
+    fontWeight: "600",
+  },
+  tipoVisitaCheck: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tipoVisitaButtons: {
+    flexDirection: "row",
+    marginTop: 20,
+    gap: 12,
+  },
+  tipoVisitaBtn: {
+    flex: 1,
+    height: 50,
+    borderRadius: 25,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  tipoVisitaBtnCancel: {
+    backgroundColor: COLORS.background,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+  },
+  tipoVisitaBtnConfirm: {
+    backgroundColor: COLORS.primary,
+  },
+  tipoVisitaBtnDisabled: {
+    backgroundColor: COLORS.border,
+  },
+  tipoVisitaBtnCancelText: {
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  tipoVisitaBtnConfirmText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+    marginLeft: 6,
+  },
+  // --- Fuera de rango ---
+  visitarBtnFueraRango: {
+    backgroundColor: "#E65100", // naranja oscuro
+    opacity: 0.85,
+  },
+  fueraDeRangoText: {
+    fontSize: 11,
+    color: "#E65100",
+    fontWeight: "600",
+    marginTop: 2,
   },
 });
