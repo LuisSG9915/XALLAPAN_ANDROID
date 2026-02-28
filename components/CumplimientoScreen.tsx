@@ -53,7 +53,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const init = async () => {
       const user = await AuthService.restoreSession();
       if (user) {
-        const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
         const sucursal =
           (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
 
@@ -62,37 +61,28 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           if (!FullSyncService.isServiceInitialized()) {
             await FullSyncService.initialize();
           }
-          // Asumiendo que user.id existe en la sesión
           if (user.id) {
             const realmUser = FullSyncService.getUsuarioById(user.id);
             if (realmUser && realmUser.metros) {
-              console.log("[Cumplimiento] Metros usuario obtenidos de Realm:", realmUser.metros);
               setUserMetros(realmUser.metros);
             } else if (user.metros) {
-              console.log("[Cumplimiento] Metros usuario obtenidos de Sesión:", user.metros);
               setUserMetros(user.metros);
             }
           }
         } catch (error) {
-          console.error("[Cumplimiento] Error al obtener usuario de Realm:", error);
-          if (user.metros) {
-            setUserMetros(user.metros);
-          }
+          if (user.metros) setUserMetros(user.metros);
         }
 
         setCurrentSucursal(sucursal);
 
-        // Sincronizar visitas desde el servidor antes de cargar (mismo método que pull-to-refresh)
-        try {
-          console.log("[Cumplimiento] 🔄 Sincronizando visitas al montar...");
-          await VisitaSyncService.getInstance().syncByDate(new Date());
-          console.log("[Cumplimiento] ✅ Visitas sincronizadas al montar");
-        } catch (error) {
-          console.error("[Cumplimiento] ⚠️ Error al sincronizar visitas:", error);
-        }
-
-        // Cargar datos después de sincronizar
+        // Cargar datos locales inmediatamente (sin esperar red)
         cargarDatos(new Date(), sucursal);
+
+        // Sincronizar en background sin bloquear UI
+        VisitaSyncService.getInstance()
+          .syncByDate(new Date())
+          .then(() => cargarDatos(new Date(), sucursal, false))
+          .catch((err) => console.warn("[Cumplimiento] Sync background fallido:", err));
       }
     };
 
@@ -107,6 +97,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingManual, setRefreshingManual] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
   const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
@@ -138,77 +129,50 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     return R * c;
   };
 
-  const obtenerNombreCliente = async (idCliente: number) => {
-    const cliente = FullSyncService.getClienteFullById(idCliente);
-    if (cliente) {
-      return {
-        nombre: cliente.nombre,
-        latitud: cliente.latitud,
-        longitud: cliente.longitud,
-        metros: cliente.metros,
-      };
-    } else {
-      const clientes = FullSyncService.getClientesFull();
-      const clienteEncontrado = clientes.find((c) => c.id === idCliente);
-      return {
-        nombre: clienteEncontrado ? clienteEncontrado.nombre : "Cliente no encontrado",
-        latitud: clienteEncontrado?.latitud,
-        longitud: clienteEncontrado?.longitud,
-        metros: clienteEncontrado?.metros,
-      };
-    }
-  };
-
-  const cargarDatos = useCallback((fecha: Date, sucursal: number) => {
-    setLoading(true);
+  const cargarDatos = useCallback((fecha: Date, sucursal: number, showLoading = true) => {
+    if (showLoading) setLoading(true);
     Promise.all([
       VisitaSyncService.getInstance().getVisitasByFecha(fecha, sucursal),
       VisitaSyncService.getInstance().getEstadisticasCumplimiento(fecha, sucursal),
     ])
       .then(([visitasDelDia, stats]) => {
-        console.log("[Cumplimiento] 📋 Visitas del día:", visitasDelDia);
-        console.log("[Cumplimiento] 📊 Estadísticas:", stats);
-        // Obtener nombres de clientes
-        Promise.all(
-          visitasDelDia.map((visita: any) => {
-            return obtenerNombreCliente(visita.idCliente).then((datosCliente) => ({
-              ...visita,
-              nombreCliente: datosCliente.nombre,
-              latitud: datosCliente.latitud,
-              longitud: datosCliente.longitud,
-              metros: datosCliente.metros,
-            }));
-          }),
-        ).then((visitasConNombres) => {
-          console.log("[Cumplimiento] 📋 Visitas cargadas:", visitasConNombres);
-          setVisitas(visitasConNombres);
-          setEstadisticas(stats);
+        // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
+        const visitasConNombres = visitasDelDia.map((visita: any) => {
+          const idClienteNum = Number(visita.idCliente);
+          const cliente = FullSyncService.getClienteFullById(idClienteNum);
+          return {
+            ...visita,
+            idCliente: idClienteNum,
+            nombreCliente: cliente?.nombre ? String(cliente.nombre) : `Cliente #${idClienteNum}`,
+            latitud: cliente?.latitud != null ? Number(cliente.latitud) : undefined,
+            longitud: cliente?.longitud != null ? Number(cliente.longitud) : undefined,
+            metros: cliente?.metros != null ? Number(cliente.metros) : undefined,
+          };
         });
+        setVisitas(visitasConNombres);
+        setEstadisticas(stats);
       })
       .catch((error) => {
-        console.error("Error al cargar datos:", error);
+        console.error("[Cumplimiento] Error al cargar datos:", error);
         Alert.alert("Error", "No se pudieron cargar las visitas");
       })
       .finally(() => {
         setLoading(false);
         setRefreshing(false);
+        setRefreshingManual(false);
       });
   }, []);
 
-  // Recargar visitas cuando la pantalla recibe foco (al regresar de SalesScreen u otra pantalla)
+  // Recargar visitas cuando la pantalla recibe foco
   useFocusEffect(
     useCallback(() => {
       if (currentSucursal > 0) {
-        console.log("[Cumplimiento] 🔄 Pantalla recibió foco, sincronizando y recargando visitas...");
-        // Re-sincronizar desde el servidor para capturar nuevas visitas agendadas
+        // Cargar local primero (inmediato), sync en background
+        cargarDatos(fechaSeleccionada, currentSucursal);
         VisitaSyncService.getInstance()
           .syncByDate(fechaSeleccionada)
-          .catch((error) => {
-            console.warn("[Cumplimiento] ⚠️ Sync en foco fallido (no crítico):", error);
-          })
-          .finally(() => {
-            cargarDatos(fechaSeleccionada, currentSucursal);
-          });
+          .then(() => cargarDatos(fechaSeleccionada, currentSucursal, false))
+          .catch((err) => console.warn("[Cumplimiento] Sync foco fallido:", err));
       }
     }, [fechaSeleccionada, currentSucursal, cargarDatos]),
   );
@@ -391,7 +355,21 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const sincronizarFecha = async () => {
     setRefreshing(true);
-    await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    try {
+      await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    } catch (err) {
+      console.warn("[Cumplimiento] Error al sincronizar:", err);
+    }
+    cargarDatos(fechaSeleccionada, currentSucursal);
+  };
+
+  const handleRefreshManual = async () => {
+    setRefreshingManual(true);
+    try {
+      await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    } catch (err) {
+      console.warn("[Cumplimiento] Error al sincronizar manual:", err);
+    }
     cargarDatos(fechaSeleccionada, currentSucursal);
   };
 
@@ -509,7 +487,16 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.titulo}>Cumplimiento de agenda</Text>
+        <View style={styles.tituloRow}>
+          <Text style={styles.titulo}>Cumplimiento de agenda</Text>
+          <TouchableOpacity onPress={handleRefreshManual} disabled={refreshingManual} style={styles.refreshHeaderBtn}>
+            {refreshingManual ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Icon name="refresh" type="material" size={20} color="white" />
+            )}
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.navegacionFechas}>
           <TouchableOpacity style={styles.botonFlecha} onPress={() => cambiarDia(-1)} activeOpacity={0.7}>
@@ -695,11 +682,21 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
   },
+  tituloRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
   titulo: {
     fontSize: 20,
     fontWeight: "bold",
     color: "white",
-    marginBottom: 4,
+  },
+  refreshHeaderBtn: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.2)",
   },
   porcentaje: {
     fontSize: 28,

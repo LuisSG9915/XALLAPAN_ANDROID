@@ -86,6 +86,7 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
+  const [loadingAgendados, setLoadingAgendados] = useState(false);
 
   // Visitar flow (tipo visita modal, como CumplimientoScreen)
   const [tipoVisitaModalOpen, setTipoVisitaModalOpen] = useState(false);
@@ -396,11 +397,20 @@ export default function SalesScreen({ route }: { route?: any }) {
   }, [route?.params, clientes, selectedClient]);
 
   const reloadVisitasDelDia = useCallback(
-    async (sucursal: number) => {
+    async (sucursal: number, showLoading = false) => {
       if (!sucursal) return;
       try {
+        if (showLoading) setLoadingAgendados(true);
+        // Si es refresh manual, sincronizar con el servidor primero
+        if (showLoading) {
+          try {
+            await VisitaSyncService.getInstance().syncByDate(new Date());
+          } catch (syncErr) {
+            console.warn("[Sales] Sync visitas fallido (no crítico):", syncErr);
+          }
+        }
         const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
-        console.log(`[Sales] useFocusEffect - Visitas recargadas: ${visitasDelDia.length}`);
+        console.log(`[Sales] Visitas recargadas: ${visitasDelDia.length}`);
         const clientesData = FullSyncService.getClientesFull(10000);
         const clientesFormateados = clientesData.map((c: any) => ({
           id: c.id,
@@ -433,6 +443,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         setVisitasDelDiaMap(visitaMap);
       } catch (error) {
         console.error("[Sales] Error al recargar visitas:", error);
+        Alert.alert("Error", "No se pudieron actualizar los clientes agendados");
+      } finally {
+        if (showLoading) setLoadingAgendados(false);
       }
     },
     [clienteTabActivo],
@@ -1913,9 +1926,24 @@ export default function SalesScreen({ route }: { route?: any }) {
                     setFilteredClientes(clientesEntregaDia);
                   }}
                 >
-                  <Text style={[styles.tabItemText, clienteTabActivo === "agendados" && styles.tabItemTextActive]}>
-                    Agendados ({clientesEntregaDia.length})
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={[styles.tabItemText, clienteTabActivo === "agendados" && styles.tabItemTextActive]}>
+                      Agendados ({clientesEntregaDia.length})
+                    </Text>
+                    {clienteTabActivo === "agendados" && (
+                      <TouchableOpacity
+                        onPress={() => reloadVisitasDelDia(currentSucursal, true)}
+                        style={styles.refreshIconBtn}
+                        disabled={loadingAgendados}
+                      >
+                        {loadingAgendados ? (
+                          <ActivityIndicator size="small" color={COLORS.primary} />
+                        ) : (
+                          <Icon name="refresh" type="material" size={16} color={COLORS.primary} />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.tabItem, clienteTabActivo === "cercanos" && styles.tabItemActive]}
@@ -3211,5 +3239,10 @@ const styles = StyleSheet.create({
     color: "#E65100",
     fontWeight: "600",
     marginTop: 2,
+  },
+  refreshIconBtn: {
+    padding: 4,
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: "transparent",
   },
 });
