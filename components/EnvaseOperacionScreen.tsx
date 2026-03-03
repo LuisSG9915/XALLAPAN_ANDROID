@@ -75,7 +75,9 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
     observacion: string;
+    costo: number;
   } | null>(null);
+  const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
   const [prestamoData, setPrestamoData] = useState<{
     idProdPrestado: number;
     claveProdPrestado: number;
@@ -83,6 +85,12 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     observacion: string;
     fechaDevolucion: string;
   } | null>(null);
+
+  // Debug: monitorear cambios en intercambioModalOpen
+  useEffect(() => {
+    console.log("[EnvaseOp] 🔔 Estado intercambioModalOpen cambió a:", intercambioModalOpen);
+    console.log("[EnvaseOp] 🔔 costoIntercambioCalculado:", costoIntercambioCalculado);
+  }, [intercambioModalOpen, costoIntercambioCalculado]);
 
   useEffect(() => {
     const init = async () => {
@@ -196,16 +204,94 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
   };
 
   const handleContinueToModal = () => {
+    console.log("[EnvaseOp] 🔵 handleContinueToModal iniciado");
+    console.log("[EnvaseOp] cantidad:", cantidad, "operationType:", operationType);
+
     const cantNum = parseInt(cantidad, 10);
     if (!cantNum || cantNum <= 0) {
+      console.log("[EnvaseOp] ❌ Cantidad inválida");
       Alert.alert("Error", "La cantidad debe ser mayor a 0");
       return;
     }
-    if (operationType === "intercambio") {
-      setIntercambioModalOpen(true);
-    } else if (operationType === "prestamo") {
-      setPrestamoModalOpen(true);
-    }
+
+    console.log("[EnvaseOp] ✅ Cantidad válida:", cantNum);
+
+    const handleConfirmQuantity = () => {
+      console.log("[EnvaseOp] 🔵 handleConfirmQuantity iniciado");
+      console.log("[EnvaseOp] operationType:", operationType);
+
+      if (operationType === "intercambio") {
+        console.log("[EnvaseOp] 📦 Procesando intercambio");
+        // Calcular costo automático del envase XALLAPAN (clave_prod 16001, id 18)
+        const CLAVE_ENVASE_XALLAPAN = 16001;
+
+        // Primero buscar el producto por su clave_prod para obtener su ID
+        const productos = FullSyncService.getProductos(1000000);
+        const productoEnvase = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_ENVASE_XALLAPAN);
+
+        if (!productoEnvase) {
+          console.warn(`[EnvaseOp] No se encontró producto con clave ${CLAVE_ENVASE_XALLAPAN}`);
+          setCostoIntercambioCalculado(0);
+          setIntercambioModalOpen(true);
+        } else {
+          const idProductoEnvase = productoEnvase.id; // Este es el ID que se usa en la tabla Precio (18)
+
+          const listaPrecios = selectedClient?.listaPrecio ?? 0;
+          const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient?.id || 0);
+          const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
+          const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
+
+          // Buscar precio del envase XALLAPAN con jerarquía: promo -> cliente -> default
+          // NOTA: En la tabla Precio, el campo claveProd contiene el ID del producto, no la clave_prod
+          let costoCalculado = 0;
+
+          // 1. Precio promocional
+          const precioPromo = preciosPromo?.find((p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase);
+          if (precioPromo) {
+            costoCalculado = precioPromo.precio || 0;
+          }
+          // 2. Precio del cliente
+          else {
+            const precioCliente = preciosCliente?.find(
+              (p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase,
+            );
+            if (precioCliente) {
+              costoCalculado = precioCliente.precio || 0;
+            }
+            // 3. Precio por defecto
+            else {
+              const precioDefault = preciosDefault?.find(
+                (p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase,
+              );
+              if (precioDefault) {
+                costoCalculado = precioDefault.precio || 0;
+              }
+            }
+          }
+
+          console.log(
+            `[EnvaseOp] Producto XALLAPAN - clave_prod: ${CLAVE_ENVASE_XALLAPAN}, id: ${idProductoEnvase}, costo: $${costoCalculado.toFixed(
+              2,
+            )}`,
+          );
+          console.log("[EnvaseOp] 🔵 Estableciendo costo:", costoCalculado);
+          setCostoIntercambioCalculado(costoCalculado);
+          console.log("[EnvaseOp] 🚀 Abriendo modal de intercambio (setTimeout)");
+          setTimeout(() => {
+            console.log("[EnvaseOp] ⏱️ setTimeout ejecutado, setIntercambioModalOpen(true)");
+            setIntercambioModalOpen(true);
+          }, 100);
+          console.log("[EnvaseOp] ✅ setTimeout registrado");
+        }
+      } else if (operationType === "prestamo") {
+        console.log("[EnvaseOp] 📦 Procesando préstamo");
+        console.log("[EnvaseOp] 🚀 Abriendo modal de préstamo");
+        setPrestamoModalOpen(true);
+      }
+    };
+    console.log("[EnvaseOp] 🔵 Llamando handleConfirmQuantity");
+    handleConfirmQuantity();
+    console.log("[EnvaseOp] ✅ handleContinueToModal completado");
   };
 
   const handleIntercambioAccept = async (data: {
@@ -214,6 +300,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
     observacion: string;
+    costo: number;
   }) => {
     setIntercambioModalOpen(false);
     setIntercambioData(data);
@@ -240,6 +327,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       envaseRecibidoClave: number;
       envaseRecibidoDesc: string;
       observacion: string;
+      costo: number;
     } | null,
     prestamo: {
       idProdPrestado: number;
@@ -287,6 +375,9 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
         console.error("[EnvaseOp] Error al obtener ubicación:", locationError);
       }
 
+      // Precio de la venta: para intercambio usar el costo calculado del modal
+      const precioVenta = type === "intercambio" && intercambio ? intercambio.costo : 0;
+
       // Print ticket
       try {
         await TicketPrinter.printSaleTicket({
@@ -296,11 +387,11 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
             {
               description: descripcionVenta,
               quantity: cantNum,
-              price: 0,
-              total: 0,
+              price: precioVenta,
+              total: precioVenta * cantNum,
             },
           ],
-          total: 0,
+          total: precioVenta * cantNum,
           businessName: APP_NAME,
           date: now,
           ticketNumber: String(saleIdMovil),
@@ -323,8 +414,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           claveProd: idProductoVenta,
           nombreProducto: descripcionVenta,
           cantProducto: cantNum,
-          precio: 0,
-          importe: 0,
+          precio: precioVenta,
+          importe: precioVenta * cantNum,
           cveCliente: selectedClient.id,
           nombreCliente: selectedClient.nombre,
           fecha: now,
@@ -366,7 +457,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           folioMovto: 1,
           cantidadEntrada: 0,
           cantidadSalida: cantNum,
-          costo: 0,
+          costo: intercambio.costo,
           tipoMovto: 1100,
           idMovil: saleIdMovil,
           observacion: intercambio.observacion || "",
@@ -378,7 +469,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           folioMovto: 1,
           cantidadEntrada: cantNum,
           cantidadSalida: 0,
-          costo: 0,
+          costo: intercambio.costo,
           tipoMovto: 1000,
           idMovil: saleIdMovil,
           observacion: intercambio.observacion || "",
@@ -756,12 +847,18 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       {step === "processing" && renderProcessing()}
 
       {/* Modals */}
-      <IntercambioEnvaseModal
-        visible={intercambioModalOpen}
-        cantidad={parseInt(cantidad, 10) || 1}
-        onAccept={handleIntercambioAccept}
-        onCancel={() => setIntercambioModalOpen(false)}
-      />
+      {intercambioModalOpen && (
+        <IntercambioEnvaseModal
+          visible={intercambioModalOpen}
+          cantidad={parseInt(cantidad, 10) || 1}
+          costoAutomatico={costoIntercambioCalculado}
+          onAccept={handleIntercambioAccept}
+          onCancel={() => {
+            console.log("[EnvaseOp] ❌ Modal cancelado por usuario");
+            setIntercambioModalOpen(false);
+          }}
+        />
+      )}
 
       <PrestamoEnvaseModal
         visible={prestamoModalOpen}

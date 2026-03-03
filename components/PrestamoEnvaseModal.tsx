@@ -43,12 +43,14 @@ export default function PrestamoEnvaseModal({
   const [observacion, setObservacion] = useState("");
   const [fechaDevolucion, setFechaDevolucion] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [sinFecha, setSinFecha] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setObservacion("");
       setFechaDevolucion(new Date());
       setShowDatePicker(false);
+      setSinFecha(false);
 
       // Buscar producto por claveProd 16001
       const prod = FullSyncService.getProductoByClaveProd("16001");
@@ -78,7 +80,7 @@ export default function PrestamoEnvaseModal({
       claveProdPrestado,
       descProdPrestado,
       observacion: observacion.trim(),
-      fechaDevolucion: formatDate(fechaDevolucion),
+      fechaDevolucion: sinFecha ? "" : formatDate(fechaDevolucion),
     });
   };
 
@@ -136,18 +138,35 @@ export default function PrestamoEnvaseModal({
 
             {/* Fecha devolución estimada */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>FECHA DEVOLUCION ESTIMADO</Text>
-              <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
-                <Text style={styles.datePickerText}>{formatDisplayDate(fechaDevolucion)}</Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={fechaDevolucion}
-                  mode="date"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onChange={onDateChange}
-                  minimumDate={new Date()}
-                />
+              <View style={styles.labelRow}>
+                <Text style={styles.sectionLabel}>FECHA DEVOLUCION ESTIMADO</Text>
+                <TouchableOpacity style={styles.sinFechaCheckbox} onPress={() => setSinFecha(!sinFecha)}>
+                  <View style={[styles.checkbox, sinFecha && styles.checkboxChecked]}>
+                    {sinFecha && <Text style={styles.checkmark}>✓</Text>}
+                  </View>
+                  <Text style={styles.sinFechaLabel}>Sin fecha</Text>
+                </TouchableOpacity>
+              </View>
+              {!sinFecha && (
+                <>
+                  <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+                    <Text style={styles.datePickerText}>{formatDisplayDate(fechaDevolucion)}</Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={fechaDevolucion}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      onChange={onDateChange}
+                      minimumDate={new Date()}
+                    />
+                  )}
+                </>
+              )}
+              {sinFecha && (
+                <View style={styles.sinFechaInfo}>
+                  <Text style={styles.sinFechaInfoText}>No se registrará fecha de devolución</Text>
+                </View>
               )}
             </View>
 
@@ -277,5 +296,51 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 14,
+  },
+  labelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: SPACING.xs,
+  },
+  sinFechaCheckbox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.primary,
+  },
+  checkmark: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  sinFechaLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: "600",
+  },
+  sinFechaInfo: {
+    backgroundColor: "#FFF3E0",
+    borderRadius: BORDER_RADIUS.s,
+    padding: SPACING.m,
+    borderLeftWidth: 3,
+    borderLeftColor: "#FF9800",
+  },
+  sinFechaInfoText: {
+    fontSize: 12,
+    color: "#E65100",
+    fontStyle: "italic",
   },
 });

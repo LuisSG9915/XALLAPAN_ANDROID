@@ -367,6 +367,26 @@ export const InventarioEnvaseSchema = {
   primaryKey: "id",
 };
 
+export const ReubicacionSchema = {
+  name: "Reubicacion",
+  properties: {
+    id: "string",
+    sucursal: "int",
+    cveCliente: "int",
+    latitudAnterior: "float?",
+    longitudAnterior: "float?",
+    latitudNueva: "float",
+    longitudNueva: "float",
+    fecha: "date",
+    usuario: "int",
+    realizado: "bool",
+    idMovil: "int?",
+    fechaTransfer: "date",
+    enviado: "bool",
+  },
+  primaryKey: "id",
+};
+
 export const ALL_SCHEMAS = [
   VentaSchema,
   UsuarioSchema,
@@ -387,4 +407,5 @@ export const ALL_SCHEMAS = [
   BitacoraSyncSchema,
   BitacoraGpsSchema,
   InventarioEnvaseSchema,
+  ReubicacionSchema,
 ];

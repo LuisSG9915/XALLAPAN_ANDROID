@@ -20,6 +20,7 @@ import AuthService, { Usuario } from "../services/AuthService";
 import LocationService, { LocationCoordinates } from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
+import ReubicacionService from "../services/ReubicacionService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 import IntercambioEnvaseModal from "./IntercambioEnvaseModal";
 import PrestamoEnvaseModal from "./PrestamoEnvaseModal";
@@ -87,6 +88,8 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
   const [loadingAgendados, setLoadingAgendados] = useState(false);
+  const [clienteYaReubicado, setClienteYaReubicado] = useState(false);
+  const [reubicandoCliente, setReubicandoCliente] = useState(false);
 
   // Visitar flow (tipo visita modal, como CumplimientoScreen)
   const [tipoVisitaModalOpen, setTipoVisitaModalOpen] = useState(false);
@@ -103,6 +106,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
     observacion: string;
+    costo: number;
   } | null>(null);
   const intercambioDataRef = useRef<{
     envaseEntregadoClave: number;
@@ -110,8 +114,10 @@ export default function SalesScreen({ route }: { route?: any }) {
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
     observacion: string;
+    costo: number;
   } | null>(null);
   const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
+  const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
 
   // Prestamo de envases (clave 1001)
   const [prestamoModalOpen, setPrestamoModalOpen] = useState(false);
@@ -127,6 +133,37 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   // Ref para evitar que el useEffect de route.params se ejecute dos veces
   const clienteParamsProcessed = useRef(false);
+
+  const obtenerPrecioProducto = useCallback(
+    (idProducto: number, preciosPromo?: any[], preciosCliente?: any[], preciosDefault?: any[]): number => {
+      // JERARQUÍA DE PRECIOS (igual que en buildProductosFormateados):
+      // 1. Precio promocional (PrecioPromo)
+      // 2. Precio de lista del cliente (Precio)
+      // 3. Precio por defecto (lista 13 - DOMIC.)
+      // NOTA: En la tabla Precio, el campo claveProd contiene el ID del producto, no la clave_prod
+
+      // Mapa de precios promocionales
+      if (preciosPromo) {
+        const precioPromo = preciosPromo.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+        if (precioPromo) return precioPromo.precio || 0;
+      }
+
+      // Mapa de precios del cliente
+      if (preciosCliente) {
+        const precioCliente = preciosCliente.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+        if (precioCliente) return precioCliente.precio || 0;
+      }
+
+      // Precio por defecto
+      if (preciosDefault) {
+        const precioDefault = preciosDefault.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+        if (precioDefault) return precioDefault.precio || 0;
+      }
+
+      return 0;
+    },
+    [],
+  );
 
   const buildProductosFormateados = useCallback(
     (
@@ -411,6 +448,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
         const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
         console.log(`[Sales] Visitas recargadas: ${visitasDelDia.length}`);
+        console.log(visitasDelDia);
         const clientesData = FullSyncService.getClientesFull(10000);
         const clientesFormateados = clientesData.map((c: any) => ({
           id: c.id,
@@ -764,7 +802,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         Alert.alert("Error", "No se pudo marcar la visita");
       }
     } else {
-      // Cliente no agendado: solo registrar en DetalleVisitas
+      // Cliente no agendado: registrar en DetalleVisitas y actualizar estado local
       try {
         await DetalleVisitasService.getInstance().registrarVisitaCompleta(
           clienteParaVisitar.id,
@@ -773,6 +811,20 @@ export default function SalesScreen({ route }: { route?: any }) {
           tipoVisitaSeleccionado,
         );
         console.log(`[Sales] Visita registrada (no agendado) para cliente ${clienteParaVisitar.id}`);
+
+        // Agregar al mapa y set para que la UI lo muestre como visitado
+        const visitaLocal = { idCliente: clienteParaVisitar.id, visitado: 1, tipo: tipoVisitaSeleccionado };
+        setVisitasDelDiaMap((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(clienteParaVisitar!.id, visitaLocal);
+          return newMap;
+        });
+        setVisitasDelDiaIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(clienteParaVisitar!.id);
+          return newSet;
+        });
+
         Alert.alert("Éxito", "Visita registrada correctamente");
       } catch (error) {
         console.error("[Sales] Error al registrar visita:", error);
@@ -1044,6 +1096,99 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
   };
 
+  useEffect(() => {
+    if (selectedClient) {
+      const yaReubicado = ReubicacionService.getInstance().clienteYaReubicado(selectedClient.id);
+      setClienteYaReubicado(yaReubicado);
+      console.log(`[Sales] Cliente ${selectedClient.id} ya reubicado: ${yaReubicado}`);
+    } else {
+      setClienteYaReubicado(false);
+    }
+  }, [selectedClient]);
+
+  const handleReubicarCliente = async () => {
+    if (!selectedClient || !currentUser) {
+      Alert.alert("Error", "No hay un cliente seleccionado");
+      return;
+    }
+
+    if (clienteYaReubicado) {
+      Alert.alert(
+        "Cliente ya reubicado",
+        "Este cliente ya fue reubicado anteriormente. Solo se puede reubicar una vez.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Reubicar Cliente",
+      `¿Deseas actualizar la ubicación del cliente ${selectedClient.nombre}?\n\nSe guardará tu ubicación GPS actual como la nueva ubicación del cliente.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Reubicar",
+          onPress: async () => {
+            setReubicandoCliente(true);
+            try {
+              console.log("[Sales] Obteniendo ubicación GPS para reubicación...");
+              const ubicacion = await LocationService.getBestLocation();
+
+              if (!ubicacion) {
+                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+                setReubicandoCliente(false);
+                return;
+              }
+
+              console.log("[Sales] Ubicación obtenida:", ubicacion);
+
+              const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
+                currentSucursal,
+                selectedClient.id,
+                selectedClient.latitud ?? null,
+                selectedClient.longitud ?? null,
+                ubicacion.latitude,
+                ubicacion.longitude,
+                currentUser.id,
+              );
+
+              if (reubicacionId) {
+                setClienteYaReubicado(true);
+
+                const updatedCliente = {
+                  ...selectedClient,
+                  latitud: ubicacion.latitude,
+                  longitud: ubicacion.longitude,
+                };
+                setSelectedClient(updatedCliente);
+
+                Alert.alert(
+                  "¡Reubicación exitosa!",
+                  `Cliente reubicado correctamente.\n\nNuevas coordenadas:\nLatitud: ${ubicacion.latitude.toFixed(
+                    6,
+                  )}\nLongitud: ${ubicacion.longitude.toFixed(
+                    6,
+                  )}\n\nLa reubicación se sincronizará automáticamente con el servidor.`,
+                );
+
+                console.log("[Sales] ✅ Cliente reubicado exitosamente");
+              } else {
+                Alert.alert(
+                  "Error",
+                  "No se pudo registrar la reubicación. Es posible que el cliente ya haya sido reubicado.",
+                );
+              }
+            } catch (error) {
+              console.error("[Sales] Error al reubicar cliente:", error);
+              Alert.alert("Error", "Ocurrió un error al intentar reubicar el cliente.");
+            } finally {
+              setReubicandoCliente(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const total = useMemo(() => cart.reduce((acc, it) => acc + it.precio * it.cantidad, 0), [cart]);
 
   const addProduct = (p: Producto) => {
@@ -1163,7 +1308,37 @@ export default function SalesScreen({ route }: { route?: any }) {
     // Verificar si el carrito tiene producto INTERCAMBIO (clave 1000) y aún no se ha llenado el modal
     const itemIntercambio = cart.find((ci) => ci.claveProd === "1000" || ci.id === 55);
     if (itemIntercambio && !intercambioData && !intercambioDataRef.current) {
-      console.log("[Sales] Producto INTERCAMBIO detectado, mostrando modal de intercambio");
+      console.log("[Sales] Producto INTERCAMBIO detectado, calculando costo y mostrando modal");
+
+      // Calcular costo automático del envase XALLAPAN (clave_prod 16001, id 18)
+      const CLAVE_ENVASE_XALLAPAN = 16001;
+
+      // Primero buscar el producto por su clave_prod para obtener su ID
+      const productos = FullSyncService.getProductos(1000000);
+      const productoEnvase = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_ENVASE_XALLAPAN);
+
+      if (!productoEnvase) {
+        console.warn(`[Sales] No se encontró producto con clave ${CLAVE_ENVASE_XALLAPAN}`);
+        setCostoIntercambioCalculado(0);
+      } else {
+        const idProductoEnvase = productoEnvase.id; // Este es el ID que se usa en la tabla Precio (18)
+
+        const listaPrecios = selectedClient?.listaPrecio ?? 0;
+        const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient?.id || 0);
+        const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
+        const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
+
+        // Buscar precio usando el ID del producto (no la clave_prod)
+        const costoCalculado = obtenerPrecioProducto(idProductoEnvase, preciosPromo, preciosCliente, preciosDefault);
+
+        console.log(
+          `[Sales] Producto XALLAPAN - clave_prod: ${CLAVE_ENVASE_XALLAPAN}, id: ${idProductoEnvase}, costo: $${costoCalculado.toFixed(
+            2,
+          )}`,
+        );
+        setCostoIntercambioCalculado(costoCalculado);
+      }
+
       setPendingIntercambioCantidad(itemIntercambio.cantidad);
       setIntercambioModalOpen(true);
       return;
@@ -1421,28 +1596,34 @@ export default function SalesScreen({ route }: { route?: any }) {
       }
 
       await FullSyncService.createLocalVentas(
-        validCart.map((item, index) => ({
-          id: saleIdMovil + index,
-          sucursal,
-          noVenta: 0,
-          idMovil: saleIdMovil,
-          claveProd: item.id, // Usar el id del producto, no claveProd
-          nombreProducto: item.descripcion,
-          cantProducto: item.cantidad,
-          precio: parseFloat(item.precio.toString()) || 0,
-          importe: parseFloat((item.precio * item.cantidad).toString()) || 0,
-          cveCliente: client.id,
-          nombreCliente: client.nombre,
-          fecha: now,
-          tipoPago: tipoPagoCode,
-          descripcionMedioPago,
-          vendedor,
-          folioFactura: false,
-          facturacionMovil: false,
-          latitud: coordinates?.latitude ?? null,
-          longitud: coordinates?.longitude ?? null,
-          observacion: observacionVenta,
-        })),
+        validCart.map((item, index) => {
+          const esIntercambio = parseInt(item.claveProd || "0", 10) === 1000 || item.id === 55;
+          const precioItem = esIntercambio
+            ? intercambioDataRef.current?.costo ?? costoIntercambioCalculado
+            : parseFloat(item.precio.toString()) || 0;
+          return {
+            id: saleIdMovil + index,
+            sucursal,
+            noVenta: 0,
+            idMovil: saleIdMovil,
+            claveProd: item.id, // Usar el id del producto, no claveProd
+            nombreProducto: item.descripcion,
+            cantProducto: item.cantidad,
+            precio: precioItem,
+            importe: precioItem * item.cantidad,
+            cveCliente: client.id,
+            nombreCliente: client.nombre,
+            fecha: now,
+            tipoPago: tipoPagoCode,
+            descripcionMedioPago,
+            vendedor,
+            folioFactura: false,
+            facturacionMovil: false,
+            latitud: coordinates?.latitude ?? null,
+            longitud: coordinates?.longitude ?? null,
+            observacion: observacionVenta,
+          };
+        }),
       );
       ventasCreadas = true;
       console.log("[Sales] ✅ Ventas locales creadas exitosamente");
@@ -1478,7 +1659,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             folioMovto: 1,
             cantidadEntrada: 0,
             cantidadSalida: cantIntercambio,
-            costo: 0,
+            costo: currentIntercambioData.costo || 0,
             tipoMovto: 1100,
             idMovil: saleIdMovil,
             observacion: currentIntercambioData.observacion || "",
@@ -1490,7 +1671,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             folioMovto: 1,
             cantidadEntrada: cantIntercambio,
             cantidadSalida: 0,
-            costo: 0,
+            costo: currentIntercambioData.costo || 0,
             tipoMovto: 1000,
             idMovil: saleIdMovil,
             observacion: currentIntercambioData.observacion || "",
@@ -1708,7 +1889,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         {!printerConnected && (
           <View style={styles.warningCard}>
             <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>Sin impresora. Los tickets se compartirán o deberás configurar una.</Text>
+            <Text style={styles.warningText}>Sin impresora. Debes configurar una.</Text>
           </View>
         )}
 
@@ -1746,16 +1927,31 @@ export default function SalesScreen({ route }: { route?: any }) {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            <TouchableOpacity
-              style={styles.smallBtn}
-              onPress={() => {
-                setClienteModalOpen(true);
-                setClienteTabActivo("agendados");
-                setFilteredClientes(clientesEntregaDia);
-              }}
-            >
-              <Text style={styles.smallBtnText}>Cambiar</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              {selectedClient && (
+                <TouchableOpacity
+                  style={[styles.smallBtn, styles.reubicarBtn, clienteYaReubicado && styles.smallBtnDisabled]}
+                  onPress={handleReubicarCliente}
+                  disabled={clienteYaReubicado || reubicandoCliente}
+                >
+                  {reubicandoCliente ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.smallBtnText}>{clienteYaReubicado ? "✓ Reubicado" : "📍 Reubicar"}</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.smallBtn}
+                onPress={() => {
+                  setClienteModalOpen(true);
+                  setClienteTabActivo("agendados");
+                  setFilteredClientes(clientesEntregaDia);
+                }}
+              >
+                <Text style={styles.smallBtnText}>Cambiar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
         </View>
@@ -2016,7 +2212,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               {/* Lista de clientes según tab activo */}
               {clienteTabActivo === "cercanos" ? (
                 <FlatList
-                  data={nearestClientes.filter((c) => visitasDelDiaMap.get(c.id)?.visitado !== 1)}
+                  data={nearestClientes}
                   keyExtractor={(i) => String(i.id)}
                   renderItem={({ item }) => {
                     const esAgendado = visitasDelDiaIds.has(item.id);
@@ -2454,6 +2650,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         <IntercambioEnvaseModal
           visible={intercambioModalOpen}
           cantidad={pendingIntercambioCantidad}
+          costoAutomatico={costoIntercambioCalculado}
           onAccept={(data) => {
             console.log("[Sales] Intercambio aceptado:", data);
             const dataObj = {
@@ -2462,13 +2659,18 @@ export default function SalesScreen({ route }: { route?: any }) {
               envaseRecibidoClave: data.envaseRecibidoClave,
               envaseRecibidoDesc: data.envaseRecibidoDesc,
               observacion: data.observacion,
+              costo: data.costo,
             };
-            // Set ref synchronously so processSale can read it immediately
             intercambioDataRef.current = dataObj;
             setIntercambioData(dataObj);
+            // Actualizar el precio del item de intercambio en el carrito
+            setCart((prev) =>
+              prev.map((ci) =>
+                parseInt(ci.claveProd || "0", 10) === 1000 || ci.id === 55 ? { ...ci, precio: data.costo } : ci,
+              ),
+            );
             setIntercambioModalOpen(false);
-            // Continuar con processSale ahora que tenemos los datos (ref ya tiene el valor)
-            setTimeout(() => processSale(), 200);
+            // El usuario debe presionar "Procesar venta" manualmente
           }}
           onCancel={() => {
             console.log("[Sales] Intercambio cancelado");
@@ -2659,13 +2861,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   smallBtn: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.secondary,
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
     borderRadius: BORDER_RADIUS.m,
+    alignItems: "center",
   },
-  smallBtnDisabled: { opacity: 0.5 },
-  smallBtnText: { color: "#fff", fontWeight: "600", fontSize: 12 },
+  smallBtnDisabled: {
+    opacity: 0.5,
+  },
+  smallBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  reubicarBtn: {
+    backgroundColor: "#2196F3",
+    minWidth: 90,
+  },
   muted: { color: COLORS.muted, fontStyle: "italic" },
   cartList: { marginTop: SPACING.s },
   cartRow: {

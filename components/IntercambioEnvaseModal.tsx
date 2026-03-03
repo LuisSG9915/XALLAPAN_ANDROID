@@ -12,29 +12,40 @@ type EnvaseProducto = {
 type IntercambioEnvaseModalProps = {
   visible: boolean;
   cantidad: number;
+  costoAutomatico: number;
   onAccept: (data: {
     envaseEntregadoClave: number;
     envaseEntregadoDesc: string;
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
     observacion: string;
+    costo: number;
   }) => void;
   onCancel: () => void;
 };
 
-const CLAVE_ENVASE_XALLAPAN = 16011;
+const CLAVE_ENVASE_XALLAPAN = 16001;
 const DESC_ENVASE_XALLAPAN = "CAMBIO DE ENVASE XALLAPAN";
 
-export default function IntercambioEnvaseModal({ visible, cantidad, onAccept, onCancel }: IntercambioEnvaseModalProps) {
+export default function IntercambioEnvaseModal({
+  visible,
+  cantidad,
+  costoAutomatico,
+  onAccept,
+  onCancel,
+}: IntercambioEnvaseModalProps) {
   const [envasesDisponibles, setEnvasesDisponibles] = useState<EnvaseProducto[]>([]);
   const [envaseRecibido, setEnvaseRecibido] = useState<EnvaseProducto | null>(null);
   const [observacion, setObservacion] = useState("");
   const [mostrarLista, setMostrarLista] = useState(false);
 
   useEffect(() => {
+    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoAutomatico:", costoAutomatico);
     if (visible) {
+      console.log("[IntercambioModal] ✅ Modal visible, cargando productos envase...");
       // Cargar productos que tienen envaseRecibe = 1
       const productos = FullSyncService.getProductosEnvaseRecibe(50);
+      console.log("[IntercambioModal] Productos envase encontrados:", productos.length);
       const formateados: EnvaseProducto[] = productos
         .filter((p: any) => {
           const clave = parseInt(p.claveProd || "0", 10);
@@ -46,12 +57,14 @@ export default function IntercambioEnvaseModal({ visible, cantidad, onAccept, on
           claveProd: p.claveProd || String(p.id),
           descripcion: p.descripcion || "Sin descripción",
         }));
+      console.log("[IntercambioModal] Productos formateados:", formateados.length);
       setEnvasesDisponibles(formateados);
       setEnvaseRecibido(null);
       setObservacion("");
       setMostrarLista(false);
+      console.log("[IntercambioModal] ✅ Estado reseteado");
     }
-  }, [visible]);
+  }, [visible, costoAutomatico]);
 
   const handleAccept = () => {
     if (!envaseRecibido) return;
@@ -61,6 +74,7 @@ export default function IntercambioEnvaseModal({ visible, cantidad, onAccept, on
       envaseRecibidoClave: parseInt(envaseRecibido.claveProd || "0", 10),
       envaseRecibidoDesc: envaseRecibido.descripcion,
       observacion: observacion.trim(),
+      costo: costoAutomatico,
     });
   };
 
@@ -111,6 +125,15 @@ export default function IntercambioEnvaseModal({ visible, cantidad, onAccept, on
                 />
               </View>
             )}
+          </View>
+
+          {/* Costo automático */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>COSTO (AUTOMÁTICO SEGÚN PRECIO CLIENTE):</Text>
+            <View style={styles.fixedValue}>
+              <Text style={styles.fixedValueText}>${costoAutomatico.toFixed(2)}</Text>
+              <Text style={styles.fixedValueSub}>Calculado según lista de precios del cliente</Text>
+            </View>
           </View>
 
           {/* Observación */}

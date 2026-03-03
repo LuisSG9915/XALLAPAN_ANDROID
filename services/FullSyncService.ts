@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 20,
+        schemaVersion: 21,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -93,6 +93,10 @@ class FullSyncService {
       // Inyectar a CierreRutaService
       const CierreRutaService = (await import("./CierreRutaService")).default;
       CierreRutaService.setRealm(this.realm);
+
+      // Inyectar a ReubicacionService
+      const ReubicacionService = (await import("./ReubicacionService")).default;
+      ReubicacionService.getInstance().setRealm(this.realm);
 
       console.log("✅ Realm inyectado a todos los servicios");
     } catch (error) {
