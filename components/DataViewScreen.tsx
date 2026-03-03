@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  RefreshControl,
-  Alert,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, RefreshControl, Alert } from "react-native";
 // import Clipboard from "@react-native-clipboard/clipboard"; // TODO: Re-enable when TurboModule issue is fixed
 import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
@@ -79,9 +70,7 @@ export default function DataViewScreen() {
         const user = await AuthService.restoreSession();
         if (user) {
           const sucursal =
-            (user.sucursal_origen as number | null | undefined) ??
-            (user.sucursal as number | null | undefined) ??
-            1;
+            (user.sucursal_origen as number | null | undefined) ?? (user.sucursal as number | null | undefined) ?? 1;
           setCurrentSucursal(sucursal);
           console.log(`[DataViewScreen] Sucursal actual: ${sucursal}`);
         }
@@ -142,10 +131,7 @@ export default function DataViewScreen() {
           setData(FullSyncService.getCierreRutaPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "visitas":
-          const visitas = await VisitaSyncService.getInstance().getVisitasByFecha(
-            new Date(),
-            currentSucursal
-          );
+          const visitas = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), currentSucursal);
           setData(visitas);
           break;
         case "detalleVisitas":
@@ -158,10 +144,7 @@ export default function DataViewScreen() {
           setData(FullSyncService.getBitacoraSyncPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "cumplimiento":
-          const stats = await VisitaSyncService.getInstance().getEstadisticasCumplimiento(
-            new Date(),
-            currentSucursal
-          );
+          const stats = await VisitaSyncService.getInstance().getEstadisticasCumplimiento(new Date(), currentSucursal);
           setData([stats]);
           break;
       }
@@ -246,12 +229,10 @@ export default function DataViewScreen() {
         <Text style={styles.cardText}>SyncLog ID: {item.syncLogId}</Text>
         <Text style={styles.cardText}>ID Bitácora: {item.id}</Text>
         <Text style={styles.cardText}>Endpoint: {item.endpoint || "N/A"}</Text>
+        <Text style={styles.cardText}>Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}</Text>
         <Text style={styles.cardText}>
-          Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
-        </Text>
-        <Text style={styles.cardText}>
-          Leídos: {item.registrosLeidos ?? 0} | Guardados: {item.registrosGuardados ?? 0}{" "}
-          | Actualizados: {item.registrosActualizados ?? 0}
+          Leídos: {item.registrosLeidos ?? 0} | Guardados: {item.registrosGuardados ?? 0} | Actualizados:{" "}
+          {item.registrosActualizados ?? 0}
         </Text>
         <Text style={styles.cardText}>
           Estado:{" "}
@@ -260,13 +241,9 @@ export default function DataViewScreen() {
           </Text>
         </Text>
         {!item.exitoso && item.razon ? (
-          <Text style={[styles.cardText, { color: COLORS.error }]}>
-            Razón: {item.razon}
-          </Text>
+          <Text style={[styles.cardText, { color: COLORS.error }]}>Razón: {item.razon}</Text>
         ) : null}
-        {item.detalles ? (
-          <Text style={styles.cardText}>Detalles: {item.detalles}</Text>
-        ) : null}
+        {item.detalles ? <Text style={styles.cardText}>Detalles: {item.detalles}</Text> : null}
       </View>
     </View>
   );
@@ -281,9 +258,7 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Grupo: {item.idGrupo || "N/A"}</Text>
           <Text style={styles.cardText}>Crédito: {item.credito ? "Sí" : "No"}</Text>
-          <Text style={styles.cardText}>
-            Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}
-          </Text>
+          <Text style={styles.cardText}>Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}</Text>
           {item.latitud && item.longitud ? (
             <Text style={styles.cardText}>
               Ubicación: {item.latitud.toFixed(4)}, {item.longitud.toFixed(4)}
@@ -304,9 +279,7 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID: {item.id}</Text>
           <Text style={styles.cardText}>Es Kit: {item.esKit ? "Sí" : "No"}</Text>
-          <Text style={styles.cardText}>
-            Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -339,9 +312,7 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
           <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
-          <Text style={styles.cardText}>
-            Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Actualizado: {item.fechaAct?.toLocaleDateString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -357,9 +328,7 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>ID: {item.id}</Text>
           <Text style={styles.cardPrice}>Saldo: {item.saldo}</Text>
-          <Text style={styles.cardText}>
-            Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Fecha Arrastre: {item.fechaArrastre?.toLocaleString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -376,16 +345,14 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
           <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
           <Text style={styles.cardText}>No. Venta: {item.noVenta}</Text>
-          <Text style={styles.cardText}>
-            Fecha: {item.fecha?.toLocaleDateString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Fecha: {item.fecha?.toLocaleDateString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
   const renderUsuario = ({ item }: { item: any }) => (
-    <TouchableOpacity onPress={() => console.log(item)}>
+    <TouchableOpacity onPress={() => consoleRealm("s", item)}>
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{item.nombre}</Text>
@@ -409,9 +376,7 @@ export default function DataViewScreen() {
         </View>
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Ruta: {item.ruta}</Text>
-          <Text style={styles.cardText}>
-            Visitado: {item.visitado ? "✅ Sí" : "❌ No"}
-          </Text>
+          <Text style={styles.cardText}>Visitado: {item.visitado ? "✅ Sí" : "❌ No"}</Text>
           <Text style={styles.cardText}>Lunes: {item.l ? "✅" : "❌"}</Text>
           <Text style={styles.cardText}>Martes: {item.m ? "✅" : "❌"}</Text>
           <Text style={styles.cardText}>Miércoles: {item.mi ? "✅" : "❌"}</Text>
@@ -419,11 +384,7 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>Viernes: {item.v ? "✅" : "❌"}</Text>
           <Text style={styles.cardText}>Sábado: {item.s ? "✅" : "❌"}</Text>
           <Text style={styles.cardText}>Domingo: {item.d ? "✅" : "❌"}</Text>
-          {item.fecha && (
-            <Text style={styles.cardText}>
-              Fecha: {new Date(item.fecha).toLocaleDateString()}
-            </Text>
-          )}
+          {item.fecha && <Text style={styles.cardText}>Fecha: {new Date(item.fecha).toLocaleDateString()}</Text>}
         </View>
       </View>
     </TouchableOpacity>
@@ -441,8 +402,7 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>Clave Producto: {item.claveProd}</Text>
           <Text style={styles.cardText}>Descuento: {item.descuento || 0}%</Text>
           <Text style={styles.cardText}>
-            Vigencia: {item.fechaInicio?.toLocaleDateString()} -{" "}
-            {item.fechaFin?.toLocaleDateString()}
+            Vigencia: {item.fechaInicio?.toLocaleDateString()} - {item.fechaFin?.toLocaleDateString()}
           </Text>
         </View>
       </View>
@@ -454,19 +414,12 @@ export default function DataViewScreen() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{item.id}</Text>
-          <Text
-            style={[
-              styles.cardSubtitle,
-              { color: item.status === "completed" ? COLORS.success : COLORS.error },
-            ]}
-          >
+          <Text style={[styles.cardSubtitle, { color: item.status === "completed" ? COLORS.success : COLORS.error }]}>
             {item.status}
           </Text>
         </View>
         <View style={styles.cardBody}>
-          <Text style={styles.cardText}>
-            Última Sync: {item.lastSyncDate?.toLocaleString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Última Sync: {item.lastSyncDate?.toLocaleString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -480,15 +433,9 @@ export default function DataViewScreen() {
           <Text style={styles.cardSubtitle}>{item.tipo}</Text>
         </View>
         <View style={styles.cardBody}>
-          <Text style={styles.cardText}>
-            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Fin: {item.fechaFinal?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Fin: {item.fechaFinal?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}</Text>
           <Text style={styles.cardText}>Total Registros: {item.totalRegistros || 0}</Text>
           <Text style={styles.cardText}>
             Estado:{" "}
@@ -506,24 +453,15 @@ export default function DataViewScreen() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>Ruta {item.id}</Text>
-          <Text
-            style={[
-              styles.cardSubtitle,
-              { color: item.rutaCerrada ? COLORS.error : COLORS.success },
-            ]}
-          >
+          <Text style={[styles.cardSubtitle, { color: item.rutaCerrada ? COLORS.error : COLORS.success }]}>
             {item.rutaCerrada ? "🔒 Cerrada" : "🔓 Abierta"}
           </Text>
         </View>
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
           <Text style={styles.cardText}>Vendedor: {item.vendedor}</Text>
-          <Text style={styles.cardText}>
-            Fecha Cierre: {item.fechaCierre?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Actualizado: {item.updatedAt?.toLocaleString() || "N/A"}
-          </Text>
+          <Text style={styles.cardText}>Fecha Cierre: {item.fechaCierre?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Actualizado: {item.updatedAt?.toLocaleString() || "N/A"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -540,15 +478,9 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>Usuario: {item.idUsuario}</Text>
           <Text style={styles.cardText}>Ruta: {item.idRuta}</Text>
           <Text style={styles.cardText}>Tipo: {item.tipoVisita}</Text>
-          <Text style={styles.cardText}>
-            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Fin: {item.fechaFin?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Sincronizado: {item.syncedAt?.toLocaleString() || "Pendiente"}
-          </Text>
+          <Text style={styles.cardText}>Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Fin: {item.fechaFin?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Sincronizado: {item.syncedAt?.toLocaleString() || "Pendiente"}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -570,12 +502,7 @@ export default function DataViewScreen() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{item.tabla}</Text>
-          <Text
-            style={[
-              styles.cardSubtitle,
-              { color: item.exitoso ? COLORS.success : COLORS.error },
-            ]}
-          >
+          <Text style={[styles.cardSubtitle, { color: item.exitoso ? COLORS.success : COLORS.error }]}>
             {item.exitoso ? "✅" : "❌"}
           </Text>
         </View>
@@ -583,22 +510,13 @@ export default function DataViewScreen() {
           <Text style={styles.cardText}>Tipo: {item.tipoSync}</Text>
           <Text style={styles.cardText}>Usuario: {item.nombreUsuario}</Text>
           <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
+          <Text style={styles.cardText}>Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}</Text>
+          <Text style={styles.cardText}>Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}</Text>
           <Text style={styles.cardText}>
-            Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}
-          </Text>
-          <Text style={styles.cardText}>
-            Leídos: {item.registrosLeidos || 0} | Guardados:{" "}
-            {item.registrosGuardados || 0}
+            Leídos: {item.registrosLeidos || 0} | Guardados: {item.registrosGuardados || 0}
           </Text>
           <Text style={styles.cardText}>Conexión: {item.tipoConexion}</Text>
-          {item.error && (
-            <Text style={[styles.cardText, { color: COLORS.error }]}>
-              Error: {item.error}
-            </Text>
-          )}
+          {item.error && <Text style={[styles.cardText, { color: COLORS.error }]}>Error: {item.error}</Text>}
         </View>
       </View>
     </TouchableOpacity>
@@ -611,12 +529,8 @@ export default function DataViewScreen() {
           <Text style={styles.cardTitle}>📊 Estadísticas de Cumplimiento</Text>
         </View>
         <View style={styles.cardBody}>
-          <Text style={styles.cardText}>
-            📅 Visitas Programadas: {item.totalProgramadas}
-          </Text>
-          <Text style={styles.cardText}>
-            ✅ Visitas Realizadas: {item.totalRealizadas}
-          </Text>
+          <Text style={styles.cardText}>📅 Visitas Programadas: {item.totalProgramadas}</Text>
+          <Text style={styles.cardText}>✅ Visitas Realizadas: {item.totalRealizadas}</Text>
           <Text style={styles.cardText}></Text>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${item.porcentaje}%` }]} />
@@ -734,18 +648,12 @@ export default function DataViewScreen() {
               color={selectedTab === tab.key ? "#fff" : COLORS.textSecondary}
               style={styles.tabIcon}
             />
-            <Text
-              style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}
-            >
-              {tab.title}
-            </Text>
+            <Text style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}>{tab.title}</Text>
             <View style={styles.badge}>
               <Text
                 style={[
                   styles.badgeText,
-                  selectedTab === tab.key
-                    ? { color: COLORS.primary }
-                    : { color: COLORS.textPrimary },
+                  selectedTab === tab.key ? { color: COLORS.primary } : { color: COLORS.textPrimary },
                 ]}
               >
                 {selectedTab === tab.key ? data.length : getCount()}
@@ -765,10 +673,7 @@ export default function DataViewScreen() {
       {/* Pagination Controls */}
       <View style={styles.paginationContainer}>
         <TouchableOpacity
-          style={[
-            styles.paginationButton,
-            currentPage === 0 && styles.paginationButtonDisabled,
-          ]}
+          style={[styles.paginationButton, currentPage === 0 && styles.paginationButtonDisabled]}
           onPress={handlePreviousPage}
           disabled={currentPage === 0}
         >
@@ -778,12 +683,7 @@ export default function DataViewScreen() {
             color={currentPage === 0 ? COLORS.textSecondary : "#fff"}
             size={20}
           />
-          <Text
-            style={[
-              styles.paginationButtonText,
-              currentPage === 0 && { color: COLORS.textSecondary },
-            ]}
-          >
+          <Text style={[styles.paginationButtonText, currentPage === 0 && { color: COLORS.textSecondary }]}>
             Anterior
           </Text>
         </TouchableOpacity>
@@ -793,8 +693,7 @@ export default function DataViewScreen() {
         <TouchableOpacity
           style={[
             styles.paginationButton,
-            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 &&
-              styles.paginationButtonDisabled,
+            currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 && styles.paginationButtonDisabled,
           ]}
           onPress={handleNextPage}
           disabled={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1}
@@ -812,11 +711,7 @@ export default function DataViewScreen() {
           <Icon
             name="chevron-right"
             type="material"
-            color={
-              currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1
-                ? COLORS.textSecondary
-                : "#fff"
-            }
+            color={currentPage >= Math.ceil(getCount() / ITEMS_PER_PAGE) - 1 ? COLORS.textSecondary : "#fff"}
             size={20}
           />
         </TouchableOpacity>
@@ -838,17 +733,9 @@ export default function DataViewScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Icon
-              name="inbox"
-              type="material"
-              size={64}
-              color={COLORS.muted}
-              style={{ marginBottom: 16 }}
-            />
+            <Icon name="inbox" type="material" size={64} color={COLORS.muted} style={{ marginBottom: 16 }} />
             <Text style={styles.emptyText}>No hay datos sincronizados</Text>
-            <Text style={styles.emptySubtext}>
-              Inicia sesión nuevamente para sincronizar
-            </Text>
+            <Text style={styles.emptySubtext}>Inicia sesión nuevamente para sincronizar</Text>
           </View>
         }
       />

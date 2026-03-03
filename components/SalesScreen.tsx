@@ -88,7 +88,7 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
   const [loadingAgendados, setLoadingAgendados] = useState(false);
-  const [clienteYaReubicado, setClienteYaReubicado] = useState(false);
+  const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
 
   // Visitar flow (tipo visita modal, como CumplimientoScreen)
@@ -1097,14 +1097,14 @@ export default function SalesScreen({ route }: { route?: any }) {
   };
 
   useEffect(() => {
-    if (selectedClient) {
-      const yaReubicado = ReubicacionService.getInstance().clienteYaReubicado(selectedClient.id);
-      setClienteYaReubicado(yaReubicado);
-      console.log(`[Sales] Cliente ${selectedClient.id} ya reubicado: ${yaReubicado}`);
+    if (currentUser) {
+      const tienePermiso = ReubicacionService.getInstance().usuarioTienePermisoReubicacion(currentUser.id);
+      setUsuarioPermisoReubicacion(tienePermiso);
+      console.log(`[Sales] Usuario ${currentUser.id} permiso reubicacion: ${tienePermiso}`);
     } else {
-      setClienteYaReubicado(false);
+      setUsuarioPermisoReubicacion(false);
     }
-  }, [selectedClient]);
+  }, [currentUser]);
 
   const handleReubicarCliente = async () => {
     if (!selectedClient || !currentUser) {
@@ -1112,10 +1112,10 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    if (clienteYaReubicado) {
+    if (!usuarioPermisoReubicacion) {
       Alert.alert(
-        "Cliente ya reubicado",
-        "Este cliente ya fue reubicado anteriormente. Solo se puede reubicar una vez.",
+        "Sin permiso de reubicación",
+        "No tienes permiso para realizar una reubicación, o ya utilizaste tu permiso.",
       );
       return;
     }
@@ -1152,7 +1152,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               );
 
               if (reubicacionId) {
-                setClienteYaReubicado(true);
+                setUsuarioPermisoReubicacion(false);
 
                 const updatedCliente = {
                   ...selectedClient,
@@ -1928,16 +1928,26 @@ export default function SalesScreen({ route }: { route?: any }) {
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Cliente</Text>
             <View style={styles.headerButtons}>
+              <TouchableOpacity
+                onPress={() =>
+                  console.log(ReubicacionService.getInstance().usuarioTienePermisoReubicacion(currentUser.id))
+                }
+              >
+                <Text>xx</Text>
+              </TouchableOpacity>
+
               {selectedClient && (
                 <TouchableOpacity
-                  style={[styles.smallBtn, styles.reubicarBtn, clienteYaReubicado && styles.smallBtnDisabled]}
+                  style={[styles.smallBtn, styles.reubicarBtn, !usuarioPermisoReubicacion && styles.smallBtnDisabled]}
                   onPress={handleReubicarCliente}
-                  disabled={clienteYaReubicado || reubicandoCliente}
+                  disabled={!usuarioPermisoReubicacion || reubicandoCliente}
                 >
                   {reubicandoCliente ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={styles.smallBtnText}>{clienteYaReubicado ? "✓ Reubicado" : "📍 Reubicar"}</Text>
+                    <Text style={styles.smallBtnText}>
+                      {!usuarioPermisoReubicacion ? "✓ Sin permiso" : "📍 Reubicar"}
+                    </Text>
                   )}
                 </TouchableOpacity>
               )}

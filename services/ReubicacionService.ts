@@ -35,6 +35,47 @@ class ReubicacionService {
   }
 
   /**
+   * Verifica si el usuario tiene permiso de reubicación (bit reubicacion === true)
+   * @param idUsuario ID del usuario
+   * @returns true si tiene permiso, false si no
+   */
+  usuarioTienePermisoReubicacion(idUsuario: number): boolean {
+    if (!this.realm || this.realm.isClosed) {
+      console.warn("[ReubicacionService] Realm no inicializado");
+      return false;
+    }
+    try {
+      console.log(idUsuario);
+      const usuario = this.realm.objectForPrimaryKey("Usuario", idUsuario);
+      console.log(usuario);
+      if (!usuario) return false;
+      return (usuario as any).reubicacion === true;
+    } catch (error) {
+      console.error("[ReubicacionService] Error verificando permiso de reubicación:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Marca el bit reubicacion del usuario en false (ya usó su permiso)
+   * @param idUsuario ID del usuario
+   */
+  private marcarPermisoReubicacionUsado(idUsuario: number): void {
+    if (!this.realm || this.realm.isClosed) return;
+    try {
+      const usuario = this.realm.objectForPrimaryKey("Usuario", idUsuario);
+      if (usuario) {
+        this.realm.write(() => {
+          (usuario as any).reubicacion = false;
+        });
+        console.log(`[ReubicacionService] Bit reubicacion marcado false para usuario ${idUsuario}`);
+      }
+    } catch (error) {
+      console.error("[ReubicacionService] Error marcando permiso reubicacion usado:", error);
+    }
+  }
+
+  /**
    * Verifica si un cliente ya fue reubicado
    * @param cveCliente ID del cliente
    * @returns true si ya fue reubicado, false si aún no
@@ -113,6 +154,9 @@ class ReubicacionService {
 
       // Actualizar coordenadas del cliente en ClienteFull
       this.actualizarCoordenadasClienteLocal(cveCliente, latitudNueva, longitudNueva);
+
+      // Marcar el bit de permiso como usado (false) — solo se puede reubicar una vez
+      this.marcarPermisoReubicacionUsado(usuario);
 
       return id;
     } catch (error) {

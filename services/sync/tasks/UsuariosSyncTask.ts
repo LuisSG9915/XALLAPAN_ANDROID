@@ -45,10 +45,26 @@ export class UsuariosSyncTask extends SyncTask {
         for (const usuario of usuarios) {
           const existing = this.realm.objectForPrimaryKey("Usuario", usuario.id);
 
-          const usuarioData = {
-            ...usuario,
+          const usuarioData: any = {
+            id: usuario.id,
+            nombre: usuario.nombre ?? null,
+            perfil: usuario.perfil ?? null,
+            descripcionPerfil: usuario.descripcionPerfil ?? null,
+            puesto: usuario.puesto ?? null,
+            descripcionPuesto: usuario.descripcionPuesto ?? null,
+            claveEmpleado: usuario.claveEmpleado ?? null,
+            password: usuario.password ?? null,
+            sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? null,
+            metros: usuario.metros ?? null,
+            reubicacion:
+              typeof usuario.reubicacion === "boolean"
+                ? usuario.reubicacion
+                : usuario.reubicacion === 1
+                ? true
+                : usuario.reubicacion === 0
+                ? false
+                : null,
             syncedAt: new Date(),
-            syncedAr: nowMexico,
           };
 
           if (existing) {

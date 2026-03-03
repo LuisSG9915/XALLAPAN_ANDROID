@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 21,
+        schemaVersion: 22,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -50,6 +50,11 @@ class FullSyncService {
             console.log(
               "[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse.",
             );
+          }
+
+          // Migración v22: Agregar campo reubicacion (bool?) a Usuario — default null (se llenará en el próximo sync)
+          if (oldRealm.schemaVersion < 22) {
+            console.log("[Migration v22] Agregando campo reubicacion a Usuario");
           }
         },
       });
@@ -449,6 +454,7 @@ class FullSyncService {
             }
 
             const usuarios = await response.json();
+            console.log({ usuarios });
             const registrosLeidos = Array.isArray(usuarios) ? usuarios.length : 0;
             let registrosGuardados = 0;
             let registrosActualizados = 0;

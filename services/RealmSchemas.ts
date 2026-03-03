@@ -42,6 +42,7 @@ export const UsuarioSchema = {
     password: "string?",
     sucursalOrigen: "int?",
     metros: "float?",
+    reubicacion: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",
