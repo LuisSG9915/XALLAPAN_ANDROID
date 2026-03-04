@@ -292,6 +292,51 @@ class FullSyncService {
       }
     }
 
+    // PASO 4: Enviar reubicaciones pendientes al servidor
+    if (idUsuario) {
+      try {
+        const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
+        if (reubicacionesPendientes.length > 0) {
+          console.log(`[FullSync] Enviando ${reubicacionesPendientes.length} reubicaciones pendientes...`);
+          
+          const reubicacionesPayload = {
+            reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
+              sucursal: r.sucursal ?? sucursal,
+              cveCliente: r.cveCliente,
+              latitudAnterior: r.latitudAnterior ?? 0,
+              longitudAnterior: r.longitudAnterior ?? 0,
+              latitudNueva: r.latitudNueva,
+              longitudNueva: r.longitudNueva,
+              fecha: (r.fecha ?? new Date()).toISOString(),
+              usuario: r.usuario ?? idUsuario,
+              idMovil: r.idMovil,
+              fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
+            })),
+          };
+
+          const reubicacionUrl = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          const reubicacionResp = await fetch(reubicacionUrl, {
+            method: "POST",
+            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
+            body: JSON.stringify(reubicacionesPayload),
+          });
+          console.log(JSON.stringify(reubicacionesPayload))
+          if (reubicacionResp.ok) {
+            this.realm.write(() => {
+              reubicacionesPendientes.forEach((r: any) => {
+                r.enviado = true;
+              });
+            });
+            console.log(`[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas`);
+          } else {
+            console.warn(`[FullSync] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
+          }
+        }
+      } catch (reubicacionError) {
+        console.warn("[FullSync] ⚠️ Error enviando reubicaciones, continuando:", reubicacionError);
+      }
+    }
+
     // Crear SyncLog principal específico para incremental
     const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const fechaInicio = new Date();
@@ -444,7 +489,6 @@ class FullSyncService {
 
           try {
             console.log("[Incremental] Usuarios full desde", url);
-
             const response = await fetch(url, {
               headers: { accept: "application/json" },
             });
@@ -452,6 +496,7 @@ class FullSyncService {
               console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
               throw new Error(`HTTP ${response.status} Usuarios`);
             }
+            
 
             const usuarios = await response.json();
             console.log({ usuarios });
@@ -474,6 +519,14 @@ class FullSyncService {
                   password: usuario.password,
                   sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
                   metros: usuario.metros,
+                  reubicacion:
+                    typeof usuario.reubicacion === "boolean"
+                      ? usuario.reubicacion
+                      : usuario.reubicacion === 1
+                      ? true
+                      : usuario.reubicacion === 0
+                      ? false
+                      : null,
                   syncedAt: nowMexico,
                 };
 

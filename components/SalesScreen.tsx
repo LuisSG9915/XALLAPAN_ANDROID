@@ -2254,7 +2254,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.listTitle}>{item.nombre}</Text>
                             <Text style={styles.listSubtitle}>ID: {item.id}</Text>
-                            <Text style={styles.distanciaText}>
+                            <Text style={[styles.distanciaText, fueraDeRango && { color: 'red' }]}>
                               {item.distanciaMetros < 1000
                                 ? `${Math.round(item.distanciaMetros)} m`
                                 : `${(item.distanciaMetros / 1000).toFixed(1)} km`}
@@ -2321,21 +2321,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                     const visitaInfo = visitasDelDiaMap.get(item.id);
                     const yaVisitado = visitaInfo?.visitado === 1;
 
-                    // Calcular si el usuario está fuera del rango del cliente
-                    let fueraDeRango = false;
-                    let distanciaActual: number | null = null;
-                    if (userCoords && item.latitud && item.longitud) {
-                      distanciaActual = calcularDistancia(
-                        userCoords.latitude,
-                        userCoords.longitude,
-                        item.latitud,
-                        item.longitud,
-                      );
-                      const metrosPermitidos = userMetros || item.metros || 100;
-                      fueraDeRango = distanciaActual > metrosPermitidos;
-                    }
-
-                    const btnDisabled = yaVisitado || validandoUbicacion || fueraDeRango;
+                    const btnDisabled = yaVisitado || validandoUbicacion;
 
                     return (
                       <View style={styles.clienteListRow}>
@@ -2346,11 +2332,6 @@ export default function SalesScreen({ route }: { route?: any }) {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.listTitle}>{item.nombre}</Text>
                             <Text style={styles.listSubtitle}>ID: {item.id}</Text>
-                            {fueraDeRango && distanciaActual !== null && (
-                              <Text style={styles.fueraDeRangoText}>
-                                ⚠️ A {Math.round(distanciaActual)} m (máx. {userMetros || item.metros || 100} m)
-                              </Text>
-                            )}
                           </View>
                           <View style={styles.badgesColumn}>
                             {esAgendado && (
@@ -2365,7 +2346,6 @@ export default function SalesScreen({ route }: { route?: any }) {
                           style={[
                             styles.visitarBtn,
                             btnDisabled && styles.visitarBtnDisabled,
-                            fueraDeRango && !yaVisitado && styles.visitarBtnFueraRango,
                           ]}
                           onPress={() => handleVisitarCliente(item)}
                           disabled={btnDisabled}
@@ -2374,14 +2354,14 @@ export default function SalesScreen({ route }: { route?: any }) {
                             <ActivityIndicator size="small" color="#fff" />
                           ) : (
                             <Icon
-                              name={yaVisitado ? "check" : fueraDeRango ? "location-off" : "directions-walk"}
+                              name={yaVisitado ? "check" : "directions-walk"}
                               type="material"
                               size={14}
                               color="#fff"
                             />
                           )}
                           <Text style={styles.visitarBtnText}>
-                            {yaVisitado ? "Listo" : fueraDeRango ? "Lejos" : "Visitar"}
+                            {yaVisitado ? "Listo" : "Visitar"}
                           </Text>
                         </TouchableOpacity>
                       </View>

@@ -66,7 +66,7 @@ export class ReubicacionSyncTask extends SyncTask {
         idMovil: r.idMovil,
         fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
       }));
-
+      console.log(payload)
       // Enviar al servidor
       const response = await fetch(this.getEndpoint(), {
         method: "POST",

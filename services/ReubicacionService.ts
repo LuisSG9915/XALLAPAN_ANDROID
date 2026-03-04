@@ -48,6 +48,7 @@ class ReubicacionService {
       console.log(idUsuario);
       const usuario = this.realm.objectForPrimaryKey("Usuario", idUsuario);
       console.log(usuario);
+      console.log(usuario.reubicacion);
       if (!usuario) return false;
       return (usuario as any).reubicacion === true;
     } catch (error) {
