@@ -1106,8 +1106,10 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
   }, [currentUser]);
 
-  const handleReubicarCliente = async () => {
-    if (!selectedClient || !currentUser) {
+  const handleReubicarCliente = async (clienteParam?: Cliente) => {
+    const clienteAUbicar = clienteParam || selectedClient;
+
+    if (!clienteAUbicar || !currentUser) {
       Alert.alert("Error", "No hay un cliente seleccionado");
       return;
     }
@@ -1122,7 +1124,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
     Alert.alert(
       "Reubicar Cliente",
-      `¿Deseas actualizar la ubicación del cliente ${selectedClient.nombre}?\n\nSe guardará tu ubicación GPS actual como la nueva ubicación del cliente.`,
+      `¿Deseas actualizar la ubicación del cliente ${clienteAUbicar.nombre}?\n\nSe guardará tu ubicación GPS actual como la nueva ubicación del cliente.`,
       [
         { text: "Cancelar", style: "cancel" },
         {
@@ -1143,9 +1145,9 @@ export default function SalesScreen({ route }: { route?: any }) {
 
               const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
                 currentSucursal,
-                selectedClient.id,
-                selectedClient.latitud ?? null,
-                selectedClient.longitud ?? null,
+                clienteAUbicar.id,
+                clienteAUbicar.latitud ?? null,
+                clienteAUbicar.longitud ?? null,
                 ubicacion.latitude,
                 ubicacion.longitude,
                 currentUser.id,
@@ -1154,12 +1156,21 @@ export default function SalesScreen({ route }: { route?: any }) {
               if (reubicacionId) {
                 setUsuarioPermisoReubicacion(false);
 
+                // Actualizar el cliente seleccionado con las nuevas coordenadas
                 const updatedCliente = {
-                  ...selectedClient,
+                  ...clienteAUbicar,
                   latitud: ubicacion.latitude,
                   longitud: ubicacion.longitude,
                 };
                 setSelectedClient(updatedCliente);
+
+                // Recargar la lista de clientes desde Realm para reflejar las nuevas coordenadas
+                try {
+                  await loadDataFromRealm(currentSucursal);
+                  console.log("[Sales] Lista de clientes recargada desde Realm");
+                } catch (reloadError) {
+                  console.error("[Sales] Error recargando clientes:", reloadError);
+                }
 
                 Alert.alert(
                   "¡Reubicación exitosa!",
@@ -1929,29 +1940,6 @@ export default function SalesScreen({ route }: { route?: any }) {
             <Text style={styles.cardTitle}>Cliente</Text>
             <View style={styles.headerButtons}>
               <TouchableOpacity
-                onPress={() =>
-                  console.log(ReubicacionService.getInstance().usuarioTienePermisoReubicacion(currentUser.id))
-                }
-              >
-                <Text>xx</Text>
-              </TouchableOpacity>
-
-              {selectedClient && (
-                <TouchableOpacity
-                  style={[styles.smallBtn, styles.reubicarBtn, !usuarioPermisoReubicacion && styles.smallBtnDisabled]}
-                  onPress={handleReubicarCliente}
-                  disabled={!usuarioPermisoReubicacion || reubicandoCliente}
-                >
-                  {reubicandoCliente ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.smallBtnText}>
-                      {!usuarioPermisoReubicacion ? "✓ Sin permiso" : "📍 Reubicar"}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
                 style={styles.smallBtn}
                 onPress={() => {
                   setClienteModalOpen(true);
@@ -2254,7 +2242,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.listTitle}>{item.nombre}</Text>
                             <Text style={styles.listSubtitle}>ID: {item.id}</Text>
-                            <Text style={[styles.distanciaText, fueraDeRango && { color: 'red' }]}>
+                            <Text style={[styles.distanciaText, fueraDeRango && { color: "red" }]}>
                               {item.distanciaMetros < 1000
                                 ? `${Math.round(item.distanciaMetros)} m`
                                 : `${(item.distanciaMetros / 1000).toFixed(1)} km`}
@@ -2297,6 +2285,23 @@ export default function SalesScreen({ route }: { route?: any }) {
                             {yaVisitado ? "Listo" : fueraDeRango ? "Lejos" : "Visitar"}
                           </Text>
                         </TouchableOpacity>
+                        {usuarioPermisoReubicacion && (
+                          <TouchableOpacity
+                            style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
+                            onPress={() => {
+                              setClienteModalOpen(false);
+                              handleReubicarCliente(item);
+                            }}
+                            disabled={reubicandoCliente}
+                          >
+                            {reubicandoCliente ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <Icon name="my-location" type="material" size={14} color="#fff" />
+                            )}
+                            <Text style={styles.reubicarBtnModalText}></Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     );
                   }}
@@ -2343,10 +2348,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                           </View>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          style={[
-                            styles.visitarBtn,
-                            btnDisabled && styles.visitarBtnDisabled,
-                          ]}
+                          style={[styles.visitarBtn, btnDisabled && styles.visitarBtnDisabled]}
                           onPress={() => handleVisitarCliente(item)}
                           disabled={btnDisabled}
                         >
@@ -2360,10 +2362,25 @@ export default function SalesScreen({ route }: { route?: any }) {
                               color="#fff"
                             />
                           )}
-                          <Text style={styles.visitarBtnText}>
-                            {yaVisitado ? "Listo" : "Visitar"}
-                          </Text>
+                          <Text style={styles.visitarBtnText}>{yaVisitado ? "Listo" : "Visitar"}</Text>
                         </TouchableOpacity>
+                        {usuarioPermisoReubicacion && (
+                          <TouchableOpacity
+                            style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
+                            onPress={() => {
+                              setClienteModalOpen(false);
+                              handleReubicarCliente(item);
+                            }}
+                            disabled={reubicandoCliente}
+                          >
+                            {reubicandoCliente ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <Icon name="my-location" type="material" size={14} color="#fff" />
+                            )}
+                            <Text style={styles.reubicarBtnModalText}></Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     );
                   }}
@@ -3301,6 +3318,25 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   visitarBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  reubicarBtnModal: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FF9800",
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.l,
+    marginLeft: SPACING.s,
+    gap: 4,
+  },
+  reubicarBtnModalDisabled: {
+    backgroundColor: "#BDBDBD",
+    opacity: 0.6,
+  },
+  reubicarBtnModalText: {
     color: "#fff",
     fontWeight: "600",
     fontSize: 12,
