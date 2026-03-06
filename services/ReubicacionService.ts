@@ -257,17 +257,17 @@ class ReubicacionService {
       );
 
       if (response.ok) {
-        // Marcar como enviadas
+        // Eliminar reubicaciones enviadas exitosamente
         this.realm.write(() => {
           pendientes.forEach((r) => {
             const reubicacion = this.realm!.objectForPrimaryKey("Reubicacion", r.id);
             if (reubicacion) {
-              (reubicacion as any).enviado = true;
+              this.realm!.delete(reubicacion);
             }
           });
         });
 
-        console.log(`[ReubicacionService] ✅ ${pendientes.length} reubicaciones enviadas exitosamente`);
+        console.log(`[ReubicacionService] ✅ ${pendientes.length} reubicaciones enviadas y eliminadas exitosamente`);
 
         return { success: true, sent: pendientes.length };
       } else {

@@ -84,14 +84,12 @@ export class ReubicacionSyncTask extends SyncTask {
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
-      // Marcar como enviadas
+      // Eliminar reubicaciones enviadas exitosamente
       this.realm.write(() => {
-        reubicacionesPendientes.forEach((r: any) => {
-          r.enviado = true;
-        });
+        this.realm.delete(reubicacionesPendientes);
       });
 
-      console.log(`[ReubicacionSync] ✅ ${payload.length} reubicaciones enviadas exitosamente`);
+      console.log(`[ReubicacionSync] ✅ ${payload.length} reubicaciones enviadas y eliminadas exitosamente`);
 
       return {
         success: true,

@@ -281,18 +281,7 @@ class FullSyncService {
       }
     }
 
-    // PASO 3: Enviar ventas pendientes al servidor antes de sincronizar
-    if (idUsuario) {
-      console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
-      const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
-      if (ventasResult.success && ventasResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
-      } else if (!ventasResult.success) {
-        console.warn("[FullSync] ⚠️ No se pudieron enviar ventas pendientes, continuando con sincronización");
-      }
-    }
-
-    // PASO 4: Enviar reubicaciones pendientes al servidor
+    // PASO 3: Enviar reubicaciones pendientes al servidor ANTES de ventas
     if (idUsuario) {
       try {
         const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
@@ -323,17 +312,26 @@ class FullSyncService {
           console.log(JSON.stringify(reubicacionesPayload))
           if (reubicacionResp.ok) {
             this.realm.write(() => {
-              reubicacionesPendientes.forEach((r: any) => {
-                r.enviado = true;
-              });
+              this.realm!.delete(reubicacionesPendientes);
             });
-            console.log(`[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas`);
+            console.log(`[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y eliminadas`);
           } else {
             console.warn(`[FullSync] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
           }
         }
       } catch (reubicacionError) {
         console.warn("[FullSync] ⚠️ Error enviando reubicaciones, continuando:", reubicacionError);
+      }
+    }
+
+    // PASO 4: Enviar ventas pendientes al servidor DESPUÉS de reubicaciones
+    if (idUsuario) {
+      console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
+      const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
+      if (ventasResult.success && ventasResult.sent > 0) {
+        console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
+      } else if (!ventasResult.success) {
+        console.warn("[FullSync] ⚠️ No se pudieron enviar ventas pendientes, continuando con sincronización");
       }
     }
 
@@ -2298,6 +2296,41 @@ class FullSyncService {
   //     "facturacionMovil": false,
   //     "syncedAt": "1970-01-01T00:00:00.000Z"
   // }
+  getVentasForDate(startOfDay: Date, endOfDay: Date, sucursal?: number): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    let query = "fecha >= $0 AND fecha <= $1";
+    const args: any[] = [startOfDay, endOfDay];
+    if (sucursal !== undefined) {
+      query += " AND sucursal == $2";
+      args.push(sucursal);
+    }
+    return Array.from(this.realm.objects("Venta").filtered(query, ...args));
+  }
+
+  getInventarioABordoForDate(startOfDay: Date, endOfDay: Date, sucursal?: number): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    const todos = Array.from(this.realm.objects("Inventario")) as any[];
+    return todos.filter((item: any) => {
+      const fa = item.fechaArrastre;
+      if (!fa) return false;
+      const d = fa instanceof Date ? fa : new Date(fa);
+      const inRange = d >= startOfDay && d <= endOfDay;
+      const inSucursal = sucursal === undefined || item.sucursal === sucursal;
+      return inRange && inSucursal && (item.saldo || 0) > 0;
+    });
+  }
+
+  getRutaForDate(startOfDay: Date, endOfDay: Date): string {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return "";
+    try {
+      const visitas = this.realm.objects("Visita").filtered("fecha >= $0 AND fecha <= $1", startOfDay, endOfDay);
+      if (visitas.length > 0) {
+        return (visitas[0] as any).ruta || "";
+      }
+    } catch (_e) {}
+    return "";
+  }
+
   getClientesFull(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("ClienteFull").sorted("nombre").slice(0, limit));

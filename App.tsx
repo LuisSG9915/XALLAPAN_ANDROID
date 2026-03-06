@@ -38,6 +38,7 @@ import DataViewScreen from "./components/DataViewScreen";
 import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
 import CumplimientoScreen from "./components/CumplimientoScreen";
 import EnvaseOperacionScreen from "./components/EnvaseOperacionScreen";
+import CortesScreen from "./components/CortesScreen";
 import AuthService from "./services/AuthService";
 import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
@@ -345,6 +346,11 @@ function App() {
             name="EnvaseOperacion"
             component={EnvaseOperacionScreen}
             options={{ title: "Operaciones de Envase", headerShown: false }}
+          />
+          <Stack.Screen
+            name="Cortes"
+            component={CortesScreen}
+            options={{ title: " Corte" }}
           />
         </Stack.Navigator>
       </NavigationContainer>
@@ -682,6 +688,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       color: "#00796B",
       screen: "EnvaseOperacion",
       description: "Intercambio / Préstamo",
+    },
+    {
+      id: "cortes",
+      title: "Cortes",
+      icon: "receipt-long",
+      type: "material",
+      color: "#E65100",
+      screen: "Cortes",
+      description: "Corte de ruta",
     },
   ];
 

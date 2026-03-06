@@ -42,6 +42,16 @@ export interface PrecorteTicketData {
   totalExpenses?: number;
 }
 
+export interface CorteTicketData {
+  fecha: string;
+  ruta: string;
+  usuario: string;
+  inventarioVendido: Array<{ nombreProducto: string; cantTotal: number }>;
+  inventarioABordo: Array<{ descripcion: string; saldo: number }>;
+  importesPorProducto: Array<{ nombreProducto: string; importe: number }>;
+  tiposPago: Array<{ descripcion: string; total: number }>;
+}
+
 class TicketPrinter {
   private readonly DEFAULT_WIDTH = 32;
 
@@ -314,6 +324,101 @@ class TicketPrinter {
   async printPrecorteTicket(data: PrecorteTicketData): Promise<void> {
     const lines = this.generatePrecorteTicket(data);
     await this.print(lines, { title: "Precorte" });
+  }
+
+  /**
+   * Genera un ticket de corte de ruta
+   */
+  generateCorteTicket(data: CorteTicketData): TicketContent {
+    const lines: TicketContent = [];
+    const width = this.DEFAULT_WIDTH;
+
+    lines.push(this.separator("=", width));
+    lines.push(this.center("CORTE DE RUTA", width));
+    lines.push(this.separator("=", width));
+
+    lines.push(this.leftRight("RUTA:", data.ruta || "---", width));
+    lines.push(this.leftRight("FECHA:", data.fecha, width));
+    lines.push(`USUARIO: ${data.usuario}`);
+    lines.push(this.separator("-", width));
+
+    lines.push("INVENTARIO VENDIDO");
+    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("PRODUCTO", "CANT", width));
+    if (data.inventarioVendido.length === 0) {
+      lines.push("  Sin ventas");
+    } else {
+      data.inventarioVendido.forEach((item) => {
+        const maxLen = width - 6;
+        const desc = item.nombreProducto.substring(0, maxLen);
+        const cant = String(item.cantTotal).padStart(4);
+        lines.push(this.leftRight(desc, cant, width));
+      });
+    }
+    lines.push(this.separator("-", width));
+
+    lines.push("ENVASES");
+    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("ENV VENDIDO", "---", width));
+    lines.push(this.leftRight("ENV CAMBIADO", "---", width));
+    lines.push(this.leftRight("ENVASE PRESTADO", "---", width));
+    lines.push(this.separator("-", width));
+
+    lines.push("INVENTARIO A BORDO");
+    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("PRODUCTO", "CANT", width));
+    if (data.inventarioABordo.length === 0) {
+      lines.push("  Sin inventario");
+    } else {
+      data.inventarioABordo.forEach((item) => {
+        const maxLen = width - 6;
+        const desc = item.descripcion.substring(0, maxLen);
+        const saldo = String(item.saldo).padStart(4);
+        lines.push(this.leftRight(desc, saldo, width));
+      });
+    }
+    lines.push(this.separator("-", width));
+
+    lines.push("IMPORTES");
+    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("PRODUCTO", "IMPORTE", width));
+    if (data.importesPorProducto.length === 0) {
+      lines.push("  Sin datos");
+    } else {
+      data.importesPorProducto.forEach((item) => {
+        const maxLen = width - 10;
+        const desc = item.nombreProducto.substring(0, maxLen);
+        const imp = `$${item.importe.toFixed(2)}`;
+        lines.push(this.leftRight(desc, imp, width));
+      });
+    }
+    lines.push(this.separator("-", width));
+
+    lines.push("TIPOS DE PAGO");
+    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("TIPO", "IMPORTE", width));
+    if (data.tiposPago.length === 0) {
+      lines.push("  Sin datos");
+    } else {
+      data.tiposPago.forEach((item) => {
+        const desc = item.descripcion.substring(0, width - 10);
+        const imp = `$${item.total.toFixed(2)}`;
+        lines.push(this.leftRight(desc, imp, width));
+      });
+    }
+
+    lines.push(this.separator("=", width));
+    lines.push("");
+
+    return lines;
+  }
+
+  /**
+   * Imprime un ticket de corte de ruta
+   */
+  async printCorteTicket(data: CorteTicketData): Promise<void> {
+    const lines = this.generateCorteTicket(data);
+    await this.print(lines, { title: "Corte de Ruta" });
   }
 
   /**
