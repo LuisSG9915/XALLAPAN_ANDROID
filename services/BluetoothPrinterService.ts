@@ -1,9 +1,6 @@
-import { Platform, PermissionsAndroid, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  BluetoothManager,
-  BluetoothEscposPrinter,
-} from 'react-native-bluetooth-escpos-printer';
+import { Platform, PermissionsAndroid, Alert } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BluetoothManager, BluetoothEscposPrinter } from "react-native-bluetooth-escpos-printer";
 
 export interface PrinterDevice {
   name: string;
@@ -15,7 +12,7 @@ export interface PrinterStatus {
   printer?: PrinterDevice;
 }
 
-const STORAGE_KEY = '@awesomeapp/selected_printer';
+const STORAGE_KEY = "@awesomeapp/selected_printer";
 
 class BluetoothPrinterService {
   private currentPrinter: PrinterDevice | null = null;
@@ -25,7 +22,7 @@ class BluetoothPrinterService {
    * Solicita permisos de Bluetooth en Android
    */
   async requestBluetoothPermissions(): Promise<boolean> {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       try {
         if (Platform.Version >= 31) {
           // Android 12+
@@ -35,18 +32,16 @@ class BluetoothPrinterService {
           ]);
 
           return (
-            granted['android.permission.BLUETOOTH_SCAN'] === 'granted' &&
-            granted['android.permission.BLUETOOTH_CONNECT'] === 'granted'
+            granted["android.permission.BLUETOOTH_SCAN"] === "granted" &&
+            granted["android.permission.BLUETOOTH_CONNECT"] === "granted"
           );
         } else {
           // Android < 12
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          );
-          return granted === 'granted';
+          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+          return granted === "granted";
         }
       } catch (err) {
-        console.error('Error requesting Bluetooth permissions:', err);
+        console.error("Error requesting Bluetooth permissions:", err);
         return false;
       }
     }
@@ -64,7 +59,7 @@ class BluetoothPrinterService {
       }
       return true;
     } catch (error) {
-      console.error('Error enabling Bluetooth:', error);
+      console.error("Error enabling Bluetooth:", error);
       return false;
     }
   }
@@ -76,16 +71,13 @@ class BluetoothPrinterService {
     try {
       const hasPermissions = await this.requestBluetoothPermissions();
       if (!hasPermissions) {
-        Alert.alert(
-          'Permisos Necesarios',
-          'Se requieren permisos de Bluetooth para buscar impresoras',
-        );
+        Alert.alert("Permisos Necesarios", "Se requieren permisos de Bluetooth para buscar impresoras");
         return [];
       }
 
       const isEnabled = await this.enableBluetooth();
       if (!isEnabled) {
-        Alert.alert('Bluetooth', 'Por favor activa el Bluetooth');
+        Alert.alert("Bluetooth", "Por favor activa el Bluetooth");
         return [];
       }
 
@@ -95,12 +87,9 @@ class BluetoothPrinterService {
       // pero en algunas versiones puede devolver directamente un objeto/array.
       let parsed: any;
       try {
-        parsed = typeof devices === 'string' ? JSON.parse(devices) : devices;
+        parsed = typeof devices === "string" ? JSON.parse(devices) : devices;
       } catch (parseError) {
-        console.warn(
-          'No se pudo parsear respuesta de scanDevices:',
-          parseError,
-        );
+        console.warn("No se pudo parsear respuesta de scanDevices:", parseError);
         parsed = devices;
       }
 
@@ -122,28 +111,28 @@ class BluetoothPrinterService {
       const printers: PrinterDevice[] = Array.from(uniqueByAddress.values())
         .filter((device: any) => {
           if (!device.address) return false;
-          const name = (device.name || '').toString().toUpperCase();
+          const name = (device.name || "").toString().toUpperCase();
           // Si no tiene nombre, igual lo mostramos (genéricas)
           if (!name) return true;
           // Nombres comunes de impresoras térmicas
           return (
-            name.includes('PRINTER') ||
-            name.includes('THERMAL') ||
-            name.includes('POS') ||
-            name.includes('RP') ||
-            name.includes('BT') ||
-            name.includes('EC MP')
+            name.includes("PRINTER") ||
+            name.includes("THERMAL") ||
+            name.includes("POS") ||
+            name.includes("RP") ||
+            name.includes("BT") ||
+            name.includes("EC MP")
           );
         })
         .map((device: any) => ({
-          name: device.name || 'Dispositivo sin nombre',
+          name: device.name || "Dispositivo sin nombre",
           address: device.address,
         }));
 
       return printers;
     } catch (error) {
-      console.error('Error scanning printers:', error);
-      Alert.alert('Error', 'No se pudo escanear impresoras Bluetooth');
+      console.error("Error scanning printers:", error);
+      Alert.alert("Error", "No se pudo escanear impresoras Bluetooth");
       return [];
     }
   }
@@ -151,14 +140,11 @@ class BluetoothPrinterService {
   /**
    * Conecta a una impresora específica
    */
-  async connectToPrinter(
-    printer: PrinterDevice,
-    options?: { silent?: boolean },
-  ): Promise<boolean> {
+  async connectToPrinter(printer: PrinterDevice, options?: { silent?: boolean }): Promise<boolean> {
     try {
       const isEnabled = await this.enableBluetooth();
       if (!isEnabled) {
-        Alert.alert('Bluetooth', 'Por favor activa el Bluetooth');
+        Alert.alert("Bluetooth", "Por favor activa el Bluetooth");
         return false;
       }
 
@@ -166,10 +152,7 @@ class BluetoothPrinterService {
       try {
         await BluetoothManager.disconnect();
       } catch (disconnectError) {
-        console.warn(
-          'Error intentando resetear la conexión Bluetooth antes de conectar:',
-          disconnectError,
-        );
+        console.warn("Error intentando resetear la conexión Bluetooth antes de conectar:", disconnectError);
       }
 
       await BluetoothManager.connect(printer.address);
@@ -181,18 +164,17 @@ class BluetoothPrinterService {
 
       return true;
     } catch (error: any) {
-      console.error('Error connecting to printer:', error);
+      console.error("Error connecting to printer:", error);
       this.currentPrinter = null;
       this.isConnected = false;
 
       if (!options?.silent) {
         const message =
-          typeof error?.message === 'string'
-            ? `No se pudo conectar a la impresora ${printer.name}.` +
-              `\n\nDetalle: ${error.message}`
+          typeof error?.message === "string"
+            ? `No se pudo conectar a la impresora ${printer.name}.` + `\n\nDetalle: ${error.message}`
             : `No se pudo conectar a la impresora ${printer.name}`;
 
-        Alert.alert('Error', message);
+        Alert.alert("Error", message);
       }
 
       return false;
@@ -209,7 +191,7 @@ class BluetoothPrinterService {
         this.isConnected = false;
       }
     } catch (error) {
-      console.error('Error disconnecting printer:', error);
+      console.error("Error disconnecting printer:", error);
     }
   }
 
@@ -220,7 +202,7 @@ class BluetoothPrinterService {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(printer));
     } catch (error) {
-      console.error('Error saving printer:', error);
+      console.error("Error saving printer:", error);
     }
   }
 
@@ -235,7 +217,7 @@ class BluetoothPrinterService {
       }
       return null;
     } catch (error) {
-      console.error('Error loading saved printer:', error);
+      console.error("Error loading saved printer:", error);
       return null;
     }
   }
@@ -266,17 +248,17 @@ class BluetoothPrinterService {
    */
   async printText(text: string): Promise<boolean> {
     if (!this.isConnected) {
-      Alert.alert('No Conectado', 'Selecciona una impresora primero');
+      Alert.alert("No Conectado", "Selecciona una impresora primero");
       return false;
     }
 
     try {
       await BluetoothEscposPrinter.printerInit();
-      await BluetoothEscposPrinter.printText(text + '\n\n\n', {});
+      await BluetoothEscposPrinter.printText(text + "\n\n\n", {});
       return true;
     } catch (error) {
-      console.error('Error printing:', error);
-      Alert.alert('Error de Impresión', 'No se pudo imprimir el ticket');
+      console.error("Error printing:", error);
+      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
       return false;
     }
   }
@@ -286,46 +268,47 @@ class BluetoothPrinterService {
    */
   async printTicket(lines: string[]): Promise<boolean> {
     if (!this.isConnected) {
-      Alert.alert('No Conectado', 'Selecciona una impresora primero');
+      Alert.alert("No Conectado", "Selecciona una impresora primero");
       return false;
     }
 
     try {
       await BluetoothEscposPrinter.printerInit();
 
-      for (const line of lines) {
+      for (let line of lines) {
+        // Detectar si la línea tiene marcador de negrita [B]
+        const isBold = line.startsWith("[B]");
+        if (isBold) {
+          line = line.substring(3); // Remover el marcador [B]
+        }
+
         // Detectar líneas especiales y aplicar formato
-        if (line.includes('===') || line.includes('---')) {
+        if (line.includes("===") || line.includes("---")) {
           // Separadores
-          await BluetoothEscposPrinter.printText(line + '\n', {});
+          await BluetoothEscposPrinter.printText(line + "\n", {});
         } else if (
-          line.toUpperCase().includes('TICKET') ||
-          line.toUpperCase().includes('PRECORTE') ||
-          line.toUpperCase().includes('COMPROBANTE')
+          line.toUpperCase().includes("CORTE DE RUTA") ||
+          line.toUpperCase().includes("TICKET") ||
+          line.toUpperCase().includes("PRECORTE") ||
+          line.toUpperCase().includes("COMPROBANTE")
         ) {
-          // Título centrado y en negritas
-          await BluetoothEscposPrinter.printText(line + '\n', {
-            align: 'center',
-            widthtimes: 1,
-          });
-        } else if (line.toUpperCase().includes('TOTAL')) {
-          // Total en negritas
-          await BluetoothEscposPrinter.printText(line + '\n', {
-            widthtimes: 1,
+          // Título centrado
+          await BluetoothEscposPrinter.printText(line + "\n", {
+            align: "center",
           });
         } else {
-          // Texto normal
-          await BluetoothEscposPrinter.printText(line + '\n', {});
+          // Texto normal (las negritas ESC/POS se manejarán con comandos si es necesario)
+          await BluetoothEscposPrinter.printText(line + "\n", {});
         }
       }
 
       // Alimentación adicional
-      await BluetoothEscposPrinter.printText('\n\n\n', {});
+      await BluetoothEscposPrinter.printText("\n\n\n", {});
 
       return true;
     } catch (error) {
-      console.error('Error printing ticket:', error);
-      Alert.alert('Error de Impresión', 'No se pudo imprimir el ticket');
+      console.error("Error printing ticket:", error);
+      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
       return false;
     }
   }
@@ -333,13 +316,9 @@ class BluetoothPrinterService {
   /**
    * Imprime un ticket con encabezado formateado
    */
-  async printFormattedTicket(
-    businessName: string,
-    title: string,
-    lines: string[],
-  ): Promise<boolean> {
+  async printFormattedTicket(businessName: string, title: string, lines: string[]): Promise<boolean> {
     if (!this.isConnected) {
-      Alert.alert('No Conectado', 'Selecciona una impresora primero');
+      Alert.alert("No Conectado", "Selecciona una impresora primero");
       return false;
     }
 
@@ -347,49 +326,34 @@ class BluetoothPrinterService {
       await BluetoothEscposPrinter.printerInit();
 
       // Encabezado
-      await BluetoothEscposPrinter.printText(
-        '================================\n',
-        {},
-      );
-      await BluetoothEscposPrinter.printText(businessName + '\n', {
-        align: 'center',
+      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText(businessName + "\n", {
+        align: "center",
         widthtimes: 1,
       });
-      await BluetoothEscposPrinter.printText(
-        '================================\n',
-        {},
-      );
-      await BluetoothEscposPrinter.printText(title + '\n', {
-        align: 'center',
+      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText(title + "\n", {
+        align: "center",
       });
-      await BluetoothEscposPrinter.printText(
-        '================================\n',
-        {},
-      );
+      await BluetoothEscposPrinter.printText("================================\n", {});
 
       // Contenido
       for (const line of lines) {
-        await BluetoothEscposPrinter.printText(line + '\n', {});
+        await BluetoothEscposPrinter.printText(line + "\n", {});
       }
 
       // Pie
-      await BluetoothEscposPrinter.printText(
-        '================================\n',
-        {},
-      );
-      await BluetoothEscposPrinter.printText('¡GRACIAS POR SU COMPRA!\n', {
-        align: 'center',
+      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("¡GRACIAS POR SU COMPRA!\n", {
+        align: "center",
       });
-      await BluetoothEscposPrinter.printText(
-        '================================\n',
-        {},
-      );
-      await BluetoothEscposPrinter.printText('\n\n\n', {});
+      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("\n\n\n", {});
 
       return true;
     } catch (error) {
-      console.error('Error printing formatted ticket:', error);
-      Alert.alert('Error de Impresión', 'No se pudo imprimir el ticket');
+      console.error("Error printing formatted ticket:", error);
+      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
       return false;
     }
   }
@@ -399,26 +363,26 @@ class BluetoothPrinterService {
    */
   async printTest(): Promise<boolean> {
     if (!this.isConnected) {
-      Alert.alert('No Conectado', 'Selecciona una impresora primero');
+      Alert.alert("No Conectado", "Selecciona una impresora primero");
       return false;
     }
 
     try {
       const testLines = [
-        '================================',
-        '        PRUEBA DE IMPRESIÓN',
-        '================================',
-        `Fecha: ${new Date().toLocaleString('es-MX')}`,
+        "================================",
+        "        PRUEBA DE IMPRESIÓN",
+        "================================",
+        `Fecha: ${new Date().toLocaleString("es-MX")}`,
         `Impresora: ${this.currentPrinter?.name}`,
-        '================================',
-        'Si puede leer esto correctamente,',
-        'la impresora está funcionando.',
-        '================================',
+        "================================",
+        "Si puede leer esto correctamente,",
+        "la impresora está funcionando.",
+        "================================",
       ];
 
       return await this.printTicket(testLines);
     } catch (error) {
-      console.error('Error printing test:', error);
+      console.error("Error printing test:", error);
       return false;
     }
   }
@@ -432,7 +396,7 @@ class BluetoothPrinterService {
       this.currentPrinter = null;
       this.isConnected = false;
     } catch (error) {
-      console.error('Error clearing saved printer:', error);
+      console.error("Error clearing saved printer:", error);
     }
   }
 }

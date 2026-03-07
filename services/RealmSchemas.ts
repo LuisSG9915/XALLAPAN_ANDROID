@@ -41,6 +41,7 @@ export const UsuarioSchema = {
     claveEmpleado: "string?",
     password: "string?",
     sucursalOrigen: "int?",
+    sucursalNombre: "string?",
     metros: "float?",
     reubicacion: "bool?",
     syncedAt: "date",
@@ -368,6 +369,25 @@ export const InventarioEnvaseSchema = {
   primaryKey: "id",
 };
 
+export const InventarioEnvasesHistorialSchema = {
+  name: "InventarioEnvasesHistorial",
+  properties: {
+    id: "int",
+    sucursal: "int?",
+    almacen: "int?",
+    claveProd: "int?",
+    descripcionCorta: "string?",
+    fechaMovto: "date?",
+    folioMovto: "int?",
+    cantidadEntrada: "float?",
+    cantidadSalida: "float?",
+    tipoMovto: "int?",
+    idMovil: "int?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
 export const ReubicacionSchema = {
   name: "Reubicacion",
   properties: {
@@ -408,5 +428,6 @@ export const ALL_SCHEMAS = [
   BitacoraSyncSchema,
   BitacoraGpsSchema,
   InventarioEnvaseSchema,
+  InventarioEnvasesHistorialSchema,
   ReubicacionSchema,
 ];

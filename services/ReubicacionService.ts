@@ -88,7 +88,13 @@ class ReubicacionService {
     }
 
     try {
-      const reubicaciones = this.realm.objects("Reubicacion").filtered("cveCliente == $0", cveCliente);
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      const reubicaciones = this.realm
+        .objects("Reubicacion")
+        .filtered("cveCliente == $0 AND fecha >= $1 AND fecha <= $2", cveCliente, startOfDay, endOfDay);
 
       return reubicaciones.length > 0;
     } catch (error) {
@@ -129,7 +135,28 @@ class ReubicacionService {
     }
 
     const id = generateUniqueId();
-    const fecha = new Date();
+    const fecha = (() => {
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Mexico_City",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const parts = fmt.formatToParts(new Date());
+      const g = (t: string) => parts.find((p) => p.type === t)?.value || "0";
+      return new Date(
+        parseInt(g("year"), 10),
+        parseInt(g("month"), 10) - 1,
+        parseInt(g("day"), 10),
+        parseInt(g("hour"), 10),
+        parseInt(g("minute"), 10),
+        parseInt(g("second"), 10),
+      );
+    })();
     const idMovil = Date.now();
 
     try {
@@ -155,9 +182,6 @@ class ReubicacionService {
 
       // Actualizar coordenadas del cliente en ClienteFull
       this.actualizarCoordenadasClienteLocal(cveCliente, latitudNueva, longitudNueva);
-
-      // Marcar el bit de permiso como usado (false) — solo se puede reubicar una vez
-      this.marcarPermisoReubicacionUsado(usuario);
 
       return id;
     } catch (error) {
@@ -257,17 +281,17 @@ class ReubicacionService {
       );
 
       if (response.ok) {
-        // Eliminar reubicaciones enviadas exitosamente
+        // Marcar como enviadas (no eliminar para conservar historial)
         this.realm.write(() => {
           pendientes.forEach((r) => {
             const reubicacion = this.realm!.objectForPrimaryKey("Reubicacion", r.id);
             if (reubicacion) {
-              this.realm!.delete(reubicacion);
+              (reubicacion as any).enviado = true;
             }
           });
         });
 
-        console.log(`[ReubicacionService] ✅ ${pendientes.length} reubicaciones enviadas y eliminadas exitosamente`);
+        console.log(`[ReubicacionService] ✅ ${pendientes.length} reubicaciones enviadas y marcadas como enviado`);
 
         return { success: true, sent: pendientes.length };
       } else {

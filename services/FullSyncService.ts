@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: ALL_SCHEMAS,
-        schemaVersion: 22,
+        schemaVersion: 24,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -55,6 +55,16 @@ class FullSyncService {
           // Migración v22: Agregar campo reubicacion (bool?) a Usuario — default null (se llenará en el próximo sync)
           if (oldRealm.schemaVersion < 22) {
             console.log("[Migration v22] Agregando campo reubicacion a Usuario");
+          }
+
+          // Migración v23: Agregar campo sucursalNombre (string?) a Usuario — default null (se llenará en el próximo sync)
+          if (oldRealm.schemaVersion < 23) {
+            console.log("[Migration v23] Agregando campo sucursalNombre a Usuario");
+          }
+
+          // Migración v24: Nueva tabla InventarioEnvasesHistorial (se llenará en el próximo sync)
+          if (oldRealm.schemaVersion < 24) {
+            console.log("[Migration v24] Creando tabla InventarioEnvasesHistorial");
           }
         },
       });
@@ -146,11 +156,46 @@ class FullSyncService {
   }
 
   /**
-   * Obtiene la fecha/hora actual.
-   * El dispositivo ya está en hora de México, no se requiere conversión.
+   * Obtiene la fecha/hora actual de México usando zona horaria America/Mexico_City.
+   * Retorna un Date object con la hora correcta de México.
    */
-  private getMexicoNow(): Date {
-    return new Date();
+  getMexicoNow(): Date {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Mexico_City",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+
+    const parts = formatter.formatToParts(new Date());
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || "0";
+
+    return new Date(
+      parseInt(get("year"), 10),
+      parseInt(get("month"), 10) - 1,
+      parseInt(get("day"), 10),
+      parseInt(get("hour"), 10),
+      parseInt(get("minute"), 10),
+      parseInt(get("second"), 10),
+    );
+  }
+
+  /**
+   * Formatea una fecha de México en formato ISO sin conversión a UTC.
+   * Útil para enviar al servidor preservando la hora local de México.
+   */
+  formatMexicoDateForServer(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
   }
 
   /**
@@ -247,8 +292,10 @@ class FullSyncService {
     if (idUsuario) {
       try {
         const envasesPendientes = this.getInventarioEnvasesPendientes();
+        console.log("ENVASES PENDIENTES.");
         if (envasesPendientes.length > 0) {
           console.log(`[FullSync] Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
+          console.log;
           const envasePayload = envasesPendientes.map((r: any) => ({
             sucursal: r.sucursal ?? sucursal,
             clave_prod: r.claveProd ?? 0,
@@ -262,6 +309,7 @@ class FullSyncService {
             id_movil: r.idMovil ?? 0,
             observacion: r.observacion ?? "",
           }));
+          console.log(envasePayload);
           const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
           const envaseResp = await fetch(envaseUrl, {
             method: "POST",
@@ -287,7 +335,7 @@ class FullSyncService {
         const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
         if (reubicacionesPendientes.length > 0) {
           console.log(`[FullSync] Enviando ${reubicacionesPendientes.length} reubicaciones pendientes...`);
-          
+
           const reubicacionesPayload = {
             reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
               sucursal: r.sucursal ?? sucursal,
@@ -296,10 +344,10 @@ class FullSyncService {
               longitudAnterior: r.longitudAnterior ?? 0,
               latitudNueva: r.latitudNueva,
               longitudNueva: r.longitudNueva,
-              fecha: (r.fecha ?? new Date()).toISOString(),
+              fecha: this.formatMexicoDateForServer(r.fecha ?? this.getMexicoNow()),
               usuario: r.usuario ?? idUsuario,
               idMovil: r.idMovil,
-              fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
+              fechaTransfer: this.formatMexicoDateForServer(r.fechaTransfer ?? this.getMexicoNow()),
             })),
           };
 
@@ -309,12 +357,16 @@ class FullSyncService {
             headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
             body: JSON.stringify(reubicacionesPayload),
           });
-          console.log(JSON.stringify(reubicacionesPayload))
+          console.log(JSON.stringify(reubicacionesPayload));
           if (reubicacionResp.ok) {
             this.realm.write(() => {
-              this.realm!.delete(reubicacionesPendientes);
+              Array.from(reubicacionesPendientes).forEach((r: any) => {
+                r.enviado = true;
+              });
             });
-            console.log(`[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y eliminadas`);
+            console.log(
+              `[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y marcadas como enviado`,
+            );
           } else {
             console.warn(`[FullSync] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
           }
@@ -494,7 +546,6 @@ class FullSyncService {
               console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
               throw new Error(`HTTP ${response.status} Usuarios`);
             }
-            
 
             const usuarios = await response.json();
             console.log({ usuarios });
@@ -516,6 +567,7 @@ class FullSyncService {
                   claveEmpleado: usuario.claveEmpleado,
                   password: usuario.password,
                   sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
+                  sucursalNombre: usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
                   metros: usuario.metros,
                   reubicacion:
                     typeof usuario.reubicacion === "boolean"
@@ -1174,6 +1226,84 @@ class FullSyncService {
               error: errorMsg,
               errorCode: "500",
             });
+            throw error;
+          }
+        },
+      },
+      {
+        name: "InventarioEnvasesHistorialIncremental",
+        run: async () => {
+          const tableName = "InventarioEnvasesHistorial";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-envases/full/${sucursal}`;
+
+          try {
+            console.log("[Incremental] InventarioEnvasesHistorial desde", url);
+
+            const response = await fetch(url, { headers: { accept: "application/json" } });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} InventarioEnvasesHistorial`);
+            }
+
+            const data = await response.json();
+            console.log({ data });
+            console.log("INVENTARIO HISTORIAL DE ENVASES ");
+            const registrosLeidos = Array.isArray(data) ? data.length : 0;
+            const nowMexico = this.getMexicoNow();
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            if (data.length > 0) {
+              console.log("[InventarioEnvasesHistorial] Ejemplo item del servidor:", data[0]);
+              console.log("[InventarioEnvasesHistorial] fechaMovto del item:", data[0].fechaMovto);
+            }
+
+            // Eliminar solo registros con fechaMovto null (datos corruptos de sincronización anterior)
+            this.realm!.write(() => {
+              const registrosCorruptos =
+                this.realm!.objects("InventarioEnvasesHistorial").filtered("fechaMovto == null");
+              if (registrosCorruptos.length > 0) {
+                console.log(
+                  `[InventarioEnvasesHistorial] Eliminando ${registrosCorruptos.length} registros con fechaMovto null...`,
+                );
+                this.realm!.delete(registrosCorruptos);
+              }
+            });
+
+            this.realm!.write(() => {
+              for (const item of data) {
+                const existing = this.realm!.objectForPrimaryKey("InventarioEnvasesHistorial", item.id);
+                const record = {
+                  id: item.id,
+                  sucursal: item.sucursal ?? null,
+                  almacen: item.almacen ?? null,
+                  claveProd: item.claveProd ?? null,
+                  descripcionCorta: item.descripcionCorta ?? null,
+                  fechaMovto: item.fechaMovto ? new Date(item.fechaMovto) : null,
+                  folioMovto: item.folioMovto ?? null,
+                  cantidadEntrada: item.cantidadEntrada ?? null,
+                  cantidadSalida: item.cantidadSalida ?? null,
+                  tipoMovto: item.tipoMovto ?? null,
+                  idMovil: item.idMovil ?? null,
+                  syncedAt: nowMexico,
+                };
+                if (existing) {
+                  this.realm!.create("InventarioEnvasesHistorial", record, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("InventarioEnvasesHistorial", record);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            console.log(
+              `[Incremental] InventarioEnvasesHistorial leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+            );
+
+            return { tabla: tableName, endpoint: url, registrosLeidos, registrosGuardados, registrosActualizados };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            console.error("[Incremental] InventarioEnvasesHistorial - Error:", errorMsg);
             throw error;
           }
         },
@@ -2320,6 +2450,104 @@ class FullSyncService {
     });
   }
 
+  getTodosEnvasesHistorial(startOfDay: Date, endOfDay: Date): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      return [];
+    }
+
+    console.log("[getTodosEnvasesHistorial] Buscando entre:", startOfDay, "y", endOfDay);
+
+    const todosLosRegistros = Array.from(this.realm.objects("InventarioEnvasesHistorial")) as any[];
+    console.log("[getTodosEnvasesHistorial] Total registros en Realm:", todosLosRegistros.length);
+    if (todosLosRegistros.length > 0) {
+      console.log("[getTodosEnvasesHistorial] Ejemplo de fechas almacenadas:", {
+        primera: todosLosRegistros[0]?.fechaMovto,
+        ultima: todosLosRegistros[todosLosRegistros.length - 1]?.fechaMovto,
+      });
+    }
+
+    const registros = Array.from(
+      this.realm
+        .objects("InventarioEnvasesHistorial")
+        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay),
+    ) as any[];
+
+    console.log("[getTodosEnvasesHistorial] Registros filtrados:", registros.length);
+
+    return registros.map((r) => ({
+      id: r.id,
+      sucursal: r.sucursal,
+      almacen: r.almacen,
+      claveProd: r.claveProd,
+      descripcionCorta: r.descripcionCorta,
+      fechaMovto: r.fechaMovto,
+      folioMovto: r.folioMovto,
+      cantidadEntrada: r.cantidadEntrada,
+      cantidadSalida: r.cantidadSalida,
+      tipoMovto: r.tipoMovto,
+      idMovil: r.idMovil,
+    }));
+  }
+
+  getEnvasesHistorialForDate(
+    startOfDay: Date,
+    endOfDay: Date,
+  ): {
+    envVendido: number;
+    envCambiado: number;
+    envPrestado: number;
+    cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
+  } {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      return { envVendido: 0, envCambiado: 0, envPrestado: 0, cambiadosPorProducto: [] };
+    }
+
+    console.log("[getEnvasesHistorialForDate] Buscando entre:", startOfDay, "y", endOfDay);
+
+    const registros = Array.from(
+      this.realm
+        .objects("InventarioEnvasesHistorial")
+        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay),
+    ) as any[];
+
+    console.log("[getEnvasesHistorialForDate] Registros encontrados:", registros.length);
+
+    let envVendido = 0;
+    let envCambiado = 0;
+    let envPrestado = 0;
+    const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
+
+    for (const r of registros) {
+      const tipo: number = r.tipoMovto ?? 0;
+      const clave: number = r.claveProd ?? 0;
+      const salida: number = r.cantidadSalida ?? 0;
+      const entrada: number = r.cantidadEntrada ?? 0;
+
+      if (tipo === 2 && clave === 18) {
+        envVendido += salida;
+      } else if (tipo === 2 && clave === 55) {
+        envCambiado += salida;
+      } else if (tipo === 2 && clave === 56) {
+        envPrestado += salida;
+      }
+
+      if (tipo === 1000 && entrada > 0) {
+        if (!cambiadosPorProd[clave]) {
+          cambiadosPorProd[clave] = { descripcionCorta: r.descripcionCorta ?? String(clave), cantidadEntrada: 0 };
+        }
+        cambiadosPorProd[clave].cantidadEntrada += entrada;
+      }
+    }
+
+    const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]) => ({
+      claveProd: parseInt(clave, 10),
+      descripcionCorta: val.descripcionCorta,
+      cantidadEntrada: val.cantidadEntrada,
+    }));
+
+    return { envVendido, envCambiado, envPrestado, cambiadosPorProducto };
+  }
+
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return "";
     try {
@@ -2526,14 +2754,15 @@ class FullSyncService {
           Cant_producto: venta.cantProducto ?? 0,
           precio: venta.precio ?? 0,
           Cve_cliente: venta.cveCliente ?? 0,
-          fecha: (venta.fecha ?? new Date()).toISOString(),
+          fecha: this.formatMexicoDateForServer(venta.fecha ?? this.getMexicoNow()),
           tipo_pago: venta.tipoPago ?? 1,
           usuario: idUsuario,
           longitud: venta?.longitud ?? 0,
           latitud: venta?.latitud ?? 0,
           id_movil: venta.idMovil,
-          fechaTransfer: new Date().toISOString(),
+          fechaTransfer: this.formatMexicoDateForServer(this.getMexicoNow()),
           observacion: venta.observacion ?? "",
+          folio_movto: 1,
         };
       });
 

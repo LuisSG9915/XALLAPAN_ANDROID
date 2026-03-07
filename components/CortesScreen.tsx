@@ -1,14 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Platform,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Alert } from "react-native";
 import { Icon } from "react-native-elements";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import FullSyncService from "../services/FullSyncService";
@@ -35,6 +26,13 @@ type TipoPagoTotal = {
 type InvABordoItem = {
   descripcion: string;
   saldo: number;
+};
+
+type EnvasesData = {
+  envVendido: number;
+  envCambiado: number;
+  envPrestado: number;
+  cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
 };
 
 const TIPO_PAGO_MAP: Record<number, string> = {
@@ -67,11 +65,18 @@ export default function CortesScreen() {
   const [printerName, setPrinterName] = useState("");
   const [ruta, setRuta] = useState("");
   const [userName, setUserName] = useState("");
+  const [nombreRuta, setNombreRuta] = useState("");
   const [fechaHoraActual, setFechaHoraActual] = useState("");
   const [inventarioVendido, setInventarioVendido] = useState<ProductoCantidad[]>([]);
   const [inventarioABordo, setInventarioABordo] = useState<InvABordoItem[]>([]);
   const [importesPorProducto, setImportesPorProducto] = useState<ProductoImporte[]>([]);
   const [tiposPago, setTiposPago] = useState<TipoPagoTotal[]>([]);
+  const [envases, setEnvases] = useState<EnvasesData>({
+    envVendido: 0,
+    envCambiado: 0,
+    envPrestado: 0,
+    cambiadosPorProducto: [],
+  });
 
   const formatFechaHoraMexico = (): string => {
     return new Intl.DateTimeFormat("es-MX", {
@@ -103,7 +108,9 @@ export default function CortesScreen() {
       if (user) {
         const nombre = user.nombre || "";
         const clave = user.claveEmpleado || "";
+        console.log(user);
         setUserName(clave ? `${clave} - ${nombre}` : nombre);
+        setNombreRuta(user.sucursalNombre || "");
       }
     };
     loadUser();
@@ -134,8 +141,9 @@ export default function CortesScreen() {
       const startOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 0, 0, 0, 0);
       const endOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 23, 59, 59, 999);
 
-      const rutaStr = FullSyncService.getRutaForDate(startOfDay, endOfDay);
-      setRuta(rutaStr);
+      // Obtener ID de ruta desde las visitas (para referencia, aunque ya tenemos el nombre)
+      const rutaId = FullSyncService.getRutaForDate(startOfDay, endOfDay);
+      setRuta(rutaId);
 
       const ventas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
 
@@ -185,6 +193,17 @@ export default function CortesScreen() {
           saldo: item.saldo ?? 0,
         })),
       );
+
+      const envasesData = FullSyncService.getEnvasesHistorialForDate(startOfDay, endOfDay);
+      setEnvases(envasesData);
+      console.log("=== ENVASES DATA ===");
+      console.log(envasesData);
+
+      // Ver todo el historial completo
+      const todosLosRegistros = FullSyncService.getTodosEnvasesHistorial(startOfDay, endOfDay);
+      console.log("=== TODOS LOS REGISTROS HISTORIAL ===");
+      console.log(`Total registros: ${todosLosRegistros.length}`);
+      console.log({ todosLosRegistros });
     } catch (error) {
       console.error("Error cargando datos de corte:", error);
       Alert.alert("Error", "No se pudieron cargar los datos del corte");
@@ -208,12 +227,13 @@ export default function CortesScreen() {
     try {
       await TicketPrinter.printCorteTicket({
         fecha: fechaHoraActual,
-        ruta,
+        ruta: nombreRuta || ruta,
         usuario: userName,
         inventarioVendido,
         inventarioABordo,
         importesPorProducto,
         tiposPago,
+        envases,
       });
       Alert.alert("✅ Impreso", `Corte enviado a ${status.printer?.name || "impresora"}`);
     } catch (error) {
@@ -249,9 +269,7 @@ export default function CortesScreen() {
       {!printerConnected && (
         <View style={styles.warningCard}>
           <Icon name="warning" type="material" color={COLORS.warning} size={22} />
-          <Text style={styles.warningText}>
-            No hay impresora configurada. Ve a Configuración de Impresora.
-          </Text>
+          <Text style={styles.warningText}>No hay impresora configurada. Ve a Configuración de Impresora.</Text>
         </View>
       )}
 
@@ -325,28 +343,39 @@ export default function CortesScreen() {
         </View>
       </View>
 
-      {/* Envases (pendiente) */}
+      {/* Envases */}
       <View style={styles.card}>
+        <Text style={styles.sectionTitle}>ENVASES</Text>
         <View style={styles.table}>
           <View style={styles.tableHeader}>
-            <Text style={[styles.th, styles.thFlex]}>ENVASES</Text>
-            <Text style={[styles.th, styles.thRight]}>CANTIDAD</Text>
+            <Text style={[styles.th, styles.thFlex]}>CONCEPTO</Text>
+            <Text style={[styles.th, styles.thRight]}>CANT</Text>
           </View>
           <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>ENV VENDIDO</Text>
-            <Text style={[styles.td, styles.tdRight]}>—</Text>
+            <Text style={[styles.td, styles.tdFlex]}>Env Vendido</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envVendido || "—"}</Text>
           </View>
           <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>ENV CAMBIADO</Text>
-            <Text style={[styles.td, styles.tdRight]}>—</Text>
+            <Text style={[styles.td, styles.tdFlex]}>Env Cambiado</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envCambiado || "—"}</Text>
           </View>
+          {envases.cambiadosPorProducto.length > 0 && (
+            <View style={[styles.table, { marginTop: 6 }]}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, styles.thFlex]}>ENVASES</Text>
+                <Text style={[styles.th, styles.thRight]}>CANT</Text>
+              </View>
+              {envases.cambiadosPorProducto.map((item, idx) => (
+                <View key={idx} style={styles.tr}>
+                  <Text style={[styles.td, styles.tdFlex]}>{item.descripcionCorta}</Text>
+                  <Text style={[styles.td, styles.tdRight]}>{item.cantidadEntrada}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <View style={styles.tr}>
-            <Text style={[styles.tdMuted, styles.tdFlex]}>C:— , B:— , E:—</Text>
-            <Text style={[styles.td, styles.tdRight]}> </Text>
-          </View>
-          <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>ENVASE PRESTADO</Text>
-            <Text style={[styles.td, styles.tdRight]}>—</Text>
+            <Text style={[styles.td, styles.tdFlex]}>Env Prestado</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envPrestado || "—"}</Text>
           </View>
         </View>
       </View>
@@ -422,6 +451,49 @@ export default function CortesScreen() {
       >
         <Icon name="print" type="material" color="#fff" size={22} style={{ marginRight: 8 }} />
         <Text style={styles.printBtnText}>{printing ? "Imprimiendo..." : "Imprimir Corte"}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => {
+          const startOfDay = new Date(
+            fechaSeleccionada.getFullYear(),
+            fechaSeleccionada.getMonth(),
+            fechaSeleccionada.getDate(),
+            0,
+            0,
+            0,
+            0,
+          );
+          const endOfDay = new Date(
+            fechaSeleccionada.getFullYear(),
+            fechaSeleccionada.getMonth(),
+            fechaSeleccionada.getDate(),
+            23,
+            59,
+            59,
+            999,
+          );
+
+          console.log("=== DEBUG CORTE ===");
+          console.log("Fecha seleccionada:", fechaSeleccionada.toLocaleDateString("es-MX"));
+          console.log("Rango:", startOfDay, "a", endOfDay);
+
+          const user = AuthService.currentUser;
+          const sucursal = user?.sucursal_origen ?? user?.sucursal ?? 38;
+          console.log("Sucursal:", sucursal);
+
+          const ventas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
+          console.log("Total ventas encontradas:", ventas.length);
+          console.log("Ventas:", ventas);
+
+          const rutaId = FullSyncService.getRutaForDate(startOfDay, endOfDay);
+          console.log("Ruta ID:", rutaId);
+          console.log("Nombre ruta:", nombreRuta);
+
+          console.log("===================");
+        }}
+        style={{ padding: 10, backgroundColor: "#888", marginTop: 10 }}
+      >
+        <Text style={{ color: "#fff" }}>🐛 Ver Info en Console</Text>
       </TouchableOpacity>
     </ScrollView>
   );

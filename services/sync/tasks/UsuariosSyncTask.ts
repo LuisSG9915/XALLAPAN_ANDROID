@@ -55,6 +55,7 @@ export class UsuariosSyncTask extends SyncTask {
             claveEmpleado: usuario.claveEmpleado ?? null,
             password: usuario.password ?? null,
             sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? null,
+            sucursalNombre: usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
             metros: usuario.metros ?? null,
             reubicacion:
               typeof usuario.reubicacion === "boolean"

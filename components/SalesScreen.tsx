@@ -1527,7 +1527,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           : "Transferencia";
       const vendedor =
         (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
-      const now = new Date();
+      const now = FullSyncService.getMexicoNow();
 
       // Filtrar productos con cantidad válida (última línea de defensa)
       const validCart = updatedCart.filter((item) => item.cantidad > 0);

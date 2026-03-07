@@ -50,6 +50,12 @@ export interface CorteTicketData {
   inventarioABordo: Array<{ descripcion: string; saldo: number }>;
   importesPorProducto: Array<{ nombreProducto: string; importe: number }>;
   tiposPago: Array<{ descripcion: string; total: number }>;
+  envases?: {
+    envVendido: number;
+    envCambiado: number;
+    envPrestado: number;
+    cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
+  };
 }
 
 class TicketPrinter {
@@ -236,7 +242,7 @@ class TicketPrinter {
     clientName: string,
     invoices: Array<{ nota: string; importe: number }>,
     paymentMethod: string,
-    total: number
+    total: number,
   ): TicketContent {
     const lines: TicketContent = [];
 
@@ -333,18 +339,30 @@ class TicketPrinter {
     const lines: TicketContent = [];
     const width = this.DEFAULT_WIDTH;
 
+    // Encabezado principal
     lines.push(this.separator("=", width));
-    lines.push(this.center("CORTE DE RUTA", width));
+    lines.push("[B]" + this.center("CORTE DE RUTA", width));
     lines.push(this.separator("=", width));
+    lines.push("");
 
-    lines.push(this.leftRight("RUTA:", data.ruta || "---", width));
-    lines.push(this.leftRight("FECHA:", data.fecha, width));
-    lines.push(`USUARIO: ${data.usuario}`);
-    lines.push(this.separator("-", width));
+    // Información de ruta y fecha
+    lines.push("[B]RUTA:");
+    lines.push(data.ruta || "---");
+    lines.push("");
+    lines.push("[B]FECHA Y HORA:");
+    lines.push(data.fecha);
+    lines.push("");
+    lines.push("[B]USUARIO:");
+    lines.push(data.usuario);
 
-    lines.push("INVENTARIO VENDIDO");
+    lines.push("");
+    lines.push(this.separator("=", width));
+    lines.push("");
+
+    // Inventario Vendido
+    lines.push("[B]INVENTARIO VENDIDO");
     lines.push(this.separator("-", width));
-    lines.push(this.leftRight("PRODUCTO", "CANT", width));
+    lines.push(this.leftRight("Producto", "Cant", width));
     if (data.inventarioVendido.length === 0) {
       lines.push("  Sin ventas");
     } else {
@@ -355,18 +373,32 @@ class TicketPrinter {
         lines.push(this.leftRight(desc, cant, width));
       });
     }
-    lines.push(this.separator("-", width));
+    lines.push("");
 
-    lines.push("ENVASES");
+    // Envases
+    lines.push("[B]ENVASES");
     lines.push(this.separator("-", width));
-    lines.push(this.leftRight("ENV VENDIDO", "---", width));
-    lines.push(this.leftRight("ENV CAMBIADO", "---", width));
-    lines.push(this.leftRight("ENVASE PRESTADO", "---", width));
-    lines.push(this.separator("-", width));
+    lines.push(this.leftRight("Concepto", "Cant", width));
+    const env = data.envases;
+    lines.push(this.leftRight("Env Vendido", env ? String(env.envVendido) : "---", width));
+    lines.push(this.leftRight("Env Cambiado", env ? String(env.envCambiado) : "---", width));
+    lines.push(this.leftRight("Env Prestado", env ? String(env.envPrestado) : "---", width));
+    if (env && env.cambiadosPorProducto.length > 0) {
+      lines.push("");
+      lines.push("[B]ENV RECIBIDOS");
+      lines.push(this.separator("-", width));
+      lines.push(this.leftRight("Producto", "Cant", width));
+      env.cambiadosPorProducto.forEach((item) => {
+        const desc = item.descripcionCorta.substring(0, width - 6);
+        lines.push(this.leftRight(desc, String(item.cantidadEntrada), width));
+      });
+    }
+    lines.push("");
 
-    lines.push("INVENTARIO A BORDO");
+    // Inventario a bordo
+    lines.push("[B]INVENTARIO A BORDO");
     lines.push(this.separator("-", width));
-    lines.push(this.leftRight("PRODUCTO", "CANT", width));
+    lines.push(this.leftRight("Producto", "Cant", width));
     if (data.inventarioABordo.length === 0) {
       lines.push("  Sin inventario");
     } else {
@@ -377,11 +409,12 @@ class TicketPrinter {
         lines.push(this.leftRight(desc, saldo, width));
       });
     }
-    lines.push(this.separator("-", width));
+    lines.push("");
 
-    lines.push("IMPORTES");
+    // Importes por producto
+    lines.push("[B]IMPORTES POR PRODUCTO");
     lines.push(this.separator("-", width));
-    lines.push(this.leftRight("PRODUCTO", "IMPORTE", width));
+    lines.push(this.leftRight("Producto", "Importe", width));
     if (data.importesPorProducto.length === 0) {
       lines.push("  Sin datos");
     } else {
@@ -392,11 +425,12 @@ class TicketPrinter {
         lines.push(this.leftRight(desc, imp, width));
       });
     }
-    lines.push(this.separator("-", width));
+    lines.push("");
 
-    lines.push("TIPOS DE PAGO");
+    // Tipos de pago
+    lines.push("[B]TIPOS DE PAGO");
     lines.push(this.separator("-", width));
-    lines.push(this.leftRight("TIPO", "IMPORTE", width));
+    lines.push(this.leftRight("Tipo", "Importe", width));
     if (data.tiposPago.length === 0) {
       lines.push("  Sin datos");
     } else {
@@ -407,6 +441,7 @@ class TicketPrinter {
       });
     }
 
+    lines.push("");
     lines.push(this.separator("=", width));
     lines.push("");
 
@@ -428,7 +463,7 @@ class TicketPrinter {
     clientName: string,
     invoices: Array<{ nota: string; importe: number }>,
     paymentMethod: string,
-    total: number
+    total: number,
   ): Promise<void> {
     const lines = this.generateBillingTicket(clientName, invoices, paymentMethod, total);
     await this.print(lines, { title: "Comprobante de Pago" });
