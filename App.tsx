@@ -707,7 +707,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <SyncStatusPanel />
 
         {/* Header */}
         <View style={styles.header}>
@@ -808,6 +807,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
             )}
           </TouchableOpacity>
         </View>
+        <SyncStatusPanel />
 
         {/* Footer Info */}
         <View style={styles.footer}>
