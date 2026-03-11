@@ -160,6 +160,10 @@ class FullSyncService {
    * Retorna un Date object con la hora correcta de México.
    */
   getMexicoNow(): Date {
+    // Obtener la hora actual en UTC
+    const nowUTC = new Date();
+
+    // Formatear la hora de México usando Intl
     const formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: "America/Mexico_City",
       year: "numeric",
@@ -171,10 +175,12 @@ class FullSyncService {
       hour12: false,
     });
 
-    const parts = formatter.formatToParts(new Date());
+    const parts = formatter.formatToParts(nowUTC);
     const get = (type: string) => parts.find((p) => p.type === type)?.value || "0";
 
-    return new Date(
+    // Crear fecha usando Date.UTC para que se interprete como UTC
+    // Luego ajustar para que represente la hora de México
+    const mexicoDateUTC = Date.UTC(
       parseInt(get("year"), 10),
       parseInt(get("month"), 10) - 1,
       parseInt(get("day"), 10),
@@ -182,6 +188,8 @@ class FullSyncService {
       parseInt(get("minute"), 10),
       parseInt(get("second"), 10),
     );
+
+    return new Date(mexicoDateUTC);
   }
 
   /**
@@ -189,13 +197,16 @@ class FullSyncService {
    * Útil para enviar al servidor preservando la hora local de México.
    */
   formatMexicoDateForServer(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    const seconds = String(date.getSeconds()).padStart(2, "0");
-    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    // El Date almacenado ya representa la hora de México como UTC
+    // Por lo tanto, usamos getUTC* para leer los componentes sin conversión adicional
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const hours = String(date.getUTCHours()).padStart(2, "0");
+    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+    const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+    const ms = String(date.getUTCMilliseconds()).padStart(3, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
   }
 
   /**
@@ -331,49 +342,87 @@ class FullSyncService {
 
     // PASO 3: Enviar reubicaciones pendientes al servidor ANTES de ventas
     if (idUsuario) {
+      console.log("[FullSync-Reubicacion] 🔍 Iniciando verificación de reubicaciones pendientes...");
       try {
+        const todasReubicaciones = this.realm.objects("Reubicacion");
+        console.log(`[FullSync-Reubicacion] Total reubicaciones en BD: ${todasReubicaciones.length}`);
+
         const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
+        console.log(`[FullSync-Reubicacion] Reubicaciones con enviado=false: ${reubicacionesPendientes.length}`);
+
         if (reubicacionesPendientes.length > 0) {
-          console.log(`[FullSync] Enviando ${reubicacionesPendientes.length} reubicaciones pendientes...`);
+          console.log(
+            `[FullSync-Reubicacion] 📤 Enviando ${reubicacionesPendientes.length} reubicaciones pendientes...`,
+          );
+          console.log(
+            `[FullSync-Reubicacion] Detalles de reubicaciones:`,
+            Array.from(reubicacionesPendientes).map((r: any) => ({
+              id: r.id,
+              cveCliente: r.cveCliente,
+              sucursal: r.sucursal,
+              enviado: r.enviado,
+              fecha: r.fecha,
+            })),
+          );
 
           const reubicacionesPayload = {
-            reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
+            request: Array.from(reubicacionesPendientes).map((r: any) => ({
               sucursal: r.sucursal ?? sucursal,
               cveCliente: r.cveCliente,
               latitudAnterior: r.latitudAnterior ?? 0,
               longitudAnterior: r.longitudAnterior ?? 0,
               latitudNueva: r.latitudNueva,
               longitudNueva: r.longitudNueva,
-              fecha: this.formatMexicoDateForServer(r.fecha ?? this.getMexicoNow()),
+              fecha: (r.fecha ?? this.getMexicoNow()).toISOString(),
               usuario: r.usuario ?? idUsuario,
               idMovil: r.idMovil,
-              fechaTransfer: this.formatMexicoDateForServer(r.fechaTransfer ?? this.getMexicoNow()),
+              fechaTransfer: (r.fechaTransfer ?? this.getMexicoNow()).toISOString(),
             })),
           };
 
           const reubicacionUrl = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          console.log(`[FullSync-Reubicacion] 🌐 URL: ${reubicacionUrl}`);
+          console.log(`[FullSync-Reubicacion] 📦 Payload:`, JSON.stringify(reubicacionesPayload, null, 2));
+
           const reubicacionResp = await fetch(reubicacionUrl, {
             method: "POST",
             headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
             body: JSON.stringify(reubicacionesPayload),
           });
-          console.log(JSON.stringify(reubicacionesPayload));
+
+          console.log(
+            `[FullSync-Reubicacion] 📡 Respuesta HTTP: ${reubicacionResp.status} ${reubicacionResp.statusText}`,
+          );
+
           if (reubicacionResp.ok) {
+            const responseText = await reubicacionResp.text();
+            console.log(`[FullSync-Reubicacion] 📥 Respuesta del servidor:`, responseText);
+
             this.realm.write(() => {
               Array.from(reubicacionesPendientes).forEach((r: any) => {
                 r.enviado = true;
               });
             });
             console.log(
-              `[FullSync] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y marcadas como enviado`,
+              `[FullSync-Reubicacion] ✅ ${reubicacionesPayload.request.length} reubicaciones enviadas y marcadas como enviado`,
             );
           } else {
-            console.warn(`[FullSync] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
+            const errorText = await reubicacionResp.text().catch(() => "No se pudo leer el error");
+            console.warn(`[FullSync-Reubicacion] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
+            console.warn(`[FullSync-Reubicacion] ⚠️ Detalle del error:`, errorText);
           }
+        } else {
+          console.log("[FullSync-Reubicacion] ℹ️ No hay reubicaciones pendientes de envío");
         }
       } catch (reubicacionError) {
-        console.warn("[FullSync] ⚠️ Error enviando reubicaciones, continuando:", reubicacionError);
+        console.error("[FullSync-Reubicacion] ❌ Error enviando reubicaciones:", reubicacionError);
+        console.error(
+          "[FullSync-Reubicacion] ❌ Stack:",
+          reubicacionError instanceof Error ? reubicacionError.stack : "N/A",
+        );
       }
+    } else {
+      console.log("[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones");
     }
 
     // PASO 4: Enviar ventas pendientes al servidor DESPUÉS de reubicaciones
@@ -2525,9 +2574,9 @@ class FullSyncService {
 
       if (tipo === 2 && clave === 18) {
         envVendido += salida;
-      } else if (tipo === 2 && clave === 55) {
+      } else if (tipo === 1100 && clave === 18) {
         envCambiado += salida;
-      } else if (tipo === 2 && clave === 56) {
+      } else if (tipo === 1200 && clave === 18) {
         envPrestado += salida;
       }
 

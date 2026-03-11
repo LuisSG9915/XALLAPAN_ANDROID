@@ -123,14 +123,28 @@ class ReubicacionService {
     longitudNueva: number,
     usuario: number,
   ): Promise<string | null> {
+    console.log("[ReubicacionService] 📍 Iniciando registro de reubicación...");
+    console.log(`[ReubicacionService] Parámetros:`, {
+      sucursal,
+      cveCliente,
+      latitudAnterior,
+      longitudAnterior,
+      latitudNueva,
+      longitudNueva,
+      usuario,
+    });
+
     if (!this.realm || this.realm.isClosed) {
-      console.error("[ReubicacionService] Realm no inicializado");
+      console.error("[ReubicacionService] ❌ Realm no inicializado");
       return null;
     }
 
     // Verificar si ya existe una reubicación para este cliente
-    if (this.clienteYaReubicado(cveCliente)) {
-      console.warn(`[ReubicacionService] El cliente ${cveCliente} ya fue reubicado anteriormente`);
+    const yaReubicado = this.clienteYaReubicado(cveCliente);
+    console.log(`[ReubicacionService] Cliente ${cveCliente} ya reubicado: ${yaReubicado}`);
+
+    if (yaReubicado) {
+      console.warn(`[ReubicacionService] ⚠️ El cliente ${cveCliente} ya fue reubicado anteriormente`);
       return null;
     }
 
@@ -159,6 +173,13 @@ class ReubicacionService {
     })();
     const idMovil = Date.now();
 
+    console.log(`[ReubicacionService] Datos generados:`, {
+      id,
+      fecha: fecha.toISOString(),
+      idMovil,
+      enviado: false,
+    });
+
     try {
       this.realm.write(() => {
         this.realm!.create("Reubicacion", {
@@ -178,14 +199,28 @@ class ReubicacionService {
         });
       });
 
-      console.log(`[ReubicacionService] Reubicación registrada para cliente ${cveCliente}`);
+      console.log(`[ReubicacionService] ✅ Reubicación registrada exitosamente`);
+      console.log(`[ReubicacionService] ID: ${id}, Cliente: ${cveCliente}, Enviado: false`);
+
+      // Verificar que se guardó correctamente
+      const verificacion = this.realm.objectForPrimaryKey("Reubicacion", id);
+      if (verificacion) {
+        console.log(`[ReubicacionService] ✓ Verificación: Reubicación existe en BD`, {
+          id: (verificacion as any).id,
+          enviado: (verificacion as any).enviado,
+          cveCliente: (verificacion as any).cveCliente,
+        });
+      } else {
+        console.error(`[ReubicacionService] ❌ Verificación: No se encontró la reubicación en BD`);
+      }
 
       // Actualizar coordenadas del cliente en ClienteFull
       this.actualizarCoordenadasClienteLocal(cveCliente, latitudNueva, longitudNueva);
 
       return id;
     } catch (error) {
-      console.error("[ReubicacionService] Error registrando reubicación:", error);
+      console.error("[ReubicacionService] ❌ Error registrando reubicación:", error);
+      console.error("[ReubicacionService] ❌ Stack:", error instanceof Error ? error.stack : "N/A");
       return null;
     }
   }
@@ -266,6 +301,19 @@ class ReubicacionService {
     console.log(`[ReubicacionService] Enviando ${pendientes.length} reubicaciones al servidor`);
 
     try {
+      const payload = pendientes.map((r) => ({
+        sucursal: r.sucursal,
+        cveCliente: r.cveCliente,
+        latitudAnterior: r.latitudAnterior ?? 0,
+        longitudAnterior: r.longitudAnterior ?? 0,
+        latitudNueva: r.latitudNueva,
+        longitudNueva: r.longitudNueva,
+        fecha: (r.fecha ?? new Date()).toISOString(),
+        usuario: r.usuario,
+        idMovil: r.idMovil,
+        fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
+      }));
+
       const response = await fetch(
         `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`,
         {
@@ -275,7 +323,7 @@ class ReubicacionService {
             Accept: "application/json",
           },
           body: JSON.stringify({
-            reubicaciones: pendientes,
+            request: payload,
           }),
         },
       );

@@ -32,8 +32,13 @@ export class ReubicacionSyncTask extends SyncTask {
   }
 
   async execute(): Promise<SyncTaskResult> {
+    console.log(`[ReubicacionSync] � Iniciando sincronización de reubicaciones para sucursal ${this.sucursal}`);
+    console.log(`[ReubicacionSync] idUsuario: ${this.idUsuario}`);
+
     try {
-      console.log(`[ReubicacionSync] 📤 Iniciando sincronización de reubicaciones para sucursal ${this.sucursal}`);
+      // Verificar todas las reubicaciones en BD
+      const todasReubicaciones = this.realm.objects("Reubicacion");
+      console.log(`[ReubicacionSync] Total reubicaciones en BD: ${todasReubicaciones.length}`);
 
       // Obtener reubicaciones pendientes de envío
       const reubicacionesPendientes = this.realm
@@ -41,9 +46,12 @@ export class ReubicacionSyncTask extends SyncTask {
         .filtered("enviado == false AND sucursal == $0", this.sucursal);
 
       const registrosLeidos = reubicacionesPendientes.length;
+      console.log(
+        `[ReubicacionSync] Reubicaciones pendientes (enviado=false, sucursal=${this.sucursal}): ${registrosLeidos}`,
+      );
 
       if (registrosLeidos === 0) {
-        console.log("[ReubicacionSync] ✓ No hay reubicaciones pendientes");
+        console.log("[ReubicacionSync] ℹ️ No hay reubicaciones pendientes");
         return {
           success: true,
           registrosLeidos: 0,
@@ -51,7 +59,17 @@ export class ReubicacionSyncTask extends SyncTask {
         };
       }
 
-      console.log(`[ReubicacionSync] Enviando ${registrosLeidos} reubicaciones pendientes`);
+      console.log(`[ReubicacionSync] 📤 Enviando ${registrosLeidos} reubicaciones pendientes`);
+      console.log(
+        `[ReubicacionSync] Detalles:`,
+        Array.from(reubicacionesPendientes).map((r: any) => ({
+          id: r.id,
+          cveCliente: r.cveCliente,
+          sucursal: r.sucursal,
+          enviado: r.enviado,
+          fecha: r.fecha,
+        })),
+      );
 
       // Convertir a array de objetos planos
       const payload = Array.from(reubicacionesPendientes).map((r: any) => ({
@@ -66,23 +84,33 @@ export class ReubicacionSyncTask extends SyncTask {
         idMovil: r.idMovil,
         fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
       }));
-      console.log(payload)
+
+      const endpoint = this.getEndpoint();
+      console.log(`[ReubicacionSync] 🌐 Endpoint: ${endpoint}`);
+      console.log(`[ReubicacionSync] 📦 Payload:`, JSON.stringify({ request: payload }, null, 2));
+
       // Enviar al servidor
-      const response = await fetch(this.getEndpoint(), {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           accept: "application/json",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          reubicaciones: payload,
+          request: payload,
         }),
       });
 
+      console.log(`[ReubicacionSync] 📡 Respuesta HTTP: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
+        const errorText = await response.text().catch(() => "No se pudo leer el error");
+        console.error(`[ReubicacionSync] ❌ Error HTTP ${response.status}:`, errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
+
+      const responseText = await response.text();
+      console.log(`[ReubicacionSync] 📥 Respuesta del servidor:`, responseText);
 
       // Eliminar reubicaciones enviadas exitosamente
       this.realm.write(() => {
@@ -99,6 +127,7 @@ export class ReubicacionSyncTask extends SyncTask {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
       console.error("[ReubicacionSync] ❌ Error:", errorMsg);
+      console.error("[ReubicacionSync] ❌ Stack:", error instanceof Error ? error.stack : "N/A");
 
       return {
         success: false,

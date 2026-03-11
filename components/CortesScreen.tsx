@@ -143,7 +143,8 @@ export default function CortesScreen() {
 
       // Obtener ID de ruta desde las visitas (para referencia, aunque ya tenemos el nombre)
       const rutaId = FullSyncService.getRutaForDate(startOfDay, endOfDay);
-      setRuta(rutaId);
+      setRuta(user?.dSucursal);
+      console.log(user);
 
       const ventas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
 

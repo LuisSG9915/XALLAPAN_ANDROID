@@ -40,16 +40,15 @@ export default function IntercambioEnvaseModal({
   const [mostrarLista, setMostrarLista] = useState(false);
 
   useEffect(() => {
-    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoAutomatico:", costoAutomatico);
+    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoIntercambio:", costoAutomatico);
     if (visible) {
       console.log("[IntercambioModal] ✅ Modal visible, cargando productos envase...");
-      // Cargar productos que tienen envaseRecibe = 1
       const productos = FullSyncService.getProductosEnvaseRecibe(50);
       console.log("[IntercambioModal] Productos envase encontrados:", productos.length);
+
       const formateados: EnvaseProducto[] = productos
         .filter((p: any) => {
           const clave = parseInt(p.claveProd || "0", 10);
-          // Excluir el envase XALLAPAN (ese es el de entrega)
           return clave !== CLAVE_ENVASE_XALLAPAN;
         })
         .map((p: any) => ({
@@ -57,8 +56,19 @@ export default function IntercambioEnvaseModal({
           claveProd: p.claveProd || String(p.id),
           descripcion: p.descripcion || "Sin descripción",
         }));
-      console.log("[IntercambioModal] Productos formateados:", formateados.length);
-      setEnvasesDisponibles(formateados);
+
+      // Eliminar duplicados por descripción (quedarse con el primero)
+      const descripcionesMap = new Map<string, EnvaseProducto>();
+      formateados.forEach((p) => {
+        if (!descripcionesMap.has(p.descripcion)) {
+          descripcionesMap.set(p.descripcion, p);
+        }
+      });
+
+      const sinDuplicados = Array.from(descripcionesMap.values());
+      console.log(`[IntercambioModal] Productos sin duplicados: ${sinDuplicados.length}`);
+
+      setEnvasesDisponibles(sinDuplicados);
       setEnvaseRecibido(null);
       setObservacion("");
       setMostrarLista(false);
@@ -68,6 +78,7 @@ export default function IntercambioEnvaseModal({
 
   const handleAccept = () => {
     if (!envaseRecibido) return;
+    console.log(`[IntercambioModal] ✅ Aceptando con costo de INTERCAMBIO: $${costoAutomatico}`);
     onAccept({
       envaseEntregadoClave: CLAVE_ENVASE_XALLAPAN,
       envaseEntregadoDesc: DESC_ENVASE_XALLAPAN,
@@ -115,6 +126,9 @@ export default function IntercambioEnvaseModal({
                       onPress={() => {
                         setEnvaseRecibido(item);
                         setMostrarLista(false);
+                        console.log(
+                          `[IntercambioModal] ✅ Seleccionado envase: ${item.descripcion} (ID: ${item.id}, Clave: ${item.claveProd})`,
+                        );
                       }}
                     >
                       <Text style={styles.listItemText}>{item.descripcion}</Text>
@@ -129,10 +143,10 @@ export default function IntercambioEnvaseModal({
 
           {/* Costo automático */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>COSTO (AUTOMÁTICO SEGÚN PRECIO CLIENTE):</Text>
+            <Text style={styles.sectionLabel}>COSTO DEL PRODUCTO INTERCAMBIO:</Text>
             <View style={styles.fixedValue}>
               <Text style={styles.fixedValueText}>${costoAutomatico.toFixed(2)}</Text>
-              <Text style={styles.fixedValueSub}>Calculado según lista de precios del cliente</Text>
+              <Text style={styles.fixedValueSub}>Precio del producto de intercambio según lista del cliente</Text>
             </View>
           </View>
 

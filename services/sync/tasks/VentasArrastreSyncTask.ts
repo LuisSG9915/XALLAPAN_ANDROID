@@ -52,6 +52,52 @@ export class VentasArrastreSyncTask extends SyncTask {
         };
       }
 
+      // Helper para obtener la hora actual de México
+      const getMexicoNow = (): Date => {
+        const nowUTC = new Date();
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/Mexico_City",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        });
+
+        const parts = formatter.formatToParts(nowUTC);
+        const get = (type: string) => parts.find((p) => p.type === type)?.value || "0";
+
+        const mexicoDateUTC = Date.UTC(
+          parseInt(get("year"), 10),
+          parseInt(get("month"), 10) - 1,
+          parseInt(get("day"), 10),
+          parseInt(get("hour"), 10),
+          parseInt(get("minute"), 10),
+          parseInt(get("second"), 10),
+        );
+
+        return new Date(mexicoDateUTC);
+      };
+
+      // Helper para formatear fecha que ya está en hora de México
+      // El Date object almacenado en Realm ya representa la hora de México como UTC
+      // Por lo tanto, usamos getUTC* para leer los componentes sin conversión adicional
+      const formatLocalDate = (date: Date): string => {
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(date.getUTCDate()).padStart(2, "0");
+        const hours = String(date.getUTCHours()).padStart(2, "0");
+        const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+        const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+        const ms = String(date.getUTCMilliseconds()).padStart(3, "0");
+
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
+      };
+
+      const nowMexico = getMexicoNow();
+
       // Preparar payload
       const payload = ventasLocales.map((venta: any) => ({
         sucursal: venta.sucursal ?? this.sucursal,
@@ -59,13 +105,13 @@ export class VentasArrastreSyncTask extends SyncTask {
         Cant_producto: venta.cantProducto ?? 0,
         precio: venta.precio ?? 0,
         Cve_cliente: venta.cveCliente ?? 0,
-        fecha: (venta.fecha ?? new Date()).toISOString(),
+        fecha: formatLocalDate(venta.fecha ?? nowMexico),
         tipo_pago: venta.tipoPago ?? 1,
         usuario: this.idUsuario,
         longitud: venta?.longitud ?? 0,
         latitud: venta?.latitud ?? 0,
         id_movil: venta.idMovil,
-        fechaTransfer: new Date().toISOString(),
+        fechaTransfer: formatLocalDate(nowMexico),
         observacion: venta.observacion ?? "",
       }));
 

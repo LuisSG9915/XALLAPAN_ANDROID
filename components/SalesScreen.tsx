@@ -142,24 +142,39 @@ export default function SalesScreen({ route }: { route?: any }) {
       // 3. Precio por defecto (lista 13 - DOMIC.)
       // NOTA: En la tabla Precio, el campo claveProd contiene el ID del producto, no la clave_prod
 
+      console.log(`[obtenerPrecioProducto] 🔍 Buscando precio para producto ID: ${idProducto}`);
+      console.log(`[obtenerPrecioProducto] Precios promo disponibles: ${preciosPromo?.length || 0}`);
+      console.log(`[obtenerPrecioProducto] Precios cliente disponibles: ${preciosCliente?.length || 0}`);
+      console.log(`[obtenerPrecioProducto] Precios default disponibles: ${preciosDefault?.length || 0}`);
+
       // Mapa de precios promocionales
       if (preciosPromo) {
         const precioPromo = preciosPromo.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
-        if (precioPromo) return precioPromo.precio || 0;
+        if (precioPromo) {
+          console.log(`[obtenerPrecioProducto] ✅ Encontrado precio PROMO: $${precioPromo.precio}`);
+          return precioPromo.precio || 0;
+        }
       }
 
       // Mapa de precios del cliente
       if (preciosCliente) {
         const precioCliente = preciosCliente.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
-        if (precioCliente) return precioCliente.precio || 0;
+        if (precioCliente) {
+          console.log(`[obtenerPrecioProducto] ✅ Encontrado precio CLIENTE: $${precioCliente.precio}`);
+          return precioCliente.precio || 0;
+        }
       }
 
       // Precio por defecto
       if (preciosDefault) {
         const precioDefault = preciosDefault.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
-        if (precioDefault) return precioDefault.precio || 0;
+        if (precioDefault) {
+          console.log(`[obtenerPrecioProducto] ✅ Encontrado precio DEFAULT: $${precioDefault.precio}`);
+          return precioDefault.precio || 0;
+        }
       }
 
+      console.warn(`[obtenerPrecioProducto] ⚠️ NO se encontró precio para producto ID ${idProducto}`);
       return 0;
     },
     [],
@@ -236,6 +251,11 @@ export default function SalesScreen({ route }: { route?: any }) {
       });
 
       const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
+        // Productos especiales (INTERCAMBIO y PRESTAMO) siempre tienen existencia infinita
+        if (claveProd === 1000 || claveProd === 1001) {
+          return 999;
+        }
+
         if (esKit && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
@@ -296,8 +316,10 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
       });
 
-      // Mapear todos los productos disponibles
-      return Array.from(todasLasClaves).map((claveNum) => {
+      // Mapear todos los productos disponibles usando un Map por ID para evitar duplicados
+      const productosMap = new Map<number, Producto>();
+
+      Array.from(todasLasClaves).forEach((claveNum) => {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
         const productoId = productoBase?.id ?? claveNum;
@@ -329,7 +351,8 @@ export default function SalesScreen({ route }: { route?: any }) {
         if (precio === undefined) precio = 0;
 
         const existencia = calcularExistencia(productoId, claveNum, esKit);
-        return {
+
+        const producto: Producto = {
           id: productoId,
           claveProd: (productoBase?.claveProd || claveNum).toString(),
           descripcion,
@@ -339,7 +362,15 @@ export default function SalesScreen({ route }: { route?: any }) {
           usandoPrecioDefault,
           esPromocion,
         };
+
+        // Solo agregar si no existe ya un producto con este ID, o si el nuevo tiene mejor precio
+        const existing = productosMap.get(productoId);
+        if (!existing || precio > existing.precio) {
+          productosMap.set(productoId, producto);
+        }
       });
+
+      return Array.from(productosMap.values());
     },
     [currentSucursal],
   );
@@ -1319,36 +1350,12 @@ export default function SalesScreen({ route }: { route?: any }) {
     // Verificar si el carrito tiene producto INTERCAMBIO (clave 1000) y aún no se ha llenado el modal
     const itemIntercambio = cart.find((ci) => ci.claveProd === "1000" || ci.id === 55);
     if (itemIntercambio && !intercambioData && !intercambioDataRef.current) {
-      console.log("[Sales] Producto INTERCAMBIO detectado, calculando costo y mostrando modal");
+      console.log("[Sales] Producto INTERCAMBIO detectado, mostrando modal");
+      console.log(`[Sales] Precio del producto INTERCAMBIO en carrito: $${itemIntercambio.precio}`);
 
-      // Calcular costo automático del envase XALLAPAN (clave_prod 16001, id 18)
-      const CLAVE_ENVASE_XALLAPAN = 16001;
-
-      // Primero buscar el producto por su clave_prod para obtener su ID
-      const productos = FullSyncService.getProductos(1000000);
-      const productoEnvase = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_ENVASE_XALLAPAN);
-
-      if (!productoEnvase) {
-        console.warn(`[Sales] No se encontró producto con clave ${CLAVE_ENVASE_XALLAPAN}`);
-        setCostoIntercambioCalculado(0);
-      } else {
-        const idProductoEnvase = productoEnvase.id; // Este es el ID que se usa en la tabla Precio (18)
-
-        const listaPrecios = selectedClient?.listaPrecio ?? 0;
-        const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient?.id || 0);
-        const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
-        const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
-
-        // Buscar precio usando el ID del producto (no la clave_prod)
-        const costoCalculado = obtenerPrecioProducto(idProductoEnvase, preciosPromo, preciosCliente, preciosDefault);
-
-        console.log(
-          `[Sales] Producto XALLAPAN - clave_prod: ${CLAVE_ENVASE_XALLAPAN}, id: ${idProductoEnvase}, costo: $${costoCalculado.toFixed(
-            2,
-          )}`,
-        );
-        setCostoIntercambioCalculado(costoCalculado);
-      }
+      // El costo del intercambio es el precio del producto de INTERCAMBIO (clave 1000)
+      // NO el precio del envase recibido
+      setCostoIntercambioCalculado(itemIntercambio.precio);
 
       setPendingIntercambioCantidad(itemIntercambio.cantidad);
       setIntercambioModalOpen(true);
@@ -1659,23 +1666,26 @@ export default function SalesScreen({ route }: { route?: any }) {
           return producto?.id || claveProd;
         };
 
-        // INTERCAMBIO (clave 1000): salida de XALLAPAN + entrada de envase recibido
+        // INTERCAMBIO (clave 1000): solo entrada de envase recibido
+        // Ya no se registra la salida del ENVASE XALLAPAN
         const currentIntercambioData = intercambioData || intercambioDataRef.current;
         if (currentIntercambioData) {
           const cantIntercambio = validCart.find((ci) => ci.claveProd === "1000" || ci.id === 55)?.cantidad || 1;
-          // SALIDA: envase XALLAPAN entregado
-          envaseItems.push({
-            sucursal,
-            claveProd: getProductIdByClave(currentIntercambioData.envaseEntregadoClave),
-            folioMovto: 1,
-            cantidadEntrada: 0,
-            cantidadSalida: cantIntercambio,
-            costo: currentIntercambioData.costo || 0,
-            tipoMovto: 1100,
-            idMovil: saleIdMovil,
-            observacion: currentIntercambioData.observacion || "",
-          });
-          // ENTRADA: envase recibido
+
+          // COMENTADO: Ya no se registra la salida del envase XALLAPAN entregado
+          // envaseItems.push({
+          //   sucursal,
+          //   claveProd: getProductIdByClave(currentIntercambioData.envaseEntregadoClave),
+          //   folioMovto: 1,
+          //   cantidadEntrada: 0,
+          //   cantidadSalida: cantIntercambio,
+          //   costo: currentIntercambioData.costo || 0,
+          //   tipoMovto: 1100,
+          //   idMovil: saleIdMovil,
+          //   observacion: currentIntercambioData.observacion || "",
+          // });
+
+          // ENTRADA: envase recibido (solo se registra la entrada)
           envaseItems.push({
             sucursal,
             claveProd: getProductIdByClave(currentIntercambioData.envaseRecibidoClave),
