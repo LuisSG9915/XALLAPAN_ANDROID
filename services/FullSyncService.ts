@@ -287,62 +287,9 @@ class FullSyncService {
       throw new Error("Realm no inicializado");
     }
 
-    // PASO 1: Enviar bitácoras pendientes
+    // PASO 1: Enviar reubicaciones pendientes PRIMERO (VentasArrastre depende de esta tabla)
     if (idUsuario) {
-      try {
-        console.log("[FullSync] Enviando bitácoras pendientes...");
-        await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras GPS pendientes...");
-        await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-      } catch (error) {
-        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
-      }
-    }
-
-    // PASO 2: Enviar InventarioEnvase pendientes ANTES de ventas
-    if (idUsuario) {
-      try {
-        const envasesPendientes = this.getInventarioEnvasesPendientes();
-        console.log("ENVASES PENDIENTES.");
-        if (envasesPendientes.length > 0) {
-          console.log(`[FullSync] Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
-          console.log;
-          const envasePayload = envasesPendientes.map((r: any) => ({
-            sucursal: r.sucursal ?? sucursal,
-            clave_prod: r.claveProd ?? 0,
-            folio_movto: r.folioMovto ?? 1,
-            cantidad_entrada: r.cantidadEntrada ?? 0,
-            cantidad_salida: r.cantidadSalida ?? 0,
-            costo: r.costo ?? 0,
-            tipo_movto: r.tipoMovto ?? 0,
-            fecha_alta: (r.fechaAlta ?? new Date()).toISOString(),
-            fecha_act: (r.fechaAct ?? new Date()).toISOString(),
-            id_movil: r.idMovil ?? 0,
-            observacion: r.observacion ?? "",
-          }));
-          console.log(envasePayload);
-          const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-          const envaseResp = await fetch(envaseUrl, {
-            method: "POST",
-            headers: { accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify(envasePayload),
-          });
-          if (envaseResp.ok) {
-            console.log(`[FullSync] ✅ ${envasePayload.length} InventarioEnvase enviados`);
-            const ids = envasesPendientes.map((r: any) => r.id as string);
-            this.marcarInventarioEnvaseSincronizado(ids);
-          } else {
-            console.warn(`[FullSync] ⚠️ Error HTTP ${envaseResp.status} enviando InventarioEnvase`);
-          }
-        }
-      } catch (envaseError) {
-        console.warn("[FullSync] ⚠️ Error enviando InventarioEnvase, continuando:", envaseError);
-      }
-    }
-
-    // PASO 3: Enviar reubicaciones pendientes al servidor ANTES de ventas
-    if (idUsuario) {
-      console.log("[FullSync-Reubicacion] 🔍 Iniciando verificación de reubicaciones pendientes...");
+      console.log("[FullSync-Reubicacion] 🔍 PASO 1 - Iniciando verificación de reubicaciones pendientes...");
       try {
         const todasReubicaciones = this.realm.objects("Reubicacion");
         console.log(`[FullSync-Reubicacion] Total reubicaciones en BD: ${todasReubicaciones.length}`);
@@ -366,7 +313,7 @@ class FullSyncService {
           );
 
           const reubicacionesPayload = {
-            request: Array.from(reubicacionesPendientes).map((r: any) => ({
+            reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
               sucursal: r.sucursal ?? sucursal,
               cveCliente: r.cveCliente,
               latitudAnterior: r.latitudAnterior ?? 0,
@@ -404,7 +351,7 @@ class FullSyncService {
               });
             });
             console.log(
-              `[FullSync-Reubicacion] ✅ ${reubicacionesPayload.request.length} reubicaciones enviadas y marcadas como enviado`,
+              `[FullSync-Reubicacion] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y marcadas como enviado`,
             );
           } else {
             const errorText = await reubicacionResp.text().catch(() => "No se pudo leer el error");
@@ -425,9 +372,62 @@ class FullSyncService {
       console.log("[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones");
     }
 
-    // PASO 4: Enviar ventas pendientes al servidor DESPUÉS de reubicaciones
+    // PASO 2: Enviar bitácoras pendientes
     if (idUsuario) {
-      console.log("[FullSync] Enviando ventas pendientes antes de sincronización incremental...");
+      try {
+        console.log("[FullSync] PASO 2 - Enviando bitácoras pendientes...");
+        await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras GPS pendientes...");
+        await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+      } catch (error) {
+        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
+      }
+    }
+
+    // PASO 3: Enviar InventarioEnvase pendientes ANTES de ventas
+    if (idUsuario) {
+      try {
+        const envasesPendientes = this.getInventarioEnvasesPendientes();
+        console.log("ENVASES PENDIENTES.");
+        if (envasesPendientes.length > 0) {
+          console.log(`[FullSync] PASO 3 - Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
+          console.log;
+          const envasePayload = envasesPendientes.map((r: any) => ({
+            sucursal: r.sucursal ?? sucursal,
+            clave_prod: r.claveProd ?? 0,
+            folio_movto: r.folioMovto ?? 1,
+            cantidad_entrada: r.cantidadEntrada ?? 0,
+            cantidad_salida: r.cantidadSalida ?? 0,
+            costo: r.costo ?? 0,
+            tipo_movto: r.tipoMovto ?? 0,
+            fecha_alta: (r.fechaAlta ?? new Date()).toISOString(),
+            fecha_act: (r.fechaAct ?? new Date()).toISOString(),
+            id_movil: r.idMovil ?? 0,
+            observacion: r.observacion ?? "",
+          }));
+          console.log(envasePayload);
+          const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          const envaseResp = await fetch(envaseUrl, {
+            method: "POST",
+            headers: { accept: "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify(envasePayload),
+          });
+          if (envaseResp.ok) {
+            console.log(`[FullSync] ✅ ${envasePayload.length} InventarioEnvase enviados`);
+            const ids = envasesPendientes.map((r: any) => r.id as string);
+            this.marcarInventarioEnvaseSincronizado(ids);
+          } else {
+            console.warn(`[FullSync] ⚠️ Error HTTP ${envaseResp.status} enviando InventarioEnvase`);
+          }
+        }
+      } catch (envaseError) {
+        console.warn("[FullSync] ⚠️ Error enviando InventarioEnvase, continuando:", envaseError);
+      }
+    }
+
+    // PASO 4: Enviar ventas pendientes al servidor (DESPUÉS de reubicaciones en PASO 1)
+    if (idUsuario) {
+      console.log("[FullSync] PASO 4 - Enviando ventas pendientes antes de sincronización incremental...");
       const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
       if (ventasResult.success && ventasResult.sent > 0) {
         console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
@@ -518,8 +518,13 @@ class FullSyncService {
             const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
             let registrosGuardados = 0;
             let registrosActualizados = 0;
+            let registrosEliminados = 0;
 
             this.realm!.write(() => {
+              // Crear un Set con los IDs de clientes del servidor para búsqueda rápida
+              const idsDelServidor = new Set(clientes.map((c: any) => c.id));
+
+              // Actualizar/crear clientes del servidor
               for (const cliente of clientes) {
                 const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
 
@@ -545,7 +550,28 @@ class FullSyncService {
                   registrosGuardados++;
                 }
               }
+
+              // Eliminar clientes locales que no están en la respuesta del servidor
+              const todosLosClientesLocales = this.realm!.objects("ClienteFull");
+              const clientesAEliminar: any[] = [];
+
+              for (const clienteLocal of todosLosClientesLocales) {
+                const id = (clienteLocal as any).id;
+                if (!idsDelServidor.has(id)) {
+                  clientesAEliminar.push(clienteLocal);
+                }
+              }
+
+              if (clientesAEliminar.length > 0) {
+                console.log(`[Incremental] Eliminando ${clientesAEliminar.length} clientes que no están en el servidor`);
+                this.realm!.delete(clientesAEliminar);
+                registrosEliminados = clientesAEliminar.length;
+              }
             });
+
+            console.log(
+              `[Incremental] Clientes: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}, eliminados=${registrosEliminados}`,
+            );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,

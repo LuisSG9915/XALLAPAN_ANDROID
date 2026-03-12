@@ -63,6 +63,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
   const [currentSucursal, setCurrentSucursal] = useState<number>(0);
   const [productosBase, setProductosBase] = useState<any[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
 
   // Modal states
   const [intercambioModalOpen, setIntercambioModalOpen] = useState(false);
@@ -214,6 +215,11 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       return;
     }
 
+    if (!metodoPago) {
+      Alert.alert("Error", "Selecciona un método de pago");
+      return;
+    }
+
     console.log("[EnvaseOp] ✅ Cantidad válida:", cantNum);
 
     const handleConfirmQuantity = () => {
@@ -222,38 +228,36 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
 
       if (operationType === "intercambio") {
         console.log("[EnvaseOp] 📦 Procesando intercambio");
-        // Calcular costo automático del envase XALLAPAN (clave_prod 16001, id 18)
-        const CLAVE_ENVASE_XALLAPAN = 16001;
+        // Calcular costo del producto INTERCAMBIO (clave 1000) igual que SalesScreen
+        const CLAVE_INTERCAMBIO = 1000;
 
-        // Primero buscar el producto por su clave_prod para obtener su ID
         const productos = FullSyncService.getProductos(1000000);
-        const productoEnvase = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_ENVASE_XALLAPAN);
+        const productoIntercambio = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_INTERCAMBIO);
 
-        if (!productoEnvase) {
-          console.warn(`[EnvaseOp] No se encontró producto con clave ${CLAVE_ENVASE_XALLAPAN}`);
+        if (!productoIntercambio) {
+          console.warn(`[EnvaseOp] No se encontró producto INTERCAMBIO con clave ${CLAVE_INTERCAMBIO}`);
           setCostoIntercambioCalculado(0);
           setIntercambioModalOpen(true);
         } else {
-          const idProductoEnvase = productoEnvase.id; // Este es el ID que se usa en la tabla Precio (18)
+          const idProductoIntercambio = productoIntercambio.id;
 
           const listaPrecios = selectedClient?.listaPrecio ?? 0;
           const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient?.id || 0);
           const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
           const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
 
-          // Buscar precio del envase XALLAPAN con jerarquía: promo -> cliente -> default
-          // NOTA: En la tabla Precio, el campo claveProd contiene el ID del producto, no la clave_prod
+          // Jerarquía de precios: promo -> cliente -> default (igual que SalesScreen)
           let costoCalculado = 0;
 
           // 1. Precio promocional
-          const precioPromo = preciosPromo?.find((p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase);
+          const precioPromo = preciosPromo?.find((p: any) => parseInt(p.claveProd || "0", 10) === idProductoIntercambio);
           if (precioPromo) {
             costoCalculado = precioPromo.precio || 0;
           }
           // 2. Precio del cliente
           else {
             const precioCliente = preciosCliente?.find(
-              (p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase,
+              (p: any) => parseInt(p.claveProd || "0", 10) === idProductoIntercambio,
             );
             if (precioCliente) {
               costoCalculado = precioCliente.precio || 0;
@@ -261,7 +265,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
             // 3. Precio por defecto
             else {
               const precioDefault = preciosDefault?.find(
-                (p: any) => parseInt(p.claveProd || "0", 10) === idProductoEnvase,
+                (p: any) => parseInt(p.claveProd || "0", 10) === idProductoIntercambio,
               );
               if (precioDefault) {
                 costoCalculado = precioDefault.precio || 0;
@@ -270,7 +274,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           }
 
           console.log(
-            `[EnvaseOp] Producto XALLAPAN - clave_prod: ${CLAVE_ENVASE_XALLAPAN}, id: ${idProductoEnvase}, costo: $${costoCalculado.toFixed(
+            `[EnvaseOp] Producto INTERCAMBIO - clave_prod: ${CLAVE_INTERCAMBIO}, id: ${idProductoIntercambio}, costo: $${costoCalculado.toFixed(
               2,
             )}`,
           );
@@ -348,7 +352,18 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       const cantNum = parseInt(cantidad, 10) || 1;
       const vendedor =
         (currentUser.claveEmpleado as string | undefined) || (currentUser.nombre as string | undefined) || "";
-      const now = new Date();
+      const now = FullSyncService.getMexicoNow();
+
+      // Tipo de pago
+      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "cupon" ? 4 : metodoPago === "credito" ? 3 : 2;
+      const descripcionMedioPago =
+        metodoPago === "efectivo"
+          ? "Efectivo"
+          : metodoPago === "cupon"
+          ? "Cupon"
+          : metodoPago === "credito"
+          ? "Credito"
+          : "Transferencia";
 
       // Determine claveProd for the sale line
       // Intercambio = clave 1000, Prestamo = clave 1001
@@ -382,7 +397,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       try {
         await TicketPrinter.printSaleTicket({
           clientName: selectedClient.nombre,
-          paymentMethod: "efectivo",
+          paymentMethod: metodoPago || "efectivo",
           items: [
             {
               description: descripcionVenta,
@@ -419,8 +434,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           cveCliente: selectedClient.id,
           nombreCliente: selectedClient.nombre,
           fecha: now,
-          tipoPago: 1,
-          descripcionMedioPago: "Efectivo",
+          tipoPago: tipoPagoCode,
+          descripcionMedioPago: descripcionMedioPago,
           vendedor,
           folioFactura: false,
           facturacionMovil: false,
@@ -526,6 +541,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     setOperationType(null);
     setSelectedClient(null);
     setCantidad("1");
+    setMetodoPago(null);
     setSearchQuery("");
     setFilteredClientes(clientes);
     setIntercambioData(null);
@@ -562,8 +578,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           <Icon name="swap-horiz" type="material" size={36} color="#2E7D32" />
         </View>
         <View style={styles.operationTextContainer}>
-          <Text style={styles.operationTitle}>Intercambio de Envase</Text>
-          <Text style={styles.operationDesc}>Cambiar un envase XALLAPAN por otro envase</Text>
+          <Text style={styles.operationTitle}>Intercambio de Envase </Text>
+          <Text style={styles.operationDesc}>Cambiar un envase XALLAPAN por otro envase </Text>
         </View>
         <Icon name="chevron-right" type="material" size={24} color={COLORS.muted} />
       </TouchableOpacity>
@@ -588,7 +604,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
   const renderClientSelection = () => (
     <View style={styles.clientContainer}>
       <Text style={styles.stepTitle}>
-        {operationType === "intercambio" ? "Intercambio de Envase" : "Préstamo de Envase"}
+        {operationType === "intercambio" ? "Intercambio de Envase " : "Préstamo de Envase"}
       </Text>
       <Text style={styles.stepSubtitle}>Seleccione el cliente</Text>
 
@@ -736,7 +752,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
   const renderQuantitySelection = () => (
     <View style={styles.contentContainer}>
       <Text style={styles.stepTitle}>
-        {operationType === "intercambio" ? "Intercambio de Envase" : "Préstamo de Envase"}
+        {operationType === "intercambio" ? "Intercambio de Envase " : "Préstamo de Envase"}
       </Text>
 
       {/* Selected client card */}
@@ -796,8 +812,33 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
         </View>
       </View>
 
+      {/* Payment method selection */}
+      <View style={styles.paymentSection}>
+        <Text style={styles.quantityLabel}>MÉTODO DE PAGO</Text>
+        <View style={styles.payRow}>
+          <PayChipEnvase label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
+          <PayChipEnvase
+            label="Transferencia"
+            selected={metodoPago === "transferencia"}
+            onPress={() => setMetodoPago("transferencia")}
+          />
+          <PayChipEnvase
+            label="Crédito"
+            selected={metodoPago === "credito"}
+            onPress={() => setMetodoPago("credito")}
+            disabled={selectedClient ? !selectedClient.credito : true}
+          />
+          <PayChipEnvase label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
+        </View>
+      </View>
+
       {/* Continue button */}
-      <TouchableOpacity style={styles.continueBtn} onPress={handleContinueToModal} activeOpacity={0.85}>
+      <TouchableOpacity
+        style={[styles.continueBtn, !metodoPago && styles.continueBtnDisabled]}
+        onPress={handleContinueToModal}
+        activeOpacity={0.85}
+        disabled={!metodoPago}
+      >
         <Text style={styles.continueBtnText}>Continuar</Text>
         <Icon name="arrow-forward" type="material" size={20} color="#fff" />
       </TouchableOpacity>
@@ -868,6 +909,28 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
         onCancel={() => setPrestamoModalOpen(false)}
       />
     </SafeAreaView>
+  );
+}
+
+function PayChipEnvase({
+  label,
+  selected,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  selected?: boolean;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
+    >
+      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1230,6 +1293,38 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "700",
+  },
+
+  // Payment
+  paymentSection: {
+    marginBottom: SPACING.l,
+  },
+  payRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.s,
+    marginTop: SPACING.s,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    marginRight: SPACING.s,
+    backgroundColor: COLORS.background,
+  },
+  chipSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+    ...SHADOWS.small,
+  },
+  chipDisabled: { opacity: 0.4 },
+  chipText: { color: COLORS.textSecondary, fontWeight: "500" },
+  chipTextSelected: { color: "#fff", fontWeight: "700" },
+  continueBtnDisabled: {
+    backgroundColor: COLORS.border,
+    opacity: 0.6,
   },
 
   // Processing

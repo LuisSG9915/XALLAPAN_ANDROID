@@ -43,8 +43,13 @@ export class KitsSyncTask extends SyncTask {
 
       console.log(`[KitsSyncTask] Leídos ${registrosLeidos} kits`);
 
+      // Set de IDs que vienen del servidor
+      const idsServidor = new Set<number>(kits.map((k: any) => k.id));
+
       // Sincronizar con Realm
+      let registrosEliminados = 0;
       this.realm.write(() => {
+        // Upsert de kits del servidor
         for (const kit of kits) {
           const existing = this.realm.objectForPrimaryKey('Kit', kit.id);
           
@@ -66,9 +71,18 @@ export class KitsSyncTask extends SyncTask {
             registrosGuardados++;
           }
         }
+
+        // Eliminar kits locales que ya no existen en el servidor
+        const todosLocales = this.realm.objects('Kit');
+        const aEliminar = todosLocales.filter((k: any) => !idsServidor.has(k.id));
+        registrosEliminados = aEliminar.length;
+        if (registrosEliminados > 0) {
+          console.log(`[KitsSyncTask] Eliminando ${registrosEliminados} kits que ya no existen en el servidor`);
+          aEliminar.forEach((k: any) => this.realm.delete(k));
+        }
       });
 
-      console.log(`[KitsSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
+      console.log(`[KitsSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}, Eliminados: ${registrosEliminados}`);
 
       return {
         success: true,

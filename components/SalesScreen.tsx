@@ -323,7 +323,11 @@ export default function SalesScreen({ route }: { route?: any }) {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
         const productoId = productoBase?.id ?? claveNum;
-        const descripcion = productoBase?.descripcion || "Sin descripción";
+        let descripcion = productoBase?.descripcion || "Sin descripción";
+        // Agregar "+ Agua" al producto INTERCAMBIO (clave 1000)
+        if (claveNum === 1000) {
+          descripcion = `${descripcion} `;
+        }
 
         // JERARQUÍA DE PRECIOS:
         // 1. Precio promocional (PrecioPromo)
@@ -2695,6 +2699,19 @@ export default function SalesScreen({ route }: { route?: any }) {
           }}
         />
 
+        {/* Modal de Carga - Reubicación en Proceso */}
+        <Modal visible={reubicandoCliente} transparent animationType="fade">
+          <View style={styles.loadingModalOverlay}>
+            <View style={styles.loadingModalContent}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+              <Text style={styles.loadingModalTitle}>Reubicando Cliente</Text>
+              <Text style={styles.loadingModalText}>
+                Obteniendo ubicación GPS y guardando la reubicación...
+              </Text>
+            </View>
+          </View>
+        </Modal>
+
         {/* Modal Préstamo de Envases (clave 1001) */}
         <PrestamoEnvaseModal
           visible={prestamoModalOpen}
@@ -3493,5 +3510,33 @@ const styles = StyleSheet.create({
     padding: 4,
     borderRadius: BORDER_RADIUS.s,
     backgroundColor: "transparent",
+  },
+  // --- Modal de Carga ---
+  loadingModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingModalContent: {
+    backgroundColor: "white",
+    borderRadius: BORDER_RADIUS.l,
+    padding: 32,
+    alignItems: "center",
+    minWidth: 280,
+    ...SHADOWS.large,
+  },
+  loadingModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: COLORS.textPrimary,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loadingModalText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
   },
 });
