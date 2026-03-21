@@ -391,24 +391,32 @@ export const InventarioEnvasesHistorialSchema = {
 export const ReubicacionSchema = {
   name: "Reubicacion",
   properties: {
-    id: "string",
-    sucursal: "int",
-    cveCliente: "int",
-    latitudAnterior: "float?",
-    longitudAnterior: "float?",
-    latitudNueva: "float",
-    longitudNueva: "float",
-    fecha: "date",
-    usuario: "int",
-    realizado: "bool",
-    idMovil: "int?",
-    fechaTransfer: "date",
-    enviado: "bool",
+    id: "int",
+    idCliente: "int",
+    latitud: "double?",
+    longitud: "double?",
+    fecha: "date?",
+    idUsuario: "int?",
+    syncedAt: "date",
   },
   primaryKey: "id",
 };
 
-export const ALL_SCHEMAS = [
+export const VisitaRealizadaSchema = {
+  name: "VisitaRealizada",
+  properties: {
+    id: "int",
+    fechaInicio: "date",
+    fechaFin: "date",
+    idCliente: "int",
+    idUsuario: "int",
+    idRuta: "int",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
+export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
   ProductoSchema,
@@ -430,4 +438,5 @@ export const ALL_SCHEMAS = [
   InventarioEnvaseSchema,
   InventarioEnvasesHistorialSchema,
   ReubicacionSchema,
+  VisitaRealizadaSchema,
 ];

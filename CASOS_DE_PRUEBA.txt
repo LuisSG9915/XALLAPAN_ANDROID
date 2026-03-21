@@ -1,0 +1,396 @@
+CASOS DE PRUEBA - APLICACIÓN XALLAPAN ANDROID
+==============================================
+
+FORMATO PARA COPIAR A EXCEL:
+Columnas: ID | Módulo | Caso de Prueba | Precondiciones | Pasos | Resultado Esperado | Prioridad | Estado
+
+==============================================
+MÓDULO 1: AUTENTICACIÓN Y PERMISOS
+==============================================
+
+CP-001	Autenticación	Login exitoso con credenciales válidas	Usuario registrado en sistema	1. Abrir app\n2. Ingresar usuario válido\n3. Ingresar contraseña válida\n4. Presionar Login	Usuario accede al panel principal, sesión guardada localmente	Alta	Pendiente
+
+CP-002	Autenticación	Login fallido con credenciales inválidas	Ninguna	1. Abrir app\n2. Ingresar usuario inválido\n3. Ingresar contraseña\n4. Presionar Login	Mensaje de error "Usuario o contraseña incorrectos"	Alta	Pendiente
+
+CP-003	Autenticación	Restauración de sesión automática	Sesión previamente guardada	1. Cerrar app\n2. Abrir app nuevamente	App restaura sesión automáticamente y muestra panel principal	Media	Pendiente
+
+CP-004	Autenticación	Cierre de sesión	Usuario logueado	1. En panel principal\n2. Presionar botón logout\n3. Confirmar cierre	Sesión cerrada, regresa a pantalla de login	Media	Pendiente
+
+CP-005	Permisos	Solicitud de permiso de ubicación al inicio	App recién instalada	1. Abrir app por primera vez	Sistema solicita permiso de ubicación, app no continúa sin permiso	Alta	Pendiente
+
+CP-006	Permisos	Permiso de ubicación denegado	Ninguna	1. Abrir app\n2. Denegar permiso de ubicación	App muestra pantalla de bloqueo con opción de reintentar o salir	Alta	Pendiente
+
+CP-007	Permisos	Permiso de ubicación bloqueado permanentemente	Permiso denegado múltiples veces	1. Denegar permiso 3+ veces	App muestra instrucciones para habilitar en configuración del sistema	Alta	Pendiente
+
+CP-008	Permisos	Reverificación de permisos al volver del background	App en background	1. Minimizar app\n2. Ir a configuración y cambiar permisos\n3. Volver a app	App detecta cambio de permisos y actualiza estado	Media	Pendiente
+
+==============================================
+MÓDULO 2: SINCRONIZACIÓN DE DATOS
+==============================================
+
+CP-009	Sincronización	Sincronización manual completa exitosa	Usuario logueado, conexión a internet	1. En panel principal\n2. Presionar "Sincronizar Datos"	Sincroniza todas las tablas, muestra progreso, mensaje de éxito	Alta	Pendiente
+
+CP-010	Sincronización	Sincronización con errores de red	Sin conexión a internet	1. Desactivar internet\n2. Presionar "Sincronizar Datos"	Mensaje de error indicando problema de conexión	Alta	Pendiente
+
+CP-011	Sincronización	Sincronización automática en background	Usuario logueado, app activa	1. Esperar 3 minutos sin interacción	Sistema sincroniza automáticamente cada 3 minutos	Media	Pendiente
+
+CP-012	Sincronización	Sincronización incremental de tablas	Datos previamente sincronizados	1. Realizar cambios en servidor\n2. Sincronizar	Solo descarga registros nuevos/modificados desde última sync	Media	Pendiente
+
+CP-013	Sincronización	Visualización de progreso de sincronización	Sincronización en curso	1. Iniciar sincronización\n2. Observar modal de progreso	Modal muestra progreso por tabla con porcentajes y estado	Baja	Pendiente
+
+CP-014	Sincronización	Logs de sincronización	Sincronización completada	1. Completar sincronización\n2. Revisar logs en Realm	Logs guardados con detalles: fecha, duración, registros, errores	Baja	Pendiente
+
+CP-015	Sincronización	Sincronización de bitácora GPS	Usuario con ubicación activa	1. Realizar acciones que generen GPS\n2. Sincronizar	Bitácora GPS se envía al servidor correctamente	Media	Pendiente
+
+==============================================
+MÓDULO 3: PUNTO DE VENTA
+==============================================
+
+CP-016	Ventas	Selección de cliente agendado	Clientes agendados para el día	1. Abrir Punto de Venta\n2. Abrir modal de clientes\n3. Tab "Agendados"\n4. Seleccionar cliente	Cliente seleccionado, lista de productos disponible	Alta	Pendiente
+
+CP-017	Ventas	Búsqueda de cliente por nombre	Clientes sincronizados	1. Abrir modal clientes\n2. Tab "Todos"\n3. Escribir nombre en búsqueda\n4. Seleccionar	Cliente filtrado y seleccionado correctamente	Alta	Pendiente
+
+CP-018	Ventas	Clientes cercanos por GPS	GPS activo, clientes con coordenadas	1. Abrir modal clientes\n2. Tab "Cercanos"\n3. Esperar carga	Muestra top 5 clientes más cercanos con distancia en metros	Media	Pendiente
+
+CP-019	Ventas	Validación de ubicación del cliente	Cliente seleccionado con coordenadas	1. Seleccionar cliente\n2. Sistema valida GPS	Si distancia > metros permitidos, muestra alerta y no permite venta	Alta	Pendiente
+
+CP-020	Ventas	Agregar producto normal al carrito	Cliente seleccionado	1. Buscar producto\n2. Ingresar cantidad\n3. Agregar al carrito	Producto agregado con precio correcto según lista del cliente	Alta	Pendiente
+
+CP-021	Ventas	Agregar producto con precio promocional	Cliente con promoción activa	1. Buscar producto en promoción\n2. Agregar al carrito	Producto agregado con precio promocional, marcado como promoción	Alta	Pendiente
+
+CP-022	Ventas	Agregar kit al carrito	Kits disponibles en inventario	1. Buscar kit\n2. Verificar existencia calculada\n3. Agregar	Kit agregado, existencia calculada según componentes mínimos	Media	Pendiente
+
+CP-023	Ventas	Filtrar solo productos en promoción	Productos con promociones	1. Activar toggle "Solo Promociones"	Lista muestra únicamente productos con precio promocional	Baja	Pendiente
+
+CP-024	Ventas	Modificar cantidad de producto en carrito	Producto en carrito	1. Cambiar cantidad en input\n2. Actualizar	Cantidad y total actualizados correctamente	Media	Pendiente
+
+CP-025	Ventas	Eliminar producto del carrito	Producto en carrito	1. Presionar botón eliminar	Producto removido, total recalculado	Media	Pendiente
+
+CP-026	Ventas	Venta en efectivo	Carrito con productos	1. Seleccionar método "Efectivo"\n2. Confirmar venta	Venta registrada con tipoPago=1, guardada en Realm y servidor	Alta	Pendiente
+
+CP-027	Ventas	Venta con transferencia	Carrito con productos	1. Seleccionar método "Transferencia"\n2. Confirmar venta	Venta registrada con tipoPago=2	Alta	Pendiente
+
+CP-028	Ventas	Venta a crédito	Cliente con crédito habilitado	1. Seleccionar método "Crédito"\n2. Confirmar venta	Venta registrada con tipoPago=3, genera saldo en cartera	Alta	Pendiente
+
+CP-029	Ventas	Venta con cupones	Carrito con productos	1. Seleccionar método "Cupones"\n2. Confirmar venta	Venta registrada con tipoPago=4	Media	Pendiente
+
+CP-030	Ventas	Impresión de ticket de venta	Venta completada, impresora conectada	1. Completar venta	Ticket impreso con detalle de productos, totales, cliente, fecha	Alta	Pendiente
+
+CP-031	Ventas	Venta sin impresora conectada	Sin impresora	1. Intentar venta	Venta se registra pero muestra advertencia de impresora no disponible	Media	Pendiente
+
+CP-032	Ventas	Actualización de inventario post-venta	Venta completada	1. Completar venta\n2. Revisar inventario	Inventario actualizado con movimiento de salida	Alta	Pendiente
+
+CP-033	Ventas	Bloqueo de venta con ruta cerrada	Ruta cerrada previamente	1. Intentar acceder a Punto de Venta	Acceso bloqueado, mensaje indicando que debe recibir carga primero	Alta	Pendiente
+
+CP-034	Ventas	Registro de visita al realizar venta	Cliente agendado	1. Completar venta a cliente agendado	Visita marcada como realizada automáticamente	Media	Pendiente
+
+CP-035	Ventas	Intercambio de envases (clave 1000)	Producto clave 1000 en carrito	1. Agregar clave 1000\n2. Abrir modal intercambio\n3. Seleccionar envases\n4. Confirmar	Movimiento de intercambio registrado en inventario de envases	Media	Pendiente
+
+CP-036	Ventas	Préstamo de envases (clave 1001)	Producto clave 1001 en carrito	1. Agregar clave 1001\n2. Abrir modal préstamo\n3. Seleccionar producto y fecha\n4. Confirmar	Movimiento de préstamo registrado con fecha de devolución	Media	Pendiente
+
+CP-037	Ventas	Reubicación de cliente	Usuario con permiso de reubicación	1. Seleccionar cliente\n2. Presionar botón reubicar\n3. Confirmar nueva ubicación	Coordenadas del cliente actualizadas, registro enviado al servidor	Baja	Pendiente
+
+==============================================
+MÓDULO 4: COBRANZA
+==============================================
+
+CP-038	Cobranza	Selección de cliente con saldo pendiente	Clientes con cartera	1. Abrir Cobranza\n2. Seleccionar cliente	Muestra facturas pendientes con saldos	Alta	Pendiente
+
+CP-039	Cobranza	Búsqueda de cliente en cobranza	Múltiples clientes	1. Escribir nombre en búsqueda	Lista filtrada por nombre	Media	Pendiente
+
+CP-040	Cobranza	Selección de facturas a pagar	Cliente con múltiples facturas	1. Seleccionar cliente\n2. Marcar facturas a pagar	Facturas seleccionadas, total calculado	Alta	Pendiente
+
+CP-041	Cobranza	Pago en efectivo	Facturas seleccionadas	1. Activar "Efectivo"\n2. Confirmar pago	Movimiento de cartera negativo registrado, facturas marcadas como cobradas	Alta	Pendiente
+
+CP-042	Cobranza	Pago con transferencia	Facturas seleccionadas	1. Activar "Transferencia"\n2. Confirmar pago	Pago registrado con forma de pago transferencia	Alta	Pendiente
+
+CP-043	Cobranza	Pago parcial de factura	Factura con saldo mayor	1. Seleccionar factura\n2. Ingresar monto parcial\n3. Confirmar	Saldo de factura reducido, no marcada como cobrada completamente	Media	Pendiente
+
+CP-044	Cobranza	Impresión de recibo de pago	Pago completado, impresora conectada	1. Completar pago	Recibo impreso con detalle de facturas pagadas	Media	Pendiente
+
+CP-045	Cobranza	Validación de forma de pago	Sin seleccionar forma de pago	1. Intentar confirmar sin seleccionar efectivo/transferencia	Mensaje de error solicitando seleccionar forma de pago	Alta	Pendiente
+
+CP-046	Cobranza	Sincronización de pagos al servidor	Pagos registrados localmente	1. Realizar pago\n2. Sincronizar	Movimientos de cartera enviados al servidor correctamente	Alta	Pendiente
+
+==============================================
+MÓDULO 5: INVENTARIO Y PRECORTE
+==============================================
+
+CP-047	Inventario	Consulta de inventario por fecha	Inventario sincronizado	1. Abrir Inventario\n2. Seleccionar fecha\n3. Presionar Consultar	Muestra inventario filtrado por fecha y sucursal	Alta	Pendiente
+
+CP-048	Inventario	Visualización de productos con saldo cero	Productos sin existencia	1. Consultar inventario	Productos con saldo 0 mostrados al final, ordenados alfabéticamente	Baja	Pendiente
+
+CP-049	Inventario	Visualización de productos con saldo positivo	Productos con existencia	1. Consultar inventario	Productos ordenados por saldo descendente	Media	Pendiente
+
+CP-050	Inventario	Cálculo de existencia de kits	Kits con componentes	1. Consultar inventario\n2. Buscar kit	Existencia de kit calculada según componente con menor disponibilidad	Media	Pendiente
+
+CP-051	Inventario	Indicador visual de kits	Kits en lista	1. Consultar inventario	Kits mostrados con emoji 📦	Baja	Pendiente
+
+CP-052	Inventario	Cálculo de total efectivo recaudado	Ventas en efectivo del día	1. Consultar inventario	Total efectivo calculado sumando ventas con tipoPago=1	Alta	Pendiente
+
+CP-053	Inventario	Impresión de reporte de inventario	Inventario consultado, impresora conectada	1. Presionar "Imprimir Reporte"	Ticket impreso con detalle de inventario y total efectivo	Alta	Pendiente
+
+CP-054	Inventario	Advertencia sin impresora	Sin impresora conectada	1. Abrir Inventario	Muestra advertencia indicando que no hay impresora configurada	Baja	Pendiente
+
+CP-055	Inventario	Filtro por sucursal del usuario	Usuario con sucursal asignada	1. Consultar inventario	Solo muestra inventario de la sucursal del usuario	Alta	Pendiente
+
+==============================================
+MÓDULO 6: CARGAS Y TRASPASOS
+==============================================
+
+CP-056	Traspasos	Búsqueda de traspasos por fecha	Traspasos registrados	1. Abrir Cargas\n2. Seleccionar rango de fechas\n3. Presionar Buscar	Lista de traspasos filtrados por fecha y sucursal	Alta	Pendiente
+
+CP-057	Traspasos	Visualización de detalle de traspaso	Traspaso seleccionado	1. Seleccionar traspaso de la lista	Modal muestra detalle de productos y cantidades	Alta	Pendiente
+
+CP-058	Traspasos	Recepción de traspaso pendiente	Traspaso con estatus "Pendiente"	1. Seleccionar traspaso\n2. Presionar "Recibir"	Traspaso marcado como recibido, estatus cambia a "Finalizado"	Alta	Pendiente
+
+CP-059	Traspasos	Actualización de inventario al recibir	Traspaso recibido	1. Completar recepción	Inventario actualizado con entradas de productos del traspaso	Alta	Pendiente
+
+CP-060	Traspasos	Desbloqueo de ruta al recibir carga	Ruta cerrada, traspaso recibido	1. Recibir traspaso exitosamente	Ruta se abre automáticamente, punto de venta desbloqueado	Alta	Pendiente
+
+CP-061	Traspasos	Indicador visual de traspasos pendientes	Traspasos pendientes del día	1. Ir al panel principal	Indicador rojo visible en botón de Cargas	Media	Pendiente
+
+CP-062	Traspasos	Polling automático de traspasos	App activa	1. Esperar 10 segundos	Sistema verifica traspasos pendientes automáticamente cada 10s	Baja	Pendiente
+
+CP-063	Traspasos	Recepción de kits en traspaso	Traspaso con kits	1. Recibir traspaso con kits\n2. Revisar inventario	Componentes del kit actualizados en inventario	Media	Pendiente
+
+==============================================
+MÓDULO 7: CUMPLIMIENTO DE AGENDA
+==============================================
+
+CP-064	Agenda	Visualización de visitas programadas	Visitas sincronizadas para el día	1. Abrir Cumplimiento	Lista de visitas del día con estadísticas	Alta	Pendiente
+
+CP-065	Agenda	Estadísticas de cumplimiento	Visitas del día	1. Abrir Cumplimiento	Muestra total programadas, realizadas y porcentaje de cumplimiento	Media	Pendiente
+
+CP-066	Agenda	Búsqueda de cliente en agenda	Múltiples visitas	1. Escribir nombre en búsqueda	Lista filtrada por nombre de cliente	Media	Pendiente
+
+CP-067	Agenda	Filtro de visitas realizadas/pendientes	Visitas mixtas	1. Activar toggle "Mostrar Visitadas"	Alterna entre mostrar todas o solo pendientes	Baja	Pendiente
+
+CP-068	Agenda	Marcar visita como realizada	Visita pendiente	1. Seleccionar visita\n2. Elegir tipo de visita\n3. Confirmar	Visita marcada como realizada, estadísticas actualizadas	Alta	Pendiente
+
+CP-069	Agenda	Validación de ubicación para visita	Cliente con coordenadas	1. Intentar marcar visita\n2. Sistema valida GPS	Si distancia > permitida, muestra alerta y no permite marcar	Alta	Pendiente
+
+CP-070	Agenda	Selección de tipo de visita	Tipos de visita disponibles	1. Marcar visita\n2. Abrir modal tipos	Muestra lista de tipos de visita desde base de datos	Media	Pendiente
+
+CP-071	Agenda	Registro de detalle de visita	Visita marcada	1. Completar marcado de visita	Detalle de visita guardado con fecha inicio/fin, tipo, usuario	Media	Pendiente
+
+CP-072	Agenda	Sincronización de visitas al servidor	Visitas marcadas localmente	1. Marcar visitas\n2. Sincronizar	Visitas enviadas al servidor con campo syncedAr actualizado	Alta	Pendiente
+
+CP-073	Agenda	Actualización automática al volver del background	App en background	1. Minimizar app\n2. Volver a Cumplimiento	Datos actualizados automáticamente con sync en background	Baja	Pendiente
+
+==============================================
+MÓDULO 8: OPERACIONES DE ENVASES
+==============================================
+
+CP-074	Envases	Selección de tipo de operación	Ninguna	1. Abrir Envases\n2. Seleccionar "Intercambio" o "Préstamo"	Tipo de operación seleccionado, avanza a selección de cliente	Alta	Pendiente
+
+CP-075	Envases	Búsqueda de cliente para operación	Clientes disponibles	1. Buscar cliente por nombre	Lista filtrada correctamente	Media	Pendiente
+
+CP-076	Envases	Clientes cercanos en operaciones	GPS activo	1. Tab "Cercanos"\n2. Esperar carga	Top 5 clientes cercanos con distancia	Media	Pendiente
+
+CP-077	Envases	Ingreso de cantidad para operación	Cliente seleccionado	1. Ingresar cantidad\n2. Continuar	Cantidad validada y guardada	Media	Pendiente
+
+CP-078	Envases	Intercambio: selección de envases	Operación de intercambio	1. Seleccionar envase entregado\n2. Seleccionar envase recibido\n3. Agregar observación	Datos de intercambio capturados correctamente	Alta	Pendiente
+
+CP-079	Envases	Intercambio: cálculo de costo	Envases seleccionados	1. Completar selección de envases	Costo calculado automáticamente según diferencia de precios	Media	Pendiente
+
+CP-080	Envases	Intercambio: registro en inventario	Intercambio confirmado	1. Confirmar intercambio	Movimientos registrados en InventarioEnvase con tipoMovto correcto	Alta	Pendiente
+
+CP-081	Envases	Préstamo: selección de producto	Operación de préstamo	1. Seleccionar producto a prestar\n2. Seleccionar fecha de devolución\n3. Agregar observación	Datos de préstamo capturados	Alta	Pendiente
+
+CP-082	Envases	Préstamo: registro en inventario	Préstamo confirmado	1. Confirmar préstamo	Movimiento de préstamo registrado con fecha de devolución	Alta	Pendiente
+
+CP-083	Envases	Impresión de comprobante de operación	Operación completada, impresora conectada	1. Completar operación	Ticket impreso con detalle de la operación	Media	Pendiente
+
+CP-084	Envases	Validación de ubicación en operaciones	Cliente con coordenadas	1. Seleccionar cliente\n2. Sistema valida GPS	Validación de distancia antes de permitir operación	Media	Pendiente
+
+==============================================
+MÓDULO 9: CORTES
+==============================================
+
+CP-085	Cortes	Selección de fecha para corte	Ninguna	1. Abrir Cortes\n2. Seleccionar fecha	Fecha seleccionada para consulta	Media	Pendiente
+
+CP-086	Cortes	Carga de datos de corte	Fecha seleccionada	1. Esperar carga de datos	Muestra inventario vendido, a bordo, importes, tipos de pago, envases	Alta	Pendiente
+
+CP-087	Cortes	Visualización de inventario vendido	Ventas del día	1. Revisar sección "Inventario Vendido"	Lista de productos vendidos con cantidades totales	Alta	Pendiente
+
+CP-088	Cortes	Visualización de inventario a bordo	Inventario actual	1. Revisar sección "Inventario a Bordo"	Lista de productos con saldo actual	Alta	Pendiente
+
+CP-089	Cortes	Cálculo de importes por producto	Ventas del día	1. Revisar sección "Importes"	Suma de importes agrupados por producto	Alta	Pendiente
+
+CP-090	Cortes	Cálculo de totales por tipo de pago	Ventas del día	1. Revisar sección "Tipos de Pago"	Totales calculados por CONTADO, TRANSFERENCIA, CRÉDITO, CUPONES	Alta	Pendiente
+
+CP-091	Cortes	Estadísticas de envases	Operaciones de envases del día	1. Revisar sección "Envases"	Muestra envases vendidos, cambiados, prestados con detalle	Media	Pendiente
+
+CP-092	Cortes	Impresión de corte completo	Datos cargados, impresora conectada	1. Presionar "Imprimir Corte"	Ticket impreso con todas las secciones del corte	Alta	Pendiente
+
+CP-093	Cortes	Actualización de fecha y hora en tiempo real	Corte abierto	1. Esperar 1 minuto	Fecha/hora actualizada automáticamente cada minuto	Baja	Pendiente
+
+CP-094	Cortes	Filtro por sucursal del usuario	Usuario con sucursal	1. Cargar corte	Datos filtrados solo para la sucursal del usuario	Alta	Pendiente
+
+==============================================
+MÓDULO 10: CONFIGURACIÓN DE IMPRESORA
+==============================================
+
+CP-095	Impresora	Escaneo de dispositivos Bluetooth	Bluetooth activo	1. Abrir Configuración de Impresora\n2. Presionar "Escanear"	Lista de dispositivos Bluetooth disponibles	Alta	Pendiente
+
+CP-096	Impresora	Conexión a impresora	Impresora disponible	1. Seleccionar impresora de la lista\n2. Presionar "Conectar"	Conexión exitosa, impresora guardada como predeterminada	Alta	Pendiente
+
+CP-097	Impresora	Desconexión de impresora	Impresora conectada	1. Presionar "Desconectar"	Impresora desconectada, estado actualizado	Media	Pendiente
+
+CP-098	Impresora	Reconexión automática al iniciar app	Impresora previamente guardada	1. Cerrar app\n2. Abrir app	Intenta conectar automáticamente a última impresora usada	Media	Pendiente
+
+CP-099	Impresora	Prueba de impresión	Impresora conectada	1. Presionar "Imprimir Prueba"	Ticket de prueba impreso correctamente	Media	Pendiente
+
+CP-100	Impresora	Manejo de error de conexión	Impresora apagada o fuera de rango	1. Intentar conectar	Mensaje de error indicando problema de conexión	Media	Pendiente
+
+CP-101	Impresora	Indicador de estado en otras pantallas	Impresora conectada	1. Navegar a Ventas, Inventario, etc.	Badge verde muestra nombre de impresora conectada	Baja	Pendiente
+
+==============================================
+MÓDULO 11: CIERRE DE RUTA
+==============================================
+
+CP-102	Ruta	Cierre de ruta con mantener presionado	Ruta abierta	1. En panel principal\n2. Mantener presionado botón "Cerrar Ruta" por 5s	Ruta cerrada, punto de venta bloqueado	Alta	Pendiente
+
+CP-103	Ruta	Confirmación de cierre de ruta	Botón mantenido 5s	1. Completar tiempo de presión\n2. Confirmar en diálogo	Ruta cerrada después de confirmación	Alta	Pendiente
+
+CP-104	Ruta	Cancelación de cierre de ruta	Presionando botón	1. Soltar botón antes de 5s	Operación cancelada, ruta permanece abierta	Media	Pendiente
+
+CP-105	Ruta	Indicador visual de progreso de cierre	Manteniendo botón presionado	1. Mantener presionado	Barra de progreso muestra tiempo restante	Baja	Pendiente
+
+CP-106	Ruta	Bloqueo de punto de venta con ruta cerrada	Ruta cerrada	1. Intentar acceder a Punto de Venta	Acceso bloqueado, mensaje explicativo	Alta	Pendiente
+
+CP-107	Ruta	Apertura automática al recibir carga	Ruta cerrada, traspaso recibido	1. Recibir traspaso exitosamente	Ruta se abre automáticamente	Alta	Pendiente
+
+CP-108	Ruta	Persistencia de estado de ruta	Ruta cerrada, app cerrada	1. Cerrar app\n2. Abrir app	Estado de ruta cerrada persiste en Realm	Alta	Pendiente
+
+CP-109	Ruta	Indicador visual de ruta cerrada	Ruta cerrada	1. Ver panel principal	Botón muestra "Ruta Cerrada" con icono de candado	Media	Pendiente
+
+CP-110	Ruta	Mensaje informativo al tocar ruta cerrada	Ruta cerrada	1. Tocar botón de ruta cerrada	Modal explica que solo se abre con carga	Baja	Pendiente
+
+==============================================
+MÓDULO 12: VISUALIZACIÓN DE DATOS
+==============================================
+
+CP-111	Datos	Visualización de estadísticas generales	Datos sincronizados	1. Abrir Datos	Muestra contadores de todas las tablas sincronizadas	Media	Pendiente
+
+CP-112	Datos	Selección de tabla para detalle	Múltiples tablas	1. Seleccionar tabla de la lista	Muestra registros de la tabla seleccionada	Media	Pendiente
+
+CP-113	Datos	Paginación de registros	Tabla con muchos registros	1. Navegar entre páginas	Paginación funciona correctamente	Baja	Pendiente
+
+CP-114	Datos	Visualización de última sincronización	Tablas sincronizadas	1. Ver detalle de tabla	Muestra fecha/hora de última sincronización	Baja	Pendiente
+
+CP-115	Datos	Exportación de datos (si aplica)	Datos disponibles	1. Intentar exportar	Datos exportados en formato legible	Baja	Pendiente
+
+==============================================
+MÓDULO 13: TRACKING GPS Y BITÁCORA
+==============================================
+
+CP-116	GPS	Captura de ubicación en venta	Venta en proceso	1. Completar venta	Coordenadas GPS guardadas con la venta	Alta	Pendiente
+
+CP-117	GPS	Captura de ubicación en visita	Visita marcada	1. Marcar visita	Coordenadas GPS guardadas con detalle de visita	Alta	Pendiente
+
+CP-118	GPS	Registro en bitácora GPS	Acciones con GPS	1. Realizar acciones que requieren GPS	Registros guardados en BitacoraGps con precisión y batería	Media	Pendiente
+
+CP-119	GPS	Sincronización de bitácora GPS	Registros pendientes de envío	1. Sincronizar datos	Bitácora GPS enviada al servidor, marcada como enviada	Media	Pendiente
+
+CP-120	GPS	Validación de precisión GPS	GPS con baja precisión	1. Intentar acción con GPS de baja calidad	Sistema advierte o rechaza si precisión es insuficiente	Media	Pendiente
+
+CP-121	GPS	Manejo de GPS desactivado	GPS desactivado en dispositivo	1. Intentar acción que requiere GPS	Mensaje solicitando activar GPS	Alta	Pendiente
+
+==============================================
+MÓDULO 14: REPORTES Y CONSULTAS
+==============================================
+
+CP-122	Reportes	Consulta de ventas por rango de fechas	Ventas registradas	1. Abrir Consulta a Ventas\n2. Seleccionar rango de fechas\n3. Consultar	Lista de ventas filtradas por fecha	Alta	Pendiente
+
+CP-123	Reportes	Filtro de ventas por cliente	Ventas de múltiples clientes	1. Buscar por nombre de cliente	Ventas filtradas por cliente específico	Media	Pendiente
+
+CP-124	Reportes	Filtro de ventas por producto	Ventas de múltiples productos	1. Buscar por producto	Ventas filtradas por producto específico	Media	Pendiente
+
+CP-125	Reportes	Visualización de detalle de venta	Venta seleccionada	1. Seleccionar venta de la lista	Modal muestra detalle completo: productos, cantidades, importes, método de pago	Media	Pendiente
+
+CP-126	Reportes	Cálculo de totales en reporte	Ventas consultadas	1. Ver totales al final de la lista	Suma total de importes calculada correctamente	Alta	Pendiente
+
+CP-127	Reportes	Exportación de reporte	Ventas consultadas	1. Intentar exportar reporte	Reporte exportado o impreso	Baja	Pendiente
+
+==============================================
+MÓDULO 15: MANEJO DE ERRORES Y EDGE CASES
+==============================================
+
+CP-128	Errores	Manejo de pérdida de conexión durante sync	Sincronización en curso, se pierde internet	1. Iniciar sync\n2. Desactivar internet	Sync se detiene, mensaje de error, datos parciales no corrompen BD	Alta	Pendiente
+
+CP-129	Errores	Recuperación de sesión después de crash	App crasheada	1. Forzar cierre de app\n2. Abrir nuevamente	Sesión restaurada, datos locales intactos	Alta	Pendiente
+
+CP-130	Errores	Validación de campos vacíos en formularios	Formulario de venta/cobranza	1. Intentar enviar sin llenar campos requeridos	Mensajes de validación claros	Media	Pendiente
+
+CP-131	Errores	Manejo de respuestas inválidas del servidor	Servidor retorna error 500	1. Acción que consulta servidor con error	Mensaje de error amigable, no crash	Media	Pendiente
+
+CP-132	Errores	Timeout en peticiones de red	Red muy lenta	1. Realizar acción con timeout	Petición cancelada después de timeout, mensaje apropiado	Media	Pendiente
+
+CP-133	Errores	Validación de stock insuficiente	Producto con stock bajo	1. Intentar vender más de lo disponible	Mensaje de error indicando stock insuficiente	Alta	Pendiente
+
+CP-134	Errores	Manejo de datos corruptos en Realm	Datos inconsistentes en BD local	1. Detectar inconsistencia	Sistema maneja error sin crash, sugiere resincronización	Media	Pendiente
+
+CP-135	Errores	Validación de permisos de usuario	Usuario sin permisos específicos	1. Intentar acción restringida	Mensaje indicando falta de permisos	Media	Pendiente
+
+==============================================
+MÓDULO 16: RENDIMIENTO Y OPTIMIZACIÓN
+==============================================
+
+CP-136	Rendimiento	Tiempo de carga inicial de app	App cerrada	1. Abrir app\n2. Medir tiempo hasta panel principal	Carga completa en menos de 3 segundos	Media	Pendiente
+
+CP-137	Rendimiento	Tiempo de sincronización completa	Datos desactualizados	1. Sincronizar todos los datos\n2. Medir tiempo	Sincronización completa en tiempo razonable (< 2 min)	Media	Pendiente
+
+CP-138	Rendimiento	Rendimiento con gran volumen de datos	Miles de registros en Realm	1. Navegar entre pantallas\n2. Realizar búsquedas	App responde sin lag significativo	Media	Pendiente
+
+CP-139	Rendimiento	Consumo de batería en background	App en background por horas	1. Dejar app en background\n2. Medir consumo de batería	Consumo de batería aceptable (< 5% por hora)	Baja	Pendiente
+
+CP-140	Rendimiento	Uso de memoria RAM	App en uso prolongado	1. Usar app por 1+ hora\n2. Medir memoria	No hay memory leaks, uso de memoria estable	Media	Pendiente
+
+==============================================
+NOTAS ADICIONALES
+==============================================
+
+PRIORIDADES:
+- Alta: Funcionalidad crítica para operación del negocio
+- Media: Funcionalidad importante pero no bloqueante
+- Baja: Mejoras de UX o funcionalidad secundaria
+
+ESTADOS:
+- Pendiente: No ejecutado
+- En Progreso: Ejecutándose actualmente
+- Pasado: Ejecutado exitosamente
+- Fallido: Ejecutado con errores
+- Bloqueado: No se puede ejecutar por dependencias
+
+MÓDULOS PRINCIPALES IDENTIFICADOS:
+1. Autenticación y Permisos (8 casos)
+2. Sincronización de Datos (7 casos)
+3. Punto de Venta (22 casos)
+4. Cobranza (9 casos)
+5. Inventario y Precorte (9 casos)
+6. Cargas y Traspasos (8 casos)
+7. Cumplimiento de Agenda (10 casos)
+8. Operaciones de Envases (11 casos)
+9. Cortes (10 casos)
+10. Configuración de Impresora (7 casos)
+11. Cierre de Ruta (9 casos)
+12. Visualización de Datos (5 casos)
+13. Tracking GPS y Bitácora (6 casos)
+14. Reportes y Consultas (6 casos)
+15. Manejo de Errores (8 casos)
+16. Rendimiento y Optimización (5 casos)
+
+TOTAL: 140 CASOS DE PRUEBA
+
+TECNOLOGÍAS CLAVE:
+- React Native 0.82.1
+- Realm 20.2.0 (Base de datos local)
+- React Navigation (Navegación)
+- Bluetooth ESC/POS Printer (Impresión)
+- Geolocation Service (GPS)
+- Background Fetch (Sincronización en background)
+- AsyncStorage (Persistencia de sesión)
+
+API BASE: https://cbinfo.no-ip.info:9031

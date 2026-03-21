@@ -1,5 +1,5 @@
 import Realm, { UpdateMode } from "realm";
-import { ALL_SCHEMAS, SyncLogSchema } from "./RealmSchemas";
+import { allSchemas, SyncLogSchema } from "./RealmSchemas";
 import { SyncProgress } from "./sync/SyncTask";
 import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
@@ -22,8 +22,8 @@ class FullSyncService {
     try {
       this.realm = await Realm.open({
         path: "FullSyncDB",
-        schema: ALL_SCHEMAS,
-        schemaVersion: 24,
+        schema: allSchemas,
+        schemaVersion: 25,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -65,6 +65,15 @@ class FullSyncService {
           // Migración v24: Nueva tabla InventarioEnvasesHistorial (se llenará en el próximo sync)
           if (oldRealm.schemaVersion < 24) {
             console.log("[Migration v24] Creando tabla InventarioEnvasesHistorial");
+          }
+
+          // Migración v25: Reubicacion cambió completamente su estructura
+          // Realm automáticamente recreará la tabla porque cambió el tipo de primary key (string -> int)
+          // Los datos antiguos de reubicaciones se perderán y deben resincronizarse
+          if (oldRealm.schemaVersion < 25) {
+            console.log(
+              "[Migration v25] ⚠️ Reestructuración completa de Reubicacion: datos antiguos se eliminarán y deben resincronizarse.",
+            );
           }
         },
       });
@@ -563,7 +572,9 @@ class FullSyncService {
               }
 
               if (clientesAEliminar.length > 0) {
-                console.log(`[Incremental] Eliminando ${clientesAEliminar.length} clientes que no están en el servidor`);
+                console.log(
+                  `[Incremental] Eliminando ${clientesAEliminar.length} clientes que no están en el servidor`,
+                );
                 this.realm!.delete(clientesAEliminar);
                 registrosEliminados = clientesAEliminar.length;
               }

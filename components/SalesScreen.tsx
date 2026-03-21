@@ -473,17 +473,27 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (!sucursal) return;
       try {
         if (showLoading) setLoadingAgendados(true);
-        // Si es refresh manual, sincronizar con el servidor primero
+        // Si es refresh manual, sincronizar visitas realizadas con el servidor
         if (showLoading) {
           try {
+            await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
             await VisitaSyncService.getInstance().syncByDate(new Date());
           } catch (syncErr) {
             console.warn("[Sales] Sync visitas fallido (no crítico):", syncErr);
           }
         }
+
+        console.log(`[Sales] 📅 Recargando visitas para sucursal: ${sucursal}`);
+
+        // Cargar visitas agendadas del día (para tab Agendados)
         const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
-        console.log(`[Sales] Visitas recargadas: ${visitasDelDia.length}`);
-        console.log(visitasDelDia);
+        console.log(`[Sales] Visitas agendadas del día: ${visitasDelDia.length}`);
+
+        // Cargar clientes visitados HOY desde el nuevo endpoint
+        const clientesVisitadosHoy = await VisitaSyncService.getInstance().getClientesVisitadosHoy(sucursal);
+        console.log(`[Sales] Clientes visitados HOY: ${clientesVisitadosHoy.size}`);
+        console.log(`[Sales] IDs visitados:`, Array.from(clientesVisitadosHoy));
+
         const clientesData = FullSyncService.getClientesFull(10000);
         const clientesFormateados = clientesData.map((c: any) => ({
           id: c.id,
@@ -496,23 +506,33 @@ export default function SalesScreen({ route }: { route?: any }) {
           metros: c.metros,
         }));
         setClientes(clientesFormateados);
-        // Actualizar agendados (solo visitado === 0)
+
+        // Actualizar agendados (solo visitado === 0 del día actual)
         const idsClientesVisitaHoy = new Set(
           visitasDelDia.filter((v: any) => v.visitado === 0).map((v: any) => v.idCliente),
         );
         const clientesConVisitaHoy = clientesFormateados.filter((c) => idsClientesVisitaHoy.has(c.id));
         setClientesEntregaDia(clientesConVisitaHoy);
-        // Actualizar filteredClientes según tab activo para que la lista se refresque
+
+        // Actualizar filteredClientes según tab activo
         if (clienteTabActivo === "agendados") {
           setFilteredClientes(clientesConVisitaHoy);
         } else if (clienteTabActivo === "todos") {
           setFilteredClientes(clientesFormateados);
         }
-        // Mapa de visitas
+
+        // Guardar IDs de agendados y visitados
         const allAgendadosIds = new Set(visitasDelDia.map((v: any) => v.idCliente as number));
         setVisitasDelDiaIds(allAgendadosIds);
+
+        // Crear mapa simple: cliente visitado HOY = true
         const visitaMap = new Map<number, any>();
-        visitasDelDia.forEach((v: any) => visitaMap.set(v.idCliente, v));
+        clientesVisitadosHoy.forEach((idCliente) => {
+          visitaMap.set(idCliente, { visitado: 1, idCliente });
+        });
+
+        console.log(`[Sales] Mapa de visitados construido con ${visitaMap.size} clientes`);
+
         setVisitasDelDiaMap(visitaMap);
       } catch (error) {
         console.error("[Sales] Error al recargar visitas:", error);
@@ -585,12 +605,21 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.log("[Sales] Ejemplo cliente con coords:", JSON.stringify(clientesConCoords[0]));
       }
 
-      // Cargar visitas del día para filtro de entrega
-      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
-      console.log(`[Sales] Visitas del día (sucursal ${sucursal}): ${visitasDelDia.length}`);
-      if (visitasDelDia.length > 0) {
-        console.log("[Sales] Ejemplo visita:", JSON.stringify(visitasDelDia[0]));
+      // Sincronizar visitas realizadas al inicio
+      try {
+        await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
+      } catch (syncErr) {
+        console.warn("[Sales] Sync visitas realizadas fallido (no crítico):", syncErr);
       }
+
+      // Cargar visitas agendadas del día (para tab Agendados)
+      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
+      console.log(`[Sales] Visitas agendadas del día: ${visitasDelDia.length}`);
+
+      // Cargar clientes visitados HOY desde el nuevo endpoint
+      const clientesVisitadosHoy = await VisitaSyncService.getInstance().getClientesVisitadosHoy(sucursal);
+      console.log(`[Sales] Clientes visitados HOY: ${clientesVisitadosHoy.size}`);
+
       // Solo clientes con visita PENDIENTE (visitado === 0) para la pestaña Agendados
       const idsClientesVisitaHoy = new Set(
         visitasDelDia.filter((v: any) => v.visitado === 0).map((v: any) => v.idCliente),
@@ -600,11 +629,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log(`[Sales] clientesEntregaDia (match con clientes): ${clientesConVisitaHoy.length}`);
       setClientesEntregaDia(clientesConVisitaHoy);
 
-      // Guardar IDs de todos los clientes agendados hoy (visitados o no)
+      // Guardar IDs de todos los clientes agendados hoy
       const allAgendadosIds = new Set(visitasDelDia.map((v: any) => v.idCliente as number));
       setVisitasDelDiaIds(allAgendadosIds);
+
+      // Crear mapa simple: cliente visitado HOY = true
       const visitaMap = new Map<number, any>();
-      visitasDelDia.forEach((v: any) => visitaMap.set(v.idCliente, v));
+      clientesVisitadosHoy.forEach((idCliente) => {
+        visitaMap.set(idCliente, { visitado: 1, idCliente });
+      });
       setVisitasDelDiaMap(visitaMap);
 
       // Cargar clientes con precios
@@ -2231,6 +2264,22 @@ export default function SalesScreen({ route }: { route?: any }) {
                     const visitaInfo = visitasDelDiaMap.get(item.id);
                     const yaVisitado = visitaInfo?.visitado === 1;
 
+                    // Debug: log para clientes con badge de visitado
+                    if (yaVisitado || esAgendado) {
+                      console.log(`[Sales Cercanos] Cliente ${item.id} (${item.nombre}):`, {
+                        esAgendado,
+                        yaVisitado,
+                        tieneVisitaInfo: !!visitaInfo,
+                        visitaInfo: visitaInfo
+                          ? {
+                              idCliente: visitaInfo.idCliente,
+                              visitado: visitaInfo.visitado,
+                              fecha: visitaInfo.fecha,
+                            }
+                          : null,
+                      });
+                    }
+
                     // Calcular si el usuario está fuera del rango del cliente
                     let fueraDeRango = false;
                     let distanciaActual: number | null = null;
@@ -2268,7 +2317,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                             )}
                           </View>
                           <View style={styles.badgesColumn}>
-                            {esAgendado && (
+                            {visitaInfo && (esAgendado || yaVisitado) && (
                               <Text style={[styles.agendadoBadge, yaVisitado && styles.agendadoBadgeVisitado]}>
                                 {yaVisitado ? "Visitado" : "Agendado"}
                               </Text>
@@ -2705,9 +2754,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             <View style={styles.loadingModalContent}>
               <ActivityIndicator size="large" color={COLORS.primary} />
               <Text style={styles.loadingModalTitle}>Reubicando Cliente</Text>
-              <Text style={styles.loadingModalText}>
-                Obteniendo ubicación GPS y guardando la reubicación...
-              </Text>
+              <Text style={styles.loadingModalText}>Obteniendo ubicación GPS y guardando la reubicación...</Text>
             </View>
           </View>
         </Modal>
