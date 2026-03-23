@@ -456,8 +456,54 @@ class VisitaSyncService {
 
   async getClientesVisitadosHoy(sucursal: number): Promise<Set<number>> {
     try {
-      const visitasHoy = await this.getVisitasRealizadasHoy(sucursal);
-      return new Set(visitasHoy.map((v) => v.idCliente));
+      const realm = this.getRealm();
+      const clientesVisitados = new Set<number>();
+
+      // Obtener rango del día actual
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      // 1. Consultar tabla Visita (local, antes de sincronizar) con visitado == 1
+      const visitasLocales = realm
+        .objects("Visita")
+        .filtered(
+          "visitado == 1 AND ruta == $0 AND fecha >= $1 AND fecha <= $2",
+          sucursal.toString(),
+          startOfDay,
+          endOfDay,
+        );
+
+      visitasLocales.forEach((v: any) => {
+        clientesVisitados.add(v.idCliente);
+      });
+
+      console.log(`[VisitaSync] 📍 Visitas locales (Visita) hoy: ${visitasLocales.length}`);
+
+      // 2. Consultar tabla VisitaRealizada (sincronizada al servidor)
+      const visitasRealizadas = realm
+        .objects("VisitaRealizada")
+        .filtered("fechaInicio >= $0 AND fechaInicio <= $1", startOfDay, endOfDay);
+
+      visitasRealizadas.forEach((v: any) => {
+        clientesVisitados.add(v.idCliente);
+      });
+
+      console.log(`[VisitaSync] 📍 Visitas realizadas (VisitaRealizada) hoy: ${visitasRealizadas.length}`);
+
+      // 3. Consultar tabla DetalleVisitas (ventas/visitas registradas hoy)
+      const detalleVisitas = realm
+        .objects("DetalleVisitas")
+        .filtered("idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2", sucursal, startOfDay, endOfDay);
+
+      detalleVisitas.forEach((v: any) => {
+        clientesVisitados.add(v.idCliente);
+      });
+
+      console.log(`[VisitaSync] 📍 Detalle visitas (DetalleVisitas) hoy: ${detalleVisitas.length}`);
+      console.log(`[VisitaSync] 📍 Total clientes visitados hoy (combinado): ${clientesVisitados.size}`);
+
+      return clientesVisitados;
     } catch (error) {
       console.error("[VisitaSync] ❌ Error al obtener clientes visitados hoy:", error);
       return new Set();

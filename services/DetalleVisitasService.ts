@@ -25,7 +25,9 @@ class DetalleVisitasService {
 
   private getRealm(): Realm {
     if (!this.realm || this.realm.isClosed) {
-      throw new Error("[DetalleVisitasService] Realm no inicializado. Debe llamarse FullSyncService.initialize() primero");
+      throw new Error(
+        "[DetalleVisitasService] Realm no inicializado. Debe llamarse FullSyncService.initialize() primero",
+      );
     }
     return this.realm;
   }
@@ -34,7 +36,7 @@ class DetalleVisitasService {
     idCliente: number,
     idUsuario: number,
     idRuta: number,
-    tipoVisita?: number
+    tipoVisita?: number,
   ): Promise<string | null> {
     try {
       const realm = this.getRealm();
@@ -100,7 +102,7 @@ class DetalleVisitasService {
     idCliente: number,
     idUsuario: number,
     idRuta: number,
-    tipoVisita?: number
+    tipoVisita?: number,
   ): Promise<string | null> {
     try {
       const realm = this.getRealm();

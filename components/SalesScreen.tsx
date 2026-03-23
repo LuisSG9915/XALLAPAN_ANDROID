@@ -1212,10 +1212,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               console.log("[Sales] Ubicación obtenida:", ubicacion);
 
               const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
-                currentSucursal,
                 clienteAUbicar.id,
-                clienteAUbicar.latitud ?? null,
-                clienteAUbicar.longitud ?? null,
                 ubicacion.latitude,
                 ubicacion.longitude,
                 currentUser.id,

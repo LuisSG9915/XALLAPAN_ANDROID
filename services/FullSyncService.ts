@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 25,
+        schemaVersion: 26,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -74,6 +74,18 @@ class FullSyncService {
             console.log(
               "[Migration v25] ⚠️ Reestructuración completa de Reubicacion: datos antiguos se eliminarán y deben resincronizarse.",
             );
+          }
+
+          // Migración v26: Agregar campo enviado a Reubicacion con default false
+          if (oldRealm.schemaVersion < 26) {
+            console.log("[Migration v26] Agregando campo enviado a Reubicacion");
+            const reubicaciones = newRealm.objects("Reubicacion");
+            for (let i = 0; i < reubicaciones.length; i++) {
+              const obj: any = reubicaciones[i];
+              if (typeof obj.enviado === "undefined") {
+                obj.enviado = false;
+              }
+            }
           }
         },
       });
@@ -314,8 +326,9 @@ class FullSyncService {
             `[FullSync-Reubicacion] Detalles de reubicaciones:`,
             Array.from(reubicacionesPendientes).map((r: any) => ({
               id: r.id,
-              cveCliente: r.cveCliente,
-              sucursal: r.sucursal,
+              idCliente: r.idCliente,
+              latitud: r.latitud,
+              longitud: r.longitud,
               enviado: r.enviado,
               fecha: r.fecha,
             })),
@@ -323,16 +336,16 @@ class FullSyncService {
 
           const reubicacionesPayload = {
             reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
-              sucursal: r.sucursal ?? sucursal,
-              cveCliente: r.cveCliente,
-              latitudAnterior: r.latitudAnterior ?? 0,
-              longitudAnterior: r.longitudAnterior ?? 0,
-              latitudNueva: r.latitudNueva,
-              longitudNueva: r.longitudNueva,
+              sucursal: sucursal,
+              cveCliente: r.idCliente,
+              latitudAnterior: 0,
+              longitudAnterior: 0,
+              latitudNueva: r.latitud ?? 0,
+              longitudNueva: r.longitud ?? 0,
               fecha: (r.fecha ?? this.getMexicoNow()).toISOString(),
-              usuario: r.usuario ?? idUsuario,
-              idMovil: r.idMovil,
-              fechaTransfer: (r.fechaTransfer ?? this.getMexicoNow()).toISOString(),
+              usuario: r.idUsuario ?? idUsuario,
+              idMovil: r.id,
+              fechaTransfer: this.getMexicoNow().toISOString(),
             })),
           };
 
@@ -2794,6 +2807,51 @@ class FullSyncService {
     );
   }
 
+  getBitacoraGpsPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("BitacoraGps")
+        .sorted("fecha", true)
+        .slice(offset, offset + limit),
+    );
+  }
+
+  getInventarioEnvasePaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("InventarioEnvase").slice(offset, offset + limit));
+  }
+
+  getInventarioEnvasesHistorialPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("InventarioEnvasesHistorial")
+        .sorted("fechaMovto", true)
+        .slice(offset, offset + limit),
+    );
+  }
+
+  getReubicacionesPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("Reubicacion")
+        .sorted("fecha", true)
+        .slice(offset, offset + limit),
+    );
+  }
+
+  getVisitasRealizadasPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("VisitaRealizada")
+        .sorted("fechaInicio", true)
+        .slice(offset, offset + limit),
+    );
+  }
+
   /**
    * Envía las ventas locales pendientes al servidor.
    * Solo envía ventas con id >= LOCAL_SALE_ID_THRESHOLD y noVenta === 0.
@@ -3061,6 +3119,10 @@ class FullSyncService {
         tipoVisita: 0,
         bitacoraSync: 0,
         inventarioEnvase: 0,
+        bitacoraGps: 0,
+        inventarioEnvasesHistorial: 0,
+        reubicaciones: 0,
+        visitasRealizadas: 0,
       };
     }
 
@@ -3082,6 +3144,10 @@ class FullSyncService {
       tipoVisita: this.realm.objects("TipoVisita").length,
       bitacoraSync: this.realm.objects("BitacoraSync").length,
       inventarioEnvase: this.realm.objects("InventarioEnvase").length,
+      bitacoraGps: this.realm.objects("BitacoraGps").length,
+      inventarioEnvasesHistorial: this.realm.objects("InventarioEnvasesHistorial").length,
+      reubicaciones: this.realm.objects("Reubicacion").length,
+      visitasRealizadas: this.realm.objects("VisitaRealizada").length,
     };
   }
 

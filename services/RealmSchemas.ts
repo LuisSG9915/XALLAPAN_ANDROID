@@ -398,6 +398,7 @@ export const ReubicacionSchema = {
     fecha: "date?",
     idUsuario: "int?",
     syncedAt: "date",
+    enviado: { type: "bool", default: false },
   },
   primaryKey: "id",
 };

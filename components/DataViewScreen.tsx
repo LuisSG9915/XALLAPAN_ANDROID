@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, RefreshControl, Alert } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  FlatList,
+  RefreshControl,
+  Alert,
+  Modal,
+} from "react-native";
 // import Clipboard from "@react-native-clipboard/clipboard"; // TODO: Re-enable when TurboModule issue is fixed
 import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
@@ -25,7 +35,12 @@ type EntityType =
   | "detalleVisitas"
   | "tipoVisita"
   | "bitacoraSync"
-  | "cumplimiento";
+  | "cumplimiento"
+  | "bitacoraGps"
+  | "inventarioEnvase"
+  | "inventarioEnvasesHistorial"
+  | "reubicaciones"
+  | "visitasRealizadas";
 
 interface EntityTab {
   key: EntityType;
@@ -52,6 +67,11 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "tipoVisita", title: "Tipo Visita", icon: "label" },
   { key: "bitacoraSync", title: "Bitácora Sync", icon: "cloud-sync" },
   { key: "cumplimiento", title: "Cumplimiento", icon: "trending-up" },
+  { key: "bitacoraGps", title: "Bitácora GPS", icon: "location-on" },
+  { key: "inventarioEnvase", title: "Inventario Envase", icon: "inventory-2" },
+  { key: "inventarioEnvasesHistorial", title: "Historial Envases", icon: "history-toggle-off" },
+  { key: "reubicaciones", title: "Reubicaciones", icon: "place" },
+  { key: "visitasRealizadas", title: "Visitas Realizadas", icon: "check-circle" },
 ];
 
 export default function DataViewScreen() {
@@ -61,6 +81,8 @@ export default function DataViewScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const ITEMS_PER_PAGE = 50;
 
   // Obtener sucursal del usuario logueado
@@ -147,6 +169,21 @@ export default function DataViewScreen() {
           const stats = await VisitaSyncService.getInstance().getEstadisticasCumplimiento(new Date(), currentSucursal);
           setData([stats]);
           break;
+        case "bitacoraGps":
+          setData(FullSyncService.getBitacoraGpsPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "inventarioEnvase":
+          setData(FullSyncService.getInventarioEnvasePaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "inventarioEnvasesHistorial":
+          setData(FullSyncService.getInventarioEnvasesHistorialPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "reubicaciones":
+          setData(FullSyncService.getReubicacionesPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "visitasRealizadas":
+          setData(FullSyncService.getVisitasRealizadasPaginated(offset, ITEMS_PER_PAGE));
+          break;
       }
     } catch (error) {
       console.error("Error al cargar datos:", error);
@@ -167,6 +204,27 @@ export default function DataViewScreen() {
   const handleTabChange = (tab: EntityType) => {
     setSelectedTab(tab);
     setCurrentPage(0);
+    setExpandedIndex(null);
+    setDropdownOpen(false);
+  };
+
+  const selectedTabInfo = ENTITY_TABS.find((t) => t.key === selectedTab);
+
+  const serializeItem = (item: any): string => {
+    try {
+      const plain: Record<string, any> = {};
+      for (const key of Object.keys(item)) {
+        const val = (item as any)[key];
+        if (val instanceof Date) {
+          plain[key] = val.toISOString();
+        } else {
+          plain[key] = val;
+        }
+      }
+      return JSON.stringify(plain, null, 2);
+    } catch {
+      return String(item);
+    }
   };
 
   const handleNextPage = () => {
@@ -621,6 +679,16 @@ export default function DataViewScreen() {
         return stats.bitacoraSync || 0;
       case "cumplimiento":
         return data.length; // El cumplimiento es un solo objeto
+      case "bitacoraGps":
+        return stats.bitacoraGps || 0;
+      case "inventarioEnvase":
+        return stats.inventarioEnvase || 0;
+      case "inventarioEnvasesHistorial":
+        return stats.inventarioEnvasesHistorial || 0;
+      case "reubicaciones":
+        return stats.reubicaciones || 0;
+      case "visitasRealizadas":
+        return stats.visitasRealizadas || 0;
       default:
         return 0;
     }
@@ -628,40 +696,45 @@ export default function DataViewScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabsContainer}
-        contentContainerStyle={styles.tabsContent}
-      >
-        {ENTITY_TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            style={[styles.tab, selectedTab === tab.key && styles.tabActive]}
-            onPress={() => handleTabChange(tab.key)}
-          >
-            <Icon
-              name={tab.icon}
-              type="material"
-              size={24}
-              color={selectedTab === tab.key ? "#fff" : COLORS.textSecondary}
-              style={styles.tabIcon}
-            />
-            <Text style={[styles.tabText, selectedTab === tab.key && styles.tabTextActive]}>{tab.title}</Text>
-            <View style={styles.badge}>
-              <Text
-                style={[
-                  styles.badgeText,
-                  selectedTab === tab.key ? { color: COLORS.primary } : { color: COLORS.textPrimary },
-                ]}
-              >
-                {selectedTab === tab.key ? data.length : getCount()}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Dropdown selector */}
+      <TouchableOpacity style={styles.dropdownButton} onPress={() => setDropdownOpen(true)}>
+        <View style={styles.dropdownButtonInner}>
+          <Icon name={selectedTabInfo?.icon ?? "list"} type="material" size={20} color={COLORS.primary} />
+          <Text style={styles.dropdownButtonText}>{selectedTabInfo?.title ?? "Seleccionar tabla"}</Text>
+          <View style={styles.dropdownBadge}>
+            <Text style={styles.dropdownBadgeText}>{getCount()}</Text>
+          </View>
+        </View>
+        <Icon name="arrow-drop-down" type="material" size={24} color={COLORS.textSecondary} />
+      </TouchableOpacity>
+
+      {/* Modal dropdown */}
+      <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDropdownOpen(false)}>
+          <View style={styles.modalList}>
+            <Text style={styles.modalTitle}>Seleccionar tabla</Text>
+            <ScrollView showsVerticalScrollIndicator>
+              {ENTITY_TABS.map((tab) => (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[styles.modalItem, selectedTab === tab.key && styles.modalItemActive]}
+                  onPress={() => handleTabChange(tab.key)}
+                >
+                  <Icon
+                    name={tab.icon}
+                    type="material"
+                    size={18}
+                    color={selectedTab === tab.key ? "#fff" : COLORS.textSecondary}
+                  />
+                  <Text style={[styles.modalItemText, selectedTab === tab.key && styles.modalItemTextActive]}>
+                    {tab.title}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Stats Summary */}
       <View style={styles.statsContainer}>
@@ -717,11 +790,10 @@ export default function DataViewScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Data List */}
+      {/* JSON Data List */}
       <FlatList
         data={data}
-        renderItem={renderItem}
-        keyExtractor={(item, index) => `${selectedTab}-${item.id || index}`}
+        keyExtractor={(item, index) => `${selectedTab}-${item.id ?? item.idBitacoraMovil ?? index}`}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
@@ -738,6 +810,32 @@ export default function DataViewScreen() {
             <Text style={styles.emptySubtext}>Inicia sesión nuevamente para sincronizar</Text>
           </View>
         }
+        renderItem={({ item, index }) => {
+          const isExpanded = expandedIndex === index;
+          return (
+            <TouchableOpacity onPress={() => setExpandedIndex(isExpanded ? null : index)} activeOpacity={0.8}>
+              <View style={styles.jsonCard}>
+                <View style={styles.jsonCardHeader}>
+                  <Text style={styles.jsonCardIndex}>#{currentPage * ITEMS_PER_PAGE + index + 1}</Text>
+                  <Text style={styles.jsonCardId} numberOfLines={1}>
+                    {item.id ?? item.idBitacoraMovil ?? item.noVenta ?? "—"}
+                  </Text>
+                  <Icon
+                    name={isExpanded ? "expand-less" : "expand-more"}
+                    type="material"
+                    size={20}
+                    color={COLORS.textSecondary}
+                  />
+                </View>
+                {isExpanded && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator>
+                    <Text style={styles.jsonText}>{serializeItem(item)}</Text>
+                  </ScrollView>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        }}
       />
     </View>
   );
@@ -748,56 +846,116 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  tabsContainer: {
+  dropdownButton: {
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    maxHeight: 100,
-  },
-  tabsContent: {
-    paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.s,
-  },
-  tab: {
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
-    marginHorizontal: 4,
-    borderRadius: BORDER_RADIUS.m,
-    backgroundColor: COLORS.background,
-    minWidth: 100,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    justifyContent: "space-between",
   },
-  tabActive: {
+  dropdownButtonInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.textPrimary,
+    flex: 1,
+  },
+  dropdownBadge: {
     backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-    ...SHADOWS.small,
+    borderRadius: BORDER_RADIUS.round,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  tabIcon: {
+  dropdownBadgeText: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: SPACING.l,
+  },
+  modalList: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.l,
+    paddingVertical: SPACING.s,
+    maxHeight: "70%",
+    ...SHADOWS.medium,
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
     marginBottom: 4,
   },
-  tabText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: COLORS.textSecondary,
-  },
-  tabTextActive: {
-    color: "#FFF",
-  },
-  badge: {
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    borderRadius: BORDER_RADIUS.round,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginTop: 4,
-    minWidth: 20,
+  modalItem: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: 12,
+    borderRadius: BORDER_RADIUS.s,
+    marginHorizontal: 4,
   },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "bold",
+  modalItemActive: {
+    backgroundColor: COLORS.primary,
+  },
+  modalItemText: {
+    fontSize: 15,
+    color: COLORS.textPrimary,
+    flex: 1,
+  },
+  modalItemTextActive: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  jsonCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.s,
+    overflow: "hidden",
+    ...SHADOWS.small,
+  },
+  jsonCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: SPACING.m,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  jsonCardIndex: {
+    fontSize: 11,
+    color: COLORS.muted,
+    minWidth: 32,
+    fontFamily: "monospace",
+  },
+  jsonCardId: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.textPrimary,
+    flex: 1,
+  },
+  jsonText: {
+    fontFamily: "monospace",
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    padding: SPACING.m,
+    backgroundColor: COLORS.background,
+    lineHeight: 18,
   },
   statsContainer: {
     backgroundColor: COLORS.surface,
