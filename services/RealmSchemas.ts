@@ -418,6 +418,25 @@ export const VisitaRealizadaSchema = {
   primaryKey: "id",
 };
 
+export const VentaCancelacionSchema = {
+  name: "VentaCancelacion",
+  properties: {
+    id: "string",
+    sucursal: "int?",
+    noVenta: "int?",
+    caja: "int?",
+    idMovil: "int?",
+    usuarioCancela: "int?",
+    fechaCancela: "date?",
+    motivoCancelacion: "string?",
+    latitud: "double?",
+    longitud: "double?",
+    fechaAlta: "date",
+    enviado: "bool",
+  },
+  primaryKey: "id",
+};
+
 export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
@@ -441,4 +460,5 @@ export const allSchemas = [
   InventarioEnvasesHistorialSchema,
   ReubicacionSchema,
   VisitaRealizadaSchema,
+  VentaCancelacionSchema,
 ];

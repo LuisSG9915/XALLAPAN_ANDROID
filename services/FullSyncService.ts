@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 27,
+        schemaVersion: 28,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -92,6 +92,11 @@ class FullSyncService {
           if (oldRealm.schemaVersion < 27) {
             console.log("[Migration v27] Agregando campo sucursal a Reubicacion");
           }
+
+          // Migración v28: Nueva tabla VentaCancelacion para cancelaciones de ventas
+          if (oldRealm.schemaVersion < 28) {
+            console.log("[Migration v28] Creando tabla VentaCancelacion");
+          }
         },
       });
 
@@ -138,6 +143,10 @@ class FullSyncService {
       // Inyectar a ReubicacionService
       const ReubicacionService = (await import("./ReubicacionService")).default;
       ReubicacionService.getInstance().setRealm(this.realm);
+
+      // Inyectar a VentaCancelacionService
+      const VentaCancelacionService = (await import("./VentaCancelacionService")).default;
+      VentaCancelacionService.getInstance().setRealm(this.realm);
 
       console.log("✅ Realm inyectado a todos los servicios");
     } catch (error) {

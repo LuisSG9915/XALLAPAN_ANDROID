@@ -16,6 +16,7 @@ import { VentasArrastreSyncTask } from "./tasks/VentasArrastreSyncTask";
 import { InventarioEnvaseSyncTask } from "./tasks/InventarioEnvaseSyncTask";
 import { ReubicacionSyncTask } from "./tasks/ReubicacionSyncTask";
 import { InventarioEnvasesHistorialSyncTask } from "./tasks/InventarioEnvasesHistorialSyncTask";
+import { VentaCancelacionSyncTask } from "./tasks/VentaCancelacionSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -67,6 +68,8 @@ export class SyncOrchestrator {
       new ReubicacionSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Arrastre al final - prioridad 100
       new VentasArrastreSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
+      // Arrastre de cancelaciones - prioridad 101
+      new VentaCancelacionSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
     ];
 
     // Asignar idUsuario a todas las tareas

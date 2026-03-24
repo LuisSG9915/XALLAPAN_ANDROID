@@ -18,6 +18,7 @@ import FullSyncService from "../services/FullSyncService";
 import FacturaService, { FacturaItem } from "../services/FacturaService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 import AuthService from "../services/AuthService";
+import VentaCancelacionService from "../services/VentaCancelacionService";
 
 type ReporteItem = {
   id: number;
@@ -449,6 +450,65 @@ export default function ReporteVentasScreen() {
     }
   };
 
+  const cancelarVenta = async (row: GroupedSale) => {
+    try {
+      if (!row.no_venta || row.no_venta === 0) {
+        Alert.alert("Error", "Solo se pueden cancelar ventas sincronizadas con el servidor");
+        return;
+      }
+
+      Alert.alert(
+        "Confirmar Cancelación",
+        `¿Estás seguro de cancelar la venta #${row.no_venta}?\n\nCliente: ${
+          row.nombre
+        }\nImporte: $${row.totalImporte.toFixed(2)}\n\nEsta acción actualizará el inventario.`,
+        [
+          {
+            text: "No",
+            style: "cancel",
+          },
+          {
+            text: "Sí, Cancelar",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await VentaCancelacionService.getInstance().cancelarVenta({
+                  noVenta: row.no_venta,
+                  sucursal: row.sucursal || 1,
+                  caja: row.caja,
+                  idMovil: row.idMovil,
+                  motivoCancelacion: "Cancelación solicitada desde consulta de ventas",
+                });
+
+                Alert.alert(
+                  "Éxito",
+                  "Venta cancelada localmente. Se enviará al servidor en la próxima sincronización.",
+                  [
+                    {
+                      text: "OK",
+                      onPress: () => {
+                        loadVentas();
+                        if (isLocalView) {
+                          consultarLocal();
+                        } else {
+                          consultar();
+                        }
+                      },
+                    },
+                  ],
+                );
+              } catch (error: any) {
+                Alert.alert("Error", error?.message || "No se pudo cancelar la venta");
+              }
+            },
+          },
+        ],
+      );
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Ocurrió un error al intentar cancelar");
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.titleRow}>
@@ -590,9 +650,6 @@ export default function ReporteVentasScreen() {
                     <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
                       <Icon name="visibility" type="material" color={COLORS.info} size={20} />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => console.log(item)}>
-                      <Text>Caja {item?.caja}</Text>
-                    </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => facturarVenta(item)}
                       disabled={!item.folioFactura && !item.facturacionMovil}
@@ -602,6 +659,18 @@ export default function ReporteVentasScreen() {
                         name="receipt"
                         type="material"
                         color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
+                        size={20}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => cancelarVenta(item)}
+                      disabled={!item.no_venta || item.no_venta === 0}
+                      style={styles.iconBtn}
+                    >
+                      <Icon
+                        name="cancel"
+                        type="material"
+                        color={!item.no_venta || item.no_venta === 0 ? COLORS.muted : COLORS.error}
                         size={20}
                       />
                     </TouchableOpacity>
