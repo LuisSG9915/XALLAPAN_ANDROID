@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 28,
+        schemaVersion: 29,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -96,6 +96,11 @@ class FullSyncService {
           // Migración v28: Nueva tabla VentaCancelacion para cancelaciones de ventas
           if (oldRealm.schemaVersion < 28) {
             console.log("[Migration v28] Creando tabla VentaCancelacion");
+          }
+
+          // Migración v29: Nueva tabla FormaPago para formas de pago dinámicas
+          if (oldRealm.schemaVersion < 29) {
+            console.log("[Migration v29] Creando tabla FormaPago");
           }
         },
       });
@@ -3230,7 +3235,13 @@ class FullSyncService {
       inventarioEnvasesHistorial: this.realm.objects("InventarioEnvasesHistorial").length,
       reubicaciones: this.realm.objects("Reubicacion").length,
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
+      formasPago: this.realm.objects("FormaPago").length,
     };
+  }
+
+  getFormasPago(): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("FormaPago").sorted("tipo"));
   }
 
   close(): void {

@@ -63,7 +63,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
   const [currentSucursal, setCurrentSucursal] = useState<number>(0);
   const [productosBase, setProductosBase] = useState<any[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
+  const [metodoPago, setMetodoPago] = useState<number | null>(null);
+  const [formasPago, setFormasPago] = useState<any[]>([]);
 
   // Modal states
   const [intercambioModalOpen, setIntercambioModalOpen] = useState(false);
@@ -121,6 +122,11 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
 
         const productosData = FullSyncService.getProductos(100000);
         setProductosBase(productosData);
+
+        // Cargar formas de pago dinámicas
+        const formasPagoData = FullSyncService.getFormasPago();
+        console.log(`[EnvaseOp] Formas de pago cargadas: ${formasPagoData.length}`);
+        setFormasPago(formasPagoData);
       } catch (error) {
         console.error("[EnvaseOp] Error al inicializar:", error);
         Alert.alert("Error", "No se pudieron cargar los datos. Sincroniza primero.");
@@ -355,15 +361,9 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       const now = FullSyncService.getMexicoNow();
 
       // Tipo de pago
-      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago === "cupon" ? 4 : metodoPago === "credito" ? 3 : 2;
-      const descripcionMedioPago =
-        metodoPago === "efectivo"
-          ? "Efectivo"
-          : metodoPago === "cupon"
-          ? "Cupon"
-          : metodoPago === "credito"
-          ? "Credito"
-          : "Transferencia";
+      const tipoPagoCode = metodoPago ?? 1;
+      const formaPagoSel = formasPago.find((fp: any) => fp.tipo === metodoPago);
+      const descripcionMedioPago = formaPagoSel?.descripcion ?? "Efectivo";
 
       // Determine claveProd for the sale line
       // Intercambio = clave 1000, Prestamo = clave 1001
@@ -397,7 +397,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       try {
         await TicketPrinter.printSaleTicket({
           clientName: selectedClient.nombre,
-          paymentMethod: metodoPago || "efectivo",
+          paymentMethod: descripcionMedioPago,
           items: [
             {
               description: descripcionVenta,
@@ -816,19 +816,19 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       <View style={styles.paymentSection}>
         <Text style={styles.quantityLabel}>MÉTODO DE PAGO</Text>
         <View style={styles.payRow}>
-          <PayChipEnvase label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
-          <PayChipEnvase
-            label="Transferencia"
-            selected={metodoPago === "transferencia"}
-            onPress={() => setMetodoPago("transferencia")}
-          />
-          <PayChipEnvase
-            label="Crédito"
-            selected={metodoPago === "credito"}
-            onPress={() => setMetodoPago("credito")}
-            disabled={selectedClient ? !selectedClient.credito : true}
-          />
-          <PayChipEnvase label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
+          {formasPago.map((fp: any) => {
+            const esCred = fp.tipo === 3;
+            const disabled = esCred ? (selectedClient ? !selectedClient.credito : true) : false;
+            return (
+              <PayChipEnvase
+                key={fp.tipo}
+                label={fp.descripcion || `Tipo ${fp.tipo}`}
+                selected={metodoPago === fp.tipo}
+                onPress={() => setMetodoPago(fp.tipo)}
+                disabled={disabled}
+              />
+            );
+          })}
         </View>
       </View>
 

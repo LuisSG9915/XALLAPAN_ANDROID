@@ -68,7 +68,8 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [quantityInputs, setQuantityInputs] = useState<{ [id: number]: string }>({});
 
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "transferencia" | "credito" | "cupon" | null>(null);
+  const [metodoPago, setMetodoPago] = useState<number | null>(null);
+  const [formasPago, setFormasPago] = useState<any[]>([]);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [printerName, setPrinterName] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
@@ -554,7 +555,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     }, [currentSucursal, reloadVisitasDelDia]),
   );
 
-  const loadDataFromRealm = async (sucursal: number) => {
+  const loadDataFromRealm = async (sucursal: number): Promise<Cliente[]> => {
     try {
       await FullSyncService.initialize();
 
@@ -650,6 +651,11 @@ export default function SalesScreen({ route }: { route?: any }) {
       setProductosBase(productosData);
       setKits(kitsData);
 
+      // Cargar formas de pago dinámicas
+      const formasPagoData = FullSyncService.getFormasPago();
+      console.log(`[Sales] Formas de pago cargadas: ${formasPagoData.length}`);
+      setFormasPago(formasPagoData);
+
       const productosFormateados = buildProductosFormateados(
         preciosData,
         productosData,
@@ -667,9 +673,12 @@ export default function SalesScreen({ route }: { route?: any }) {
       setProductos(productosFormateados);
       // Por defecto mostrar solo productos normales (sin kits ni promociones)
       setFilteredProductos(productosFormateados.filter((p) => !p.esKit && !p.esPromocion));
+      
+      return clientesFormateados;
     } catch (error) {
       console.error("Error al cargar datos de Realm:", error);
       Alert.alert("Error", "No se pudieron cargar los datos. Sincroniza primero.");
+      return [];
     }
   };
 
@@ -1220,8 +1229,6 @@ export default function SalesScreen({ route }: { route?: any }) {
               );
 
               if (reubicacionId) {
-                setUsuarioPermisoReubicacion(false);
-
                 // Actualizar el cliente seleccionado con las nuevas coordenadas
                 const updatedCliente = {
                   ...clienteAUbicar,
@@ -1230,10 +1237,42 @@ export default function SalesScreen({ route }: { route?: any }) {
                 };
                 setSelectedClient(updatedCliente);
 
+                // Pequeño delay para asegurar que la actualización en Realm se complete totalmente
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // Verificar DIRECTAMENTE en Realm si el cliente tiene las nuevas coordenadas
+                try {
+                  await FullSyncService.initialize();
+                  const realm = (FullSyncService as any).realm;
+                  if (realm && !realm.isClosed) {
+                    const clienteEnRealm = realm.objectForPrimaryKey("ClienteFull", clienteAUbicar.id);
+                    if (clienteEnRealm) {
+                      console.log(`[Sales] 📋 Cliente ${clienteAUbicar.id} DIRECTAMENTE desde Realm:`, {
+                        latitud: (clienteEnRealm as any).latitud,
+                        longitud: (clienteEnRealm as any).longitud
+                      });
+                    }
+                  }
+                } catch (realmError) {
+                  console.error("[Sales] Error verificando Realm directo:", realmError);
+                }
+
                 // Recargar la lista de clientes desde Realm para reflejar las nuevas coordenadas
                 try {
-                  await loadDataFromRealm(currentSucursal);
+                  const clientesActualizados = await loadDataFromRealm(currentSucursal);
                   console.log("[Sales] Lista de clientes recargada desde Realm");
+                  
+                  // Verificar que el cliente específico tiene las nuevas coordenadas (usando el valor retornado, no el estado)
+                  const clienteActualizado = clientesActualizados.find(c => c.id === clienteAUbicar.id);
+                  if (clienteActualizado) {
+                    console.log(`[Sales] 🔍 Cliente ${clienteActualizado.id} en estado después de recarga:`, {
+                      nombre: clienteActualizado.nombre,
+                      latitud: clienteActualizado.latitud,
+                      longitud: clienteActualizado.longitud
+                    });
+                  } else {
+                    console.warn(`[Sales] ⚠️ Cliente ${clienteAUbicar.id} no encontrado en la lista recargada`);
+                  }
                 } catch (reloadError) {
                   console.error("[Sales] Error recargando clientes:", reloadError);
                 }
@@ -1558,15 +1597,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
       const inventarioBaseId = buildMovilSaleId(sucursal);
-      const tipoPagoCode = metodoPago === "efectivo" ? 1 : metodoPago == "cupon" ? 4 : metodoPago === "credito" ? 3 : 2; // transferencia
-      const descripcionMedioPago =
-        metodoPago === "efectivo"
-          ? "Efectivo"
-          : metodoPago === "cupon"
-          ? "Cupon"
-          : metodoPago === "credito"
-          ? "Credito"
-          : "Transferencia";
+      const tipoPagoCode = metodoPago ?? 1;
+      const formaPagoSel = formasPago.find((fp: any) => fp.tipo === metodoPago);
+      const descripcionMedioPago = formaPagoSel?.descripcion ?? "Efectivo";
       const vendedor =
         (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = FullSyncService.getMexicoNow();
@@ -1610,7 +1643,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       try {
         await TicketPrinter.printSaleTicket({
           clientName: client.nombre,
-          paymentMethod: metodoPago,
+          paymentMethod: descripcionMedioPago,
           items: validCart.map((item) => ({
             description: item.descripcion,
             quantity: item.cantidad,
@@ -1841,14 +1874,14 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${metodoPago}\n\nTicket enviado a: ${
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${descripcionMedioPago}\n\nTicket enviado a: ${
             status.printer?.name
           }`,
         );
       } else {
         Alert.alert(
           "✅ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${metodoPago}`,
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${descripcionMedioPago}`,
         );
       }
 
@@ -2090,19 +2123,19 @@ export default function SalesScreen({ route }: { route?: any }) {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
-            <PayChip label="Efectivo" selected={metodoPago === "efectivo"} onPress={() => setMetodoPago("efectivo")} />
-            <PayChip
-              label="Transferencia"
-              selected={metodoPago === "transferencia"}
-              onPress={() => setMetodoPago("transferencia")}
-            />
-            <PayChip
-              label="Crédito"
-              selected={metodoPago === "credito"}
-              onPress={() => setMetodoPago("credito")}
-              disabled={selectedClient ? !selectedClient.credito : true}
-            />
-            <PayChip label="Cupon" selected={metodoPago === "cupon"} onPress={() => setMetodoPago("cupon")} />
+            {formasPago.map((fp: any) => {
+              const esCred = fp.tipo === 3;
+              const disabled = esCred ? (selectedClient ? !selectedClient.credito : true) : false;
+              return (
+                <PayChip
+                  key={fp.tipo}
+                  label={fp.descripcion || `Tipo ${fp.tipo}`}
+                  selected={metodoPago === fp.tipo}
+                  onPress={() => setMetodoPago(fp.tipo)}
+                  disabled={disabled}
+                />
+              );
+            })}
           </View>
 
           <View style={styles.totalRow}>

@@ -16,6 +16,7 @@ import { VentasArrastreSyncTask } from "./tasks/VentasArrastreSyncTask";
 import { InventarioEnvaseSyncTask } from "./tasks/InventarioEnvaseSyncTask";
 import { ReubicacionSyncTask } from "./tasks/ReubicacionSyncTask";
 import { InventarioEnvasesHistorialSyncTask } from "./tasks/InventarioEnvasesHistorialSyncTask";
+import { FormaPagoSyncTask } from "./tasks/FormaPagoSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -47,6 +48,7 @@ export class SyncOrchestrator {
    */
   private createAllTasks(): SyncTask[] {
     const tasks = [
+      new FormaPagoSyncTask(this.realm, this.syncLogId, this.sucursal),
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),
       new KitsSyncTask(this.realm, this.syncLogId),

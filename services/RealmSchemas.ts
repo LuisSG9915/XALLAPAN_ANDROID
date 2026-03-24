@@ -418,6 +418,20 @@ export const VisitaRealizadaSchema = {
   primaryKey: "id",
 };
 
+export const FormaPagoSchema = {
+  name: "FormaPago",
+  properties: {
+    tipo: "int",
+    sucursal: "int?",
+    descripcion: "string?",
+    grupoOperacion: "int?",
+    tarjeta: "bool?",
+    cuentaBancaria: "string?",
+    syncedAt: "date",
+  },
+  primaryKey: "tipo",
+};
+
 export const VentaCancelacionSchema = {
   name: "VentaCancelacion",
   properties: {
@@ -461,4 +475,5 @@ export const allSchemas = [
   ReubicacionSchema,
   VisitaRealizadaSchema,
   VentaCancelacionSchema,
+  FormaPagoSchema,
 ];

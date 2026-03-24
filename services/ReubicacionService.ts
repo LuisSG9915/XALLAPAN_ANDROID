@@ -186,6 +186,9 @@ class ReubicacionService {
       // Actualizar coordenadas del cliente en ClienteFull
       this.actualizarCoordenadasClienteLocal(idCliente, latitud, longitud);
 
+      // Marcar el permiso como usado después del registro exitoso
+      this.marcarPermisoReubicacionUsado(idUsuario);
+
       return id;
     } catch (error) {
       console.error("[ReubicacionService] ❌ Error registrando reubicación:", error);
@@ -202,17 +205,26 @@ class ReubicacionService {
 
     try {
       const cliente = this.realm.objectForPrimaryKey("ClienteFull", idCliente);
+      console.log(`[ReubicacionService] 🔍 Buscando cliente ${idCliente} en ClienteFull...`);
 
       if (cliente) {
+        const coordsAntes = { lat: (cliente as any).latitud, lng: (cliente as any).longitud };
+        console.log(`[ReubicacionService] 📍 Coordenadas ANTES:`, coordsAntes);
+        
         this.realm.write(() => {
           (cliente as any).latitud = latitud;
           (cliente as any).longitud = longitud;
         });
 
-        console.log(`[ReubicacionService] Coordenadas actualizadas localmente para cliente ${idCliente}`);
+        // Verificar inmediatamente después del write
+        const coordsDespues = { lat: (cliente as any).latitud, lng: (cliente as any).longitud };
+        console.log(`[ReubicacionService] 📍 Coordenadas DESPUÉS:`, coordsDespues);
+        console.log(`[ReubicacionService] ✅ Coordenadas actualizadas localmente para cliente ${idCliente}`);
+      } else {
+        console.warn(`[ReubicacionService] ⚠️ Cliente ${idCliente} no encontrado en ClienteFull`);
       }
     } catch (error) {
-      console.error("[ReubicacionService] Error actualizando coordenadas locales:", error);
+      console.error("[ReubicacionService] ❌ Error actualizando coordenadas locales:", error);
     }
   }
 
