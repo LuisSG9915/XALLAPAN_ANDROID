@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 26,
+        schemaVersion: 27,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -86,6 +86,11 @@ class FullSyncService {
                 obj.enviado = false;
               }
             }
+          }
+
+          // Migración v27: Agregar campo sucursal a Reubicacion
+          if (oldRealm.schemaVersion < 27) {
+            console.log("[Migration v27] Agregando campo sucursal a Reubicacion");
           }
         },
       });

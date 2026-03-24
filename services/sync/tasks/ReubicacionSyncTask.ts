@@ -64,7 +64,7 @@ export class ReubicacionSyncTask extends SyncTask {
         `[ReubicacionSync] Detalles:`,
         Array.from(reubicacionesPendientes).map((r: any) => ({
           id: r.id,
-          cveCliente: r.cveCliente,
+          idCliente: r.idCliente,
           sucursal: r.sucursal,
           enviado: r.enviado,
           fecha: r.fecha,
@@ -73,16 +73,16 @@ export class ReubicacionSyncTask extends SyncTask {
 
       // Convertir a array de objetos planos
       const payload = Array.from(reubicacionesPendientes).map((r: any) => ({
-        sucursal: r.sucursal,
-        cveCliente: r.cveCliente,
-        latitudAnterior: r.latitudAnterior,
-        longitudAnterior: r.longitudAnterior,
-        latitudNueva: r.latitudNueva,
-        longitudNueva: r.longitudNueva,
+        sucursal: r.sucursal ?? this.sucursal,
+        cveCliente: r.idCliente,
+        latitudAnterior: 0,
+        longitudAnterior: 0,
+        latitudNueva: r.latitud ?? 0,
+        longitudNueva: r.longitud ?? 0,
         fecha: (r.fecha ?? new Date()).toISOString(),
-        usuario: r.usuario,
-        idMovil: r.idMovil,
-        fechaTransfer: (r.fechaTransfer ?? new Date()).toISOString(),
+        usuario: r.idUsuario ?? this.idUsuario,
+        idMovil: r.id,
+        fechaTransfer: new Date().toISOString(),
       }));
 
       const endpoint = this.getEndpoint();

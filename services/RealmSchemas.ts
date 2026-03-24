@@ -393,12 +393,13 @@ export const ReubicacionSchema = {
   properties: {
     id: "int",
     idCliente: "int",
+    sucursal: "int?",
     latitud: "double?",
     longitud: "double?",
     fecha: "date?",
     idUsuario: "int?",
     syncedAt: "date",
-    enviado: { type: "bool", default: false },
+    enviado: "bool",
   },
   primaryKey: "id",
 };

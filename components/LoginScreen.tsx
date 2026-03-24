@@ -16,14 +16,7 @@ import AuthService from "../services/AuthService";
 import FullSyncService, { SyncProgress } from "../services/FullSyncService";
 import BackgroundSyncService from "../services/BackgroundSyncService";
 import SyncProgressModal from "./SyncProgressModal";
-import {
-  APP_NAME,
-  COLORS,
-  SPACING,
-  SHADOWS,
-  BORDER_RADIUS,
-  TYPOGRAPHY,
-} from "../theme/theme";
+import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 export default function LoginScreen({ navigation }: any) {
   const [usuario, setUsuario] = useState("");
@@ -63,9 +56,22 @@ export default function LoginScreen({ navigation }: any) {
       setSyncing(true);
       setSyncProgress([]);
 
-      await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
+      const syncResult = await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
         setSyncProgress((prev) => [...prev, progress]);
       });
+
+      setSyncing(false);
+
+      if (!syncResult.success) {
+        const syncMsg = syncResult.error || "Error durante la sincronización";
+        Alert.alert(
+          "Error de Sincronización",
+          `${syncMsg}\n\nNo se puede continuar sin sincronizar los datos. Por favor, intenta nuevamente.`,
+          [{ text: "Reintentar", onPress: handleLogin }],
+        );
+        console.error("Error en sincronización:", syncResult.error);
+        return;
+      }
 
       // Mantener el modal visible 2 segundos después de terminar
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
@@ -75,11 +81,10 @@ export default function LoginScreen({ navigation }: any) {
         console.log("Error al iniciar sincronización automática:", err);
       });
 
-      setSyncing(false);
       navigation.reset({ index: 0, routes: [{ name: "Home" }] });
     } catch (err: any) {
       const msg = err?.message || "Ocurrió un error al iniciar sesión";
-      Alert.alert("No autorizado", msg);
+      Alert.alert("No autorizado, debe pasar la primera sincronización", msg);
       setSyncing(false);
     } finally {
       setLoading(false);
@@ -87,10 +92,7 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={styles.container}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerContainer}>
           <View style={styles.logoContainer}>
@@ -129,13 +131,7 @@ export default function LoginScreen({ navigation }: any) {
           </View>
 
           <View style={styles.inputContainer}>
-            <Icon
-              name="lock-outline"
-              type="material"
-              size={24}
-              color={COLORS.textSecondary}
-              style={styles.inputIcon}
-            />
+            <Icon name="lock-outline" type="material" size={24} color={COLORS.textSecondary} style={styles.inputIcon} />
             <TextInput
               placeholder="Contraseña"
               placeholderTextColor={COLORS.muted}
@@ -165,9 +161,7 @@ export default function LoginScreen({ navigation }: any) {
             )}
           </TouchableOpacity>
 
-          <Text style={styles.note}>
-            Login solo online por ahora. IndexedDB/Realm pendiente.
-          </Text>
+          <Text style={styles.note}>Login solo online por ahora. IndexedDB/Realm pendiente.</Text>
         </View>
 
         <SyncProgressModal visible={syncing} progress={syncProgress} />

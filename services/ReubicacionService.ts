@@ -114,6 +114,7 @@ class ReubicacionService {
     latitud: number,
     longitud: number,
     idUsuario: number,
+    sucursal?: number,
   ): Promise<number | null> {
     console.log("[ReubicacionService] 📍 Iniciando registro de reubicación...");
     console.log(`[ReubicacionService] Parámetros:`, {
@@ -157,6 +158,7 @@ class ReubicacionService {
         this.realm!.create("Reubicacion", {
           id,
           idCliente,
+          sucursal: sucursal ?? null,
           latitud,
           longitud,
           fecha,

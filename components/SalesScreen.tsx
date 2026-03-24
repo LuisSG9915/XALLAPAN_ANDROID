@@ -1216,6 +1216,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 ubicacion.latitude,
                 ubicacion.longitude,
                 currentUser.id,
+                currentSucursal,
               );
 
               if (reubicacionId) {
