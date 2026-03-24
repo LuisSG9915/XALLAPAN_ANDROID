@@ -56,7 +56,7 @@ export class VentaCancelacionSyncTask extends SyncTask {
         const minutes = String(date.getUTCMinutes()).padStart(2, "0");
         const seconds = String(date.getUTCSeconds()).padStart(2, "0");
 
-        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
       };
 
       const payload = cancelacionesPendientes.map((cancelacion: any) => ({
@@ -74,12 +74,12 @@ export class VentaCancelacionSyncTask extends SyncTask {
       const response = await fetch(this.getEndpoint(), {
         method: "POST",
         headers: {
-          accept: "application/json",
+          accept: "application/octet-stream",
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
       });
-
+      console.log("Payload:", JSON.stringify(payload));
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         throw new Error(`HTTP ${response.status}: ${errorText}`);

@@ -664,13 +664,13 @@ export default function ReporteVentasScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => cancelarVenta(item)}
-                      disabled={!item.no_venta || item.no_venta === 0}
+                      disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
                       style={styles.iconBtn}
                     >
                       <Icon
                         name="cancel"
                         type="material"
-                        color={!item.no_venta || item.no_venta === 0 ? COLORS.muted : COLORS.error}
+                        color={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error}
                         size={20}
                       />
                     </TouchableOpacity>

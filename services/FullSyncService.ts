@@ -322,9 +322,77 @@ class FullSyncService {
       throw new Error("Realm no inicializado");
     }
 
-    // PASO 1: Enviar reubicaciones pendientes PRIMERO (VentasArrastre depende de esta tabla)
+    // PASO 1: Enviar cancelaciones de ventas pendientes PRIMERO
     if (idUsuario) {
-      console.log("[FullSync-Reubicacion] 🔍 PASO 1 - Iniciando verificación de reubicaciones pendientes...");
+      console.log("[FullSync] PASO 1 - Enviando cancelaciones de ventas pendientes...");
+      try {
+        const cancelacionesPendientes = this.realm.objects("VentaCancelacion").filtered("enviado == false");
+        
+        if (cancelacionesPendientes.length > 0) {
+          console.log(`[FullSync-Cancelacion] 📤 Enviando ${cancelacionesPendientes.length} cancelaciones pendientes...`);
+
+          const formatDate = (date: Date): string => {
+            const year = date.getUTCFullYear();
+            const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(date.getUTCDate()).padStart(2, "0");
+            const hours = String(date.getUTCHours()).padStart(2, "0");
+            const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+            const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+          };
+
+          const payload = Array.from(cancelacionesPendientes).map((cancelacion: any) => ({
+            sucursal: cancelacion.sucursal ?? sucursal,
+            no_venta: cancelacion.noVenta ?? 0,
+            caja: cancelacion.caja ?? 1,
+            id_movil: cancelacion.idMovil,
+            usuario_cancela: cancelacion.usuarioCancela ?? idUsuario,
+            fecha_cancela: formatDate(cancelacion.fechaCancela ?? new Date()),
+            motivo_cancelacion: cancelacion.motivoCancelacion ?? "",
+            latitud: cancelacion.latitud ?? 0,
+            longitud: cancelacion.longitud ?? 0,
+          }));
+
+          const cancelacionUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasCancelacionJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          console.log(`[FullSync-Cancelacion] 🌐 URL: ${cancelacionUrl}`);
+          console.log(`[FullSync-Cancelacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
+
+          const cancelacionResp = await fetch(cancelacionUrl, {
+            method: "POST",
+            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          console.log(
+            `[FullSync-Cancelacion] 📡 Respuesta HTTP: ${cancelacionResp.status} ${cancelacionResp.statusText}`,
+          );
+
+          if (cancelacionResp.ok) {
+            const responseText = await cancelacionResp.text();
+            console.log(`[FullSync-Cancelacion] 📥 Respuesta del servidor:`, responseText);
+
+            this.realm.write(() => {
+              Array.from(cancelacionesPendientes).forEach((c: any) => {
+                c.enviado = true;
+              });
+            });
+            console.log(`[FullSync-Cancelacion] ✅ ${payload.length} cancelaciones enviadas y marcadas como enviado`);
+          } else {
+            const errorText = await cancelacionResp.text().catch(() => "No se pudo leer el error");
+            console.warn(`[FullSync-Cancelacion] ⚠️ Error HTTP ${cancelacionResp.status} enviando cancelaciones`);
+            console.warn(`[FullSync-Cancelacion] ⚠️ Detalle del error:`, errorText);
+          }
+        } else {
+          console.log("[FullSync-Cancelacion] ℹ️ No hay cancelaciones pendientes de envío");
+        }
+      } catch (cancelacionError) {
+        console.error("[FullSync-Cancelacion] ❌ Error enviando cancelaciones:", cancelacionError);
+      }
+    }
+
+    // PASO 2: Enviar reubicaciones pendientes (VentasArrastre depende de esta tabla)
+    if (idUsuario) {
+      console.log("[FullSync-Reubicacion] 🔍 PASO 2 - Iniciando verificación de reubicaciones pendientes...");
       try {
         const todasReubicaciones = this.realm.objects("Reubicacion");
         console.log(`[FullSync-Reubicacion] Total reubicaciones en BD: ${todasReubicaciones.length}`);
@@ -408,10 +476,10 @@ class FullSyncService {
       console.log("[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones");
     }
 
-    // PASO 2: Enviar bitácoras pendientes
+    // PASO 3: Enviar bitácoras pendientes
     if (idUsuario) {
       try {
-        console.log("[FullSync] PASO 2 - Enviando bitácoras pendientes...");
+        console.log("[FullSync] PASO 3 - Enviando bitácoras pendientes...");
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras GPS pendientes...");
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
@@ -420,13 +488,13 @@ class FullSyncService {
       }
     }
 
-    // PASO 3: Enviar InventarioEnvase pendientes ANTES de ventas
+    // PASO 4: Enviar InventarioEnvase pendientes ANTES de ventas
     if (idUsuario) {
       try {
         const envasesPendientes = this.getInventarioEnvasesPendientes();
         console.log("ENVASES PENDIENTES.");
         if (envasesPendientes.length > 0) {
-          console.log(`[FullSync] PASO 3 - Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
+          console.log(`[FullSync] PASO 4 - Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
           console.log;
           const envasePayload = envasesPendientes.map((r: any) => ({
             sucursal: r.sucursal ?? sucursal,
@@ -461,9 +529,9 @@ class FullSyncService {
       }
     }
 
-    // PASO 4: Enviar ventas pendientes al servidor (DESPUÉS de reubicaciones en PASO 1)
+    // PASO 5: Enviar ventas pendientes al servidor (DESPUÉS de reubicaciones y cancelaciones)
     if (idUsuario) {
-      console.log("[FullSync] PASO 4 - Enviando ventas pendientes antes de sincronización incremental...");
+      console.log("[FullSync] PASO 5 - Enviando ventas pendientes antes de sincronización incremental...");
       const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
       if (ventasResult.success && ventasResult.sent > 0) {
         console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
