@@ -1270,17 +1270,19 @@ class FullSyncService {
             };
 
             const nowStr = formatDateForMexico(nowMexico);
-            const visitasArray = Array.from(detallesVisitas).map((detalle: any) => ({
-              fechaInicio: isValidDate(detalle.fechaInicio) ? formatDateForMexico(detalle.fechaInicio) : nowStr,
-              fechaFin: isValidDate(detalle.fechaFin) ? formatDateForMexico(detalle.fechaFin) : nowStr,
-              idCliente: detalle.idCliente,
-              idUsuario: detalle.idUsuario,
-              idRuta: detalle.idRuta,
-              tipo: detalle.tipoVisita,
-            }));
-
-            console.log(`[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor`);
-            console.log("[Incremental] DetalleVisitas - Payload:", JSON.stringify(visitasArray));
+            const visitasArray = Array.from(detallesVisitas)
+              .map((detalle: any) => ({
+                fechaInicio: isValidDate(detalle.fechaInicio) ? formatDateForMexico(detalle.fechaInicio) : nowStr,
+                fechaFin: isValidDate(detalle.fechaFin) ? formatDateForMexico(detalle.fechaFin) : nowStr,
+                idCliente: detalle.idCliente,
+                idUsuario: detalle.idUsuario,
+                idRuta: detalle.idRuta,
+                tipo: detalle.tipoVisita,
+              }))
+              .filter((visita: any) => visita.tipo !== null && visita.tipo !== undefined);
+            
+            console.log(`[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor (filtradas sin tipo null)`);
+            console.log("[Incremental] DetalleVisitas arrastre - Payload:", JSON.stringify(visitasArray));
 
             const response = await fetch(url, {
               method: "POST",

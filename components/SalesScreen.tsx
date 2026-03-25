@@ -704,9 +704,16 @@ export default function SalesScreen({ route }: { route?: any }) {
   );
 
   const handleClienteSeleccionado = (cliente: Cliente) => {
-    console.log("[Sales] Cliente seleccionado:", cliente.nombre);
+    // Buscar el cliente actualizado desde el array clientes (recargado de Realm)
+    const clienteActualizado = clientes.find(c => c.id === cliente.id) || cliente;
+    console.log("[Sales] Cliente seleccionado:", clienteActualizado.nombre);
+    console.log("[Sales] Coordenadas del cliente seleccionado:", {
+      latitud: clienteActualizado.latitud,
+      longitud: clienteActualizado.longitud,
+      origen: clientes.find(c => c.id === cliente.id) ? 'Realm actualizado' : 'objeto viejo'
+    });
     console.log("[Sales] Estado actual validandoUbicacion:", validandoUbicacion);
-    setClientePendienteVisita(cliente);
+    setClientePendienteVisita(clienteActualizado);
     setVisitaConfirmModalOpen(true);
   };
 
@@ -1265,11 +1272,24 @@ export default function SalesScreen({ route }: { route?: any }) {
                   // Verificar que el cliente específico tiene las nuevas coordenadas (usando el valor retornado, no el estado)
                   const clienteActualizado = clientesActualizados.find(c => c.id === clienteAUbicar.id);
                   if (clienteActualizado) {
-                    console.log(`[Sales] 🔍 Cliente ${clienteActualizado.id} en estado después de recarga:`, {
+                    console.log(`[Sales] 🔍 Cliente ${clienteActualizado.id} después de recarga:`, {
                       nombre: clienteActualizado.nombre,
                       latitud: clienteActualizado.latitud,
                       longitud: clienteActualizado.longitud
                     });
+                    
+                    // IMPORTANTE: Actualizar selectedClient inmediatamente con las coordenadas nuevas
+                    if (selectedClient && selectedClient.id === clienteAUbicar.id) {
+                      console.log("[Sales] 🔄 Actualizando selectedClient con coordenadas nuevas");
+                      setSelectedClient(clienteActualizado);
+                    }
+                    
+                    // Forzar actualización del estado clientes inmediatamente
+                    setClientes([...clientesActualizados]);
+                    
+                    // Recargar visitas para recalcular clientesEntregaDia con coordenadas nuevas
+                    console.log("[Sales] 🔄 Recargando visitas para recalcular arrays derivados...");
+                    await reloadVisitasDelDia(currentSucursal, true);
                   } else {
                     console.warn(`[Sales] ⚠️ Cliente ${clienteAUbicar.id} no encontrado en la lista recargada`);
                   }
@@ -1997,7 +2017,14 @@ export default function SalesScreen({ route }: { route?: any }) {
                   key={cliente.id}
                   style={[styles.clienteItem, selectedClient?.id === cliente.id && styles.clienteItemSelected]}
                   onPress={() => {
-                    setSelectedClient(cliente);
+                    // Buscar cliente actualizado desde array clientes (recargado de Realm)
+                    const clienteActualizado = clientes.find(c => c.id === cliente.id) || cliente;
+                    console.log("[Sales] Cliente seleccionado desde modal:", {
+                      nombre: clienteActualizado.nombre,
+                      latitud: clienteActualizado.latitud,
+                      longitud: clienteActualizado.longitud
+                    });
+                    setSelectedClient(clienteActualizado);
                     setClienteModalOpen(false);
                   }}
                 >
