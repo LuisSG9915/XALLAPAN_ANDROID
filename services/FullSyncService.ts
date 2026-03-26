@@ -332,9 +332,11 @@ class FullSyncService {
       console.log("[FullSync] PASO 1 - Enviando cancelaciones de ventas pendientes...");
       try {
         const cancelacionesPendientes = this.realm.objects("VentaCancelacion").filtered("enviado == false");
-        
+
         if (cancelacionesPendientes.length > 0) {
-          console.log(`[FullSync-Cancelacion] 📤 Enviando ${cancelacionesPendientes.length} cancelaciones pendientes...`);
+          console.log(
+            `[FullSync-Cancelacion] 📤 Enviando ${cancelacionesPendientes.length} cancelaciones pendientes...`,
+          );
 
           const formatDate = (date: Date): string => {
             const year = date.getUTCFullYear();
@@ -1280,8 +1282,10 @@ class FullSyncService {
                 tipo: detalle.tipoVisita,
               }))
               .filter((visita: any) => visita.tipo !== null && visita.tipo !== undefined);
-            
-            console.log(`[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor (filtradas sin tipo null)`);
+
+            console.log(
+              `[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor (filtradas sin tipo null)`,
+            );
             console.log("[Incremental] DetalleVisitas arrastre - Payload:", JSON.stringify(visitasArray));
 
             const response = await fetch(url, {
@@ -1340,7 +1344,7 @@ class FullSyncService {
         run: async () => {
           const tableName = "Inventario";
           const nowMexico = this.getMexicoNow();
-          const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
+          const fechaMovto = this.formatMexicoDateForServer(nowMexico);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
             String(sucursal),
           )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
@@ -2577,7 +2581,7 @@ class FullSyncService {
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
-    let query = "fecha >= $0 AND fecha <= $1 AND tipoPago == 1 and noVenta>0";
+    let query = "fecha >= $0 AND fecha <= $1 AND tipoPago == 1 and noVenta>0 AND idMovil == NULL";
     const args: any[] = [start, end];
 
     if (sucursal !== undefined) {
@@ -2616,7 +2620,7 @@ class FullSyncService {
   // }
   getVentasForDate(startOfDay: Date, endOfDay: Date, sucursal?: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    let query = "fecha >= $0 AND fecha <= $1";
+    let query = "fecha >= $0 AND fecha <= $1 AND idMovil == NULL";
     const args: any[] = [startOfDay, endOfDay];
     if (sucursal !== undefined) {
       query += " AND sucursal == $2";
@@ -3045,7 +3049,7 @@ class FullSyncService {
 
     const tableName = "Inventario";
     const nowMexico = this.getMexicoNow();
-    const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
+    const fechaMovto = this.formatMexicoDateForServer(nowMexico);
     const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
       String(sucursal),
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;

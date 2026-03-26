@@ -188,9 +188,8 @@ export default function ReporteVentasScreen() {
           );
         } else {
           // Consultar: solo ventas con id < threshold (ventas remotas/API)
-          return (
-            inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 // ✅ FILTRO ADICIONAL
-          );
+          // Excluir ventas que tienen idMovil (ya sincronizadas, evitar duplicados)
+          return inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 && !venta.idMovil;
         }
       });
       console.log("[Reporte] Filtered results", { count: filtered });
@@ -670,7 +669,9 @@ export default function ReporteVentasScreen() {
                       <Icon
                         name="cancel"
                         type="material"
-                        color={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error}
+                        color={
+                          !item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error
+                        }
                         size={20}
                       />
                     </TouchableOpacity>

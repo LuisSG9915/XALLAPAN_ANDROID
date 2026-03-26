@@ -72,7 +72,7 @@ export default function PrecorteScreen() {
         const inSucursal = sucursalUsuario === undefined || inv.sucursal === sucursalUsuario;
         return inDateRange && inSucursal && inv.saldo >= 0;
       });
-
+      console.log("Inventario filtrado", inventarioFiltrado);
       // Mapa de productos por claveProd para saber si es kit
       const productosPorClave = new Map<number, any>();
       productos.forEach((p: any) => {
@@ -269,6 +269,11 @@ export default function PrecorteScreen() {
         <TouchableOpacity style={styles.secondaryBtn} onPress={consultar}>
           <Text style={styles.secondaryBtnText}>Consultar</Text>
         </TouchableOpacity>
+        {/* <TouchableOpacity onPress={() => {
+          console.log()
+        }}>
+          <Text style={styles.secondaryBtnText}>log</Text>
+        </TouchableOpacity> */}
       </View>
 
       <View style={styles.card}>
