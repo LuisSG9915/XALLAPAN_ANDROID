@@ -52,6 +52,7 @@ type GroupedSale = {
   folioFactura?: boolean;
   facturacionMovil?: boolean;
   timbrado?: "0" | "1";
+  vendedor?: string;
   productos: Array<{
     nombreProducto: string;
     cantProducto: number;
@@ -172,8 +173,28 @@ export default function ReporteVentasScreen() {
       const fecha2Parsed = new Date(fecha2);
       fecha2Parsed.setHours(23, 59, 59, 999);
 
+      console.log("[Reporte] DEBUG - allVentas disponibles:", allVentas.length);
+      console.log("[Reporte] DEBUG - Rango de fechas:", { fecha1Parsed, fecha2Parsed });
+      console.log("[Reporte] DEBUG - sucursalUsuario:", sucursalUsuario);
+      console.log("[Reporte] DEBUG - soloLocales:", soloLocales);
+      
+      // Mostrar primeras 5 ventas para debug
+      if (allVentas.length > 0) {
+        console.log("[Reporte] DEBUG - Primeras ventas:", allVentas.slice(0, 5).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+          claveProd: v.claveProd,
+          fecha: v.fecha,
+          sucursal: v.sucursal,
+        })));
+      }
+
       const filtered = allVentas.filter((venta) => {
-        if (!venta.fecha) return false;
+        if (!venta.fecha) {
+          console.log("[Reporte] DEBUG - Venta sin fecha:", venta.id);
+          return false;
+        }
         const ventaDate = new Date(venta.fecha);
         // Filtrar por fecha siempre
         const inDateRange = ventaDate >= fecha1Parsed && ventaDate <= fecha2Parsed;
@@ -183,13 +204,31 @@ export default function ReporteVentasScreen() {
 
         if (soloLocales) {
           // Consultar Local: solo ventas con id >= threshold (ventas locales)
-          return (
-            inDateRange && inSucursal && venta.noVenta == 0 && venta.claveProd !== 0 // ✅ FILTRO ADICIONAL
-          );
+          const result = inDateRange && inSucursal && venta.noVenta == 0 && venta.claveProd !== 0;
+          if (!result) {
+            console.log("[Reporte] DEBUG - Venta local rechazada:", {
+              id: venta.id,
+              inDateRange,
+              inSucursal,
+              noVenta: venta.noVenta,
+              claveProd: venta.claveProd,
+            });
+          }
+          return result;
         } else {
-          // Consultar: solo ventas con id < threshold (ventas remotas/API)
-          // Excluir ventas que tienen idMovil (ya sincronizadas, evitar duplicados)
-          return inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 && !venta.idMovil;
+          // Consultar: ventas sincronizadas (tienen idMovil)
+          const result = inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 && venta.idMovil;
+          if (!result) {
+            console.log("[Reporte] DEBUG - Venta remota rechazada:", {
+              id: venta.id,
+              inDateRange,
+              inSucursal,
+              noVenta: venta.noVenta,
+              claveProd: venta.claveProd,
+              idMovil: venta.idMovil,
+            });
+          }
+          return result;
         }
       });
       console.log("[Reporte] Filtered results", { count: filtered });
@@ -250,6 +289,7 @@ export default function ReporteVentasScreen() {
             folioFactura: venta.folioFactura,
             facturacionMovil: venta.facturacionMovil,
             timbrado: venta.timbrado,
+            vendedor: venta.vendedor || undefined,
           });
         }
 
@@ -312,12 +352,17 @@ export default function ReporteVentasScreen() {
 
       const total = groupedRow.totalImporte;
 
+      const currentUser = AuthService.currentUser;
+
       const saleTicketData: SaleTicketData = {
         clientName,
         date,
         paymentMethod,
         items,
         total,
+        ticketNumber: String(groupedRow.idMovil || groupedRow.no_venta),
+        sellerName: groupedRow.vendedor || currentUser?.claveEmpleado || undefined,
+        branch: currentUser?.dSucursal || groupedRow.sucursal,
       };
 
       return saleTicketData;
@@ -371,6 +416,9 @@ export default function ReporteVentasScreen() {
 
     const total = items.length > 0 ? items.reduce((sum, item) => sum + item.total, 0) : reporteRow.importe;
 
+    const currentUser = AuthService.currentUser;
+    const vendedorFromVenta = base?.vendedor || undefined;
+
     const saleTicketData: SaleTicketData = {
       clientName,
       paymentMethod,
@@ -378,11 +426,8 @@ export default function ReporteVentasScreen() {
       total,
       date,
       ticketNumber: String(row.no_venta),
-      businessName: undefined,
-      businessAddress: undefined,
-      taxId: undefined,
-      sellerName: undefined,
-      branch: row.sucursal,
+      sellerName: vendedorFromVenta || currentUser?.claveEmpleado || undefined,
+      branch: currentUser?.dSucursal || row.sucursal,
     };
 
     return saleTicketData;

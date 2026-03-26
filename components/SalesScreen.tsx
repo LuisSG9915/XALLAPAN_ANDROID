@@ -1675,7 +1675,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           date: now,
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
-          branch: sucursal,
+          branch: currentUser?.dSucursal || sucursal,
         });
         ticketImpreso = true;
         console.log("[Sales] ✅ Ticket impreso correctamente");

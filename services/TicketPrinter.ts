@@ -134,7 +134,7 @@ class TicketPrinter {
     }
 
     if (data.branch !== undefined) {
-      lines.push(`Sucursal: ${String(data.branch)}`);
+      lines.push(`Ruta: ${String(data.branch)}`);
     }
 
     lines.push(`Cliente: ${data.clientName}`);

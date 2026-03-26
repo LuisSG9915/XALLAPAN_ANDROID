@@ -148,34 +148,78 @@ export default function CortesScreen() {
 
       const ventas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
 
+      // Cargar kits y productos para expandir ventas de kits
+      const allKits = FullSyncService.getKits(10000);
+      const kitsByProducto: Record<number, any[]> = {};
+      for (const kit of allKits) {
+        const idProd = kit.idProducto;
+        if (idProd != null) {
+          if (!kitsByProducto[idProd]) kitsByProducto[idProd] = [];
+          kitsByProducto[idProd].push(kit);
+        }
+      }
+
+      // Mapa de productos para obtener nombre del insumo
+      const allProductos = FullSyncService.getProductos(10000);
+      const productoNombreMap: Record<number, string> = {};
+      for (const p of allProductos) {
+        productoNombreMap[p.id] = p.descripcion || `Producto ${p.id}`;
+      }
+
       const ventasPorProducto: Record<string, number> = {};
       const importesPorProd: Record<string, number> = {};
       const pagosPorTipo: Record<number, number> = {};
 
       for (const v of ventas) {
-        const nombre: string = v.nombreProducto || "Sin nombre";
-        const cant: number = v.cantProducto || 0;
-        const precio: number = v.precio || 0;
-        const importe: number = v.importe || 0;
+        const claveProd: number = v.claveProd || 0;
+        const cantVenta: number = v.cantProducto || 0;
         const tipoPago: number = v.tipoPago || 0;
+        const importeVenta: number = v.importe || 0;
 
-        ventasPorProducto[nombre] = (ventasPorProducto[nombre] || 0) + cant;
-        importesPorProd[nombre] = (importesPorProd[nombre] || 0) + cant * precio;
-        pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importe;
+        const kitInsumos = kitsByProducto[claveProd];
+
+        if (kitInsumos && kitInsumos.length > 0) {
+          // Es un kit: expandir en sus insumos
+          let importeKitTotal = 0;
+          for (const insumo of kitInsumos) {
+            const idInsumo: number = insumo.idInsumo || 0;
+            const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
+            const precioInsumo: number = Math.round((insumo.precio || 0)  * 100) / 100;
+            const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
+
+            ventasPorProducto[nombreInsumo] = (ventasPorProducto[nombreInsumo] || 0) + cantInsumo;
+            importesPorProd[nombreInsumo] = (importesPorProd[nombreInsumo] || 0) + cantInsumo * precioInsumo;
+            importeKitTotal += cantInsumo * precioInsumo;
+          }
+          // Tipo de pago: usar el importe real de la venta
+          pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
+        } else {
+          // Producto normal
+          const nombre: string = v.nombreProducto || "Sin nombre";
+          const precio: number = v.precio || 0;
+
+          ventasPorProducto[nombre] = (ventasPorProducto[nombre] || 0) + cantVenta;
+          importesPorProd[nombre] = (importesPorProd[nombre] || 0) + cantVenta * precio;
+          pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
+        }
       }
 
       setInventarioVendido(
-        Object.entries(ventasPorProducto).map(([nombre, cant]) => ({
-          nombreProducto: nombre,
-          cantTotal: cant,
-        })),
+        Object.entries(ventasPorProducto)
+          .filter(([, cant]) => cant > 0)
+          .map(([nombre, cant]) => ({
+            nombreProducto: nombre,
+            cantTotal: cant,
+          })),
       );
 
       setImportesPorProducto(
-        Object.entries(importesPorProd).map(([nombre, imp]) => ({
-          nombreProducto: nombre,
-          importe: imp,
-        })),
+        Object.entries(importesPorProd)
+          .filter(([, imp]) => imp > 0)
+          .map(([nombre, imp]) => ({
+            nombreProducto: nombre,
+            importe: imp,
+          })),
       );
 
       setTiposPago(

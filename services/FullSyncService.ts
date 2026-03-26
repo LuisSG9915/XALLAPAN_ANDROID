@@ -2620,7 +2620,7 @@ class FullSyncService {
   // }
   getVentasForDate(startOfDay: Date, endOfDay: Date, sucursal?: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    let query = "fecha >= $0 AND fecha <= $1 AND idMovil == NULL";
+    let query = "fecha >= $0 AND fecha <= $1";
     const args: any[] = [startOfDay, endOfDay];
     if (sucursal !== undefined) {
       query += " AND sucursal == $2";
@@ -2703,6 +2703,33 @@ class FullSyncService {
     ) as any[];
 
     console.log("[getEnvasesHistorialForDate] Registros encontrados:", registros.length);
+    if (registros.length > 0) {
+      console.log("[getEnvasesHistorialForDate] Primeros 3 registros:", registros.slice(0, 3).map((r: any) => ({
+        tipoMovto: r.tipoMovto,
+        claveProd: r.claveProd,
+        cantidadSalida: r.cantidadSalida,
+        cantidadEntrada: r.cantidadEntrada,
+        fechaMovto: r.fechaMovto instanceof Date ? r.fechaMovto.toISOString() : String(r.fechaMovto),
+      })));
+      
+      // Obtener detalles del inventario para claveProd 18 (envases)
+      try {
+        const inventarioEnvases = this.realm?.objectForPrimaryKey("Inventario", 18);
+        if (inventarioEnvases) {
+          console.log("[getEnvasesHistorialForDate] 📦 Inventario claveProd=18:", {
+            id: (inventarioEnvases as any).id,
+            descripcion: (inventarioEnvases as any).descripcion,
+            saldo: (inventarioEnvases as any).saldo,
+            entrada: (inventarioEnvases as any).entrada,
+            salida: (inventarioEnvases as any).salida,
+          });
+        } else {
+          console.log("[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=18");
+        }
+      } catch (err) {
+        console.log("[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:", err);
+      }
+    }
 
     let envVendido = 0;
     let envCambiado = 0;
@@ -2716,20 +2743,26 @@ class FullSyncService {
       const entrada: number = r.cantidadEntrada ?? 0;
 
       if (tipo === 2 && clave === 18) {
+        console.log("[getEnvasesHistorialForDate] ✅ envVendido += ", salida, " (tipo=2, clave=18)");
         envVendido += salida;
       } else if (tipo === 1100 && clave === 18) {
+        console.log("[getEnvasesHistorialForDate] ✅ envCambiado += ", salida, " (tipo=1100, clave=18)");
         envCambiado += salida;
       } else if (tipo === 1200 && clave === 18) {
+        console.log("[getEnvasesHistorialForDate] ✅ envPrestado += ", salida, " (tipo=1200, clave=18)");
         envPrestado += salida;
       }
 
       if (tipo === 1000 && entrada > 0) {
+        console.log("[getEnvasesHistorialForDate] ✅ cambiadosPorProd[", clave, "] += ", entrada, " (tipo=1000)");
         if (!cambiadosPorProd[clave]) {
           cambiadosPorProd[clave] = { descripcionCorta: r.descripcionCorta ?? String(clave), cantidadEntrada: 0 };
         }
         cambiadosPorProd[clave].cantidadEntrada += entrada;
       }
     }
+
+    console.log("[getEnvasesHistorialForDate] TOTALES:", { envVendido, envCambiado, envPrestado, cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length });
 
     const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]) => ({
       claveProd: parseInt(clave, 10),
