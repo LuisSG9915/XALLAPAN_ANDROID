@@ -80,6 +80,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     costo: number;
   } | null>(null);
   const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
+  const [envaseIntercambioClave, setEnvaseIntercambioClave] = useState<number | undefined>(undefined);
+  const [envaseIntercambioDesc, setEnvaseIntercambioDesc] = useState<string | undefined>(undefined);
   const [prestamoData, setPrestamoData] = useState<{
     idProdPrestado: number;
     claveProdPrestado: number;
@@ -234,18 +236,38 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
 
       if (operationType === "intercambio") {
         console.log("[EnvaseOp] 📦 Procesando intercambio");
-        // Calcular costo del producto INTERCAMBIO (clave 1000) igual que SalesScreen
-        const CLAVE_INTERCAMBIO = 1000;
-
+        // Buscar producto con intercambio=true dinámicamente
         const productos = FullSyncService.getProductos(1000000);
-        const productoIntercambio = productos.find((p: any) => parseInt(p.claveProd || "0", 10) === CLAVE_INTERCAMBIO);
+        const productoIntercambio = productos.find((p: any) => p.intercambio);
 
         if (!productoIntercambio) {
-          console.warn(`[EnvaseOp] No se encontró producto INTERCAMBIO con clave ${CLAVE_INTERCAMBIO}`);
+          console.warn("[EnvaseOp] No se encontró producto con intercambio=true");
           setCostoIntercambioCalculado(0);
+          setEnvaseIntercambioClave(undefined);
+          setEnvaseIntercambioDesc(undefined);
           setIntercambioModalOpen(true);
         } else {
           const idProductoIntercambio = productoIntercambio.id;
+
+          // Buscar kit con envaseIntercambio=true para el modal
+          try {
+            const kitsAll = FullSyncService.getKits(5000);
+            const kitEnvase = kitsAll.find((k: any) => k.idProducto === idProductoIntercambio && k.envaseIntercambio);
+            if (kitEnvase) {
+              const idInsumo = kitEnvase.idInsumo;
+              const prodInsumo = productos.find((p: any) => p.id === idInsumo);
+              setEnvaseIntercambioClave(prodInsumo ? parseInt(prodInsumo.claveProd || "0", 10) : idInsumo);
+              setEnvaseIntercambioDesc(prodInsumo?.descripcion || `Producto ${idInsumo}`);
+              console.log(`[EnvaseOp] envaseIntercambio: idInsumo=${idInsumo}, desc=${prodInsumo?.descripcion}`);
+            } else {
+              setEnvaseIntercambioClave(undefined);
+              setEnvaseIntercambioDesc(undefined);
+            }
+          } catch (err) {
+            console.warn("[EnvaseOp] Error buscando envaseIntercambio:", err);
+            setEnvaseIntercambioClave(undefined);
+            setEnvaseIntercambioDesc(undefined);
+          }
 
           const listaPrecios = selectedClient?.listaPrecio ?? 0;
           const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient?.id || 0);
@@ -256,7 +278,9 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           let costoCalculado = 0;
 
           // 1. Precio promocional
-          const precioPromo = preciosPromo?.find((p: any) => parseInt(p.claveProd || "0", 10) === idProductoIntercambio);
+          const precioPromo = preciosPromo?.find(
+            (p: any) => parseInt(p.claveProd || "0", 10) === idProductoIntercambio,
+          );
           if (precioPromo) {
             costoCalculado = precioPromo.precio || 0;
           }
@@ -280,9 +304,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           }
 
           console.log(
-            `[EnvaseOp] Producto INTERCAMBIO - clave_prod: ${CLAVE_INTERCAMBIO}, id: ${idProductoIntercambio}, costo: $${costoCalculado.toFixed(
-              2,
-            )}`,
+            `[EnvaseOp] Producto INTERCAMBIO - id: ${idProductoIntercambio}, costo: $${costoCalculado.toFixed(2)}`,
           );
           console.log("[EnvaseOp] 🔵 Estableciendo costo:", costoCalculado);
           setCostoIntercambioCalculado(costoCalculado);
@@ -365,11 +387,14 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       const formaPagoSel = formasPago.find((fp: any) => fp.tipo === metodoPago);
       const descripcionMedioPago = formaPagoSel?.descripcion ?? "Efectivo";
 
-      // Determine claveProd for the sale line
-      // Intercambio = clave 1000, Prestamo = clave 1001
-      const claveProductoVenta = type === "intercambio" ? 1000 : 1001;
-      const productoVenta = productosBase.find((p: any) => parseInt(p.claveProd || "0", 10) === claveProductoVenta);
-      const idProductoVenta = productoVenta?.id ?? claveProductoVenta;
+      // Determine claveProd for the sale line (dinámico para intercambio, fijo para préstamo)
+      let productoVenta: any;
+      if (type === "intercambio") {
+        productoVenta = productosBase.find((p: any) => p.intercambio);
+      } else {
+        productoVenta = productosBase.find((p: any) => parseInt(p.claveProd || "0", 10) === 1001);
+      }
+      const idProductoVenta = productoVenta?.id ?? (type === "intercambio" ? 0 : 1001);
       const descripcionVenta =
         productoVenta?.descripcion || (type === "intercambio" ? "INTERCAMBIO ENVASE" : "PRESTAMO ENVASE");
 
@@ -893,6 +918,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           visible={intercambioModalOpen}
           cantidad={parseInt(cantidad, 10) || 1}
           costoAutomatico={costoIntercambioCalculado}
+          envaseEntregadoClave={envaseIntercambioClave}
+          envaseEntregadoDesc={envaseIntercambioDesc}
           onAccept={handleIntercambioAccept}
           onCancel={() => {
             console.log("[EnvaseOp] ❌ Modal cancelado por usuario");

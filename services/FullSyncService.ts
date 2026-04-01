@@ -153,6 +153,10 @@ class FullSyncService {
       const VentaCancelacionService = (await import("./VentaCancelacionService")).default;
       VentaCancelacionService.getInstance().setRealm(this.realm);
 
+      // Inyectar a VentaModificacionService
+      const VentaModificacionService = (await import("./VentaModificacionService")).default;
+      VentaModificacionService.getInstance().setRealm(this.realm);
+
       console.log("✅ Realm inyectado a todos los servicios");
     } catch (error) {
       console.error("❌ Error al inyectar Realm a servicios:", error);
@@ -394,6 +398,80 @@ class FullSyncService {
         }
       } catch (cancelacionError) {
         console.error("[FullSync-Cancelacion] ❌ Error enviando cancelaciones:", cancelacionError);
+      }
+    }
+
+    // PASO 1.5: Enviar modificaciones de ventas pendientes (quitar renglón)
+    if (idUsuario) {
+      console.log("[FullSync] PASO 1.5 - Enviando modificaciones de ventas pendientes...");
+      try {
+        const modificacionesPendientes = this.realm.objects("VentaModificacion").filtered("enviado == false");
+
+        if (modificacionesPendientes.length > 0) {
+          console.log(
+            `[FullSync-Modificacion] 📤 Enviando ${modificacionesPendientes.length} modificaciones pendientes...`,
+          );
+
+          const formatDate = (date: Date): string => {
+            const year = date.getUTCFullYear();
+            const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(date.getUTCDate()).padStart(2, "0");
+            const hours = String(date.getUTCHours()).padStart(2, "0");
+            const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+            const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+          };
+
+          const payload = Array.from(modificacionesPendientes).map((mod: any) => ({
+            sucursal: mod.sucursal ?? sucursal,
+            no_venta: mod.noVenta ?? 0,
+            caja: mod.caja ?? 1,
+            id_movil: mod.idMovil,
+            clave_prod: mod.claveProd,
+            nombre_producto: mod.nombreProducto ?? "",
+            cantidad_anterior: mod.cantidadAnterior ?? 0,
+            cantidad_nueva: mod.cantidadNueva ?? 0,
+            usuario_modifica: mod.usuarioModifica ?? idUsuario,
+            fecha_modifica: formatDate(mod.fechaModifica ?? new Date()),
+            motivo_modificacion: mod.motivoModificacion ?? "",
+            latitud: mod.latitud ?? 0,
+            longitud: mod.longitud ?? 0,
+          }));
+
+          const modificacionUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasModificacionJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+          console.log(`[FullSync-Modificacion] 🌐 URL: ${modificacionUrl}`);
+          console.log(`[FullSync-Modificacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
+
+          const modificacionResp = await fetch(modificacionUrl, {
+            method: "POST",
+            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          console.log(
+            `[FullSync-Modificacion] 📡 Respuesta HTTP: ${modificacionResp.status} ${modificacionResp.statusText}`,
+          );
+
+          if (modificacionResp.ok) {
+            const responseText = await modificacionResp.text();
+            console.log(`[FullSync-Modificacion] 📥 Respuesta del servidor:`, responseText);
+
+            this.realm.write(() => {
+              Array.from(modificacionesPendientes).forEach((m: any) => {
+                m.enviado = true;
+              });
+            });
+            console.log(`[FullSync-Modificacion] ✅ ${payload.length} modificaciones enviadas y marcadas como enviado`);
+          } else {
+            const errorText = await modificacionResp.text().catch(() => "No se pudo leer el error");
+            console.warn(`[FullSync-Modificacion] ⚠️ Error HTTP ${modificacionResp.status} enviando modificaciones`);
+            console.warn(`[FullSync-Modificacion] ⚠️ Detalle del error:`, errorText);
+          }
+        } else {
+          console.log("[FullSync-Modificacion] ℹ️ No hay modificaciones pendientes de envío");
+        }
+      } catch (modificacionError) {
+        console.error("[FullSync-Modificacion] ❌ Error enviando modificaciones:", modificacionError);
       }
     }
 
@@ -2704,14 +2782,17 @@ class FullSyncService {
 
     console.log("[getEnvasesHistorialForDate] Registros encontrados:", registros.length);
     if (registros.length > 0) {
-      console.log("[getEnvasesHistorialForDate] Primeros 3 registros:", registros.slice(0, 3).map((r: any) => ({
-        tipoMovto: r.tipoMovto,
-        claveProd: r.claveProd,
-        cantidadSalida: r.cantidadSalida,
-        cantidadEntrada: r.cantidadEntrada,
-        fechaMovto: r.fechaMovto instanceof Date ? r.fechaMovto.toISOString() : String(r.fechaMovto),
-      })));
-      
+      console.log(
+        "[getEnvasesHistorialForDate] Primeros 3 registros:",
+        registros.slice(0, 3).map((r: any) => ({
+          tipoMovto: r.tipoMovto,
+          claveProd: r.claveProd,
+          cantidadSalida: r.cantidadSalida,
+          cantidadEntrada: r.cantidadEntrada,
+          fechaMovto: r.fechaMovto instanceof Date ? r.fechaMovto.toISOString() : String(r.fechaMovto),
+        })),
+      );
+
       // Obtener detalles del inventario para claveProd 18 (envases)
       try {
         const inventarioEnvases = this.realm?.objectForPrimaryKey("Inventario", 18);
@@ -2762,7 +2843,12 @@ class FullSyncService {
       }
     }
 
-    console.log("[getEnvasesHistorialForDate] TOTALES:", { envVendido, envCambiado, envPrestado, cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length });
+    console.log("[getEnvasesHistorialForDate] TOTALES:", {
+      envVendido,
+      envCambiado,
+      envPrestado,
+      cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length,
+    });
 
     const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]) => ({
       claveProd: parseInt(clave, 10),

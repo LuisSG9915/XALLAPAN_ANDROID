@@ -13,6 +13,8 @@ type IntercambioEnvaseModalProps = {
   visible: boolean;
   cantidad: number;
   costoAutomatico: number;
+  envaseEntregadoClave?: number;
+  envaseEntregadoDesc?: string;
   onAccept: (data: {
     envaseEntregadoClave: number;
     envaseEntregadoDesc: string;
@@ -31,9 +33,13 @@ export default function IntercambioEnvaseModal({
   visible,
   cantidad,
   costoAutomatico,
+  envaseEntregadoClave: propEntregadoClave,
+  envaseEntregadoDesc: propEntregadoDesc,
   onAccept,
   onCancel,
 }: IntercambioEnvaseModalProps) {
+  const claveEntregado = propEntregadoClave ?? CLAVE_ENVASE_XALLAPAN;
+  const descEntregado = propEntregadoDesc ?? DESC_ENVASE_XALLAPAN;
   const [envasesDisponibles, setEnvasesDisponibles] = useState<EnvaseProducto[]>([]);
   const [envaseRecibido, setEnvaseRecibido] = useState<EnvaseProducto | null>(null);
   const [observacion, setObservacion] = useState("");
@@ -49,7 +55,7 @@ export default function IntercambioEnvaseModal({
       const formateados: EnvaseProducto[] = productos
         .filter((p: any) => {
           const clave = parseInt(p.claveProd || "0", 10);
-          return clave !== CLAVE_ENVASE_XALLAPAN;
+          return clave !== claveEntregado;
         })
         .map((p: any) => ({
           id: p.id,
@@ -80,8 +86,8 @@ export default function IntercambioEnvaseModal({
     if (!envaseRecibido) return;
     console.log(`[IntercambioModal] ✅ Aceptando con costo de INTERCAMBIO: $${costoAutomatico}`);
     onAccept({
-      envaseEntregadoClave: CLAVE_ENVASE_XALLAPAN,
-      envaseEntregadoDesc: DESC_ENVASE_XALLAPAN,
+      envaseEntregadoClave: claveEntregado,
+      envaseEntregadoDesc: descEntregado,
       envaseRecibidoClave: parseInt(envaseRecibido.claveProd || "0", 10),
       envaseRecibidoDesc: envaseRecibido.descripcion,
       observacion: observacion.trim(),

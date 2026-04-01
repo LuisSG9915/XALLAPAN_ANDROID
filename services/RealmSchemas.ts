@@ -57,6 +57,7 @@ export const ProductoSchema = {
     descripcion: "string?",
     esKit: "bool?",
     envaseRecibe: "bool?",
+    intercambio: "bool?",
     fechaAct: "date?",
     syncedAt: "date",
   },
@@ -72,6 +73,7 @@ export const KitSchema = {
     cantidad: "float?",
     precio: "float?",
     descuento: "float?",
+    envaseIntercambio: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",
@@ -451,6 +453,29 @@ export const VentaCancelacionSchema = {
   primaryKey: "id",
 };
 
+export const VentaModificacionSchema = {
+  name: "VentaModificacion",
+  properties: {
+    id: "string",
+    sucursal: "int?",
+    noVenta: "int?",
+    caja: "int?",
+    idMovil: "int?",
+    claveProd: "int?",
+    nombreProducto: "string?",
+    cantidadAnterior: "float?",
+    cantidadNueva: "float?",
+    usuarioModifica: "int?",
+    fechaModifica: "date?",
+    motivoModificacion: "string?",
+    latitud: "double?",
+    longitud: "double?",
+    fechaAlta: "date",
+    enviado: "bool",
+  },
+  primaryKey: "id",
+};
+
 export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
@@ -475,5 +500,6 @@ export const allSchemas = [
   ReubicacionSchema,
   VisitaRealizadaSchema,
   VentaCancelacionSchema,
+  VentaModificacionSchema,
   FormaPagoSchema,
 ];

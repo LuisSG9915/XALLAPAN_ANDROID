@@ -44,6 +44,7 @@ type Producto = {
   precio: number;
   existencia: number;
   esKit?: boolean;
+  intercambio?: boolean;
   usandoPrecioDefault?: boolean;
   esPromocion?: boolean;
 };
@@ -99,8 +100,10 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [visitasDelDiaIds, setVisitasDelDiaIds] = useState<Set<number>>(new Set());
   const [visitasDelDiaMap, setVisitasDelDiaMap] = useState<Map<number, any>>(new Map());
 
-  // Intercambio de envases (clave 1000)
+  // Intercambio de envases (dinámico por bit intercambio)
   const [intercambioModalOpen, setIntercambioModalOpen] = useState(false);
+  const [envaseIntercambioClave, setEnvaseIntercambioClave] = useState<number | undefined>(undefined);
+  const [envaseIntercambioDesc, setEnvaseIntercambioDesc] = useState<string | undefined>(undefined);
   const [intercambioData, setIntercambioData] = useState<{
     envaseEntregadoClave: number;
     envaseEntregadoDesc: string;
@@ -251,9 +254,14 @@ export default function SalesScreen({ route }: { route?: any }) {
         kitsPorProducto.set(k.idProducto, arr);
       });
 
-      const calcularExistencia = (productoId: number | undefined, claveProd: number | undefined, esKit: boolean) => {
+      const calcularExistencia = (
+        productoId: number | undefined,
+        claveProd: number | undefined,
+        esKit: boolean,
+        intercambio: boolean = false,
+      ) => {
         // Productos especiales (INTERCAMBIO y PRESTAMO) siempre tienen existencia infinita
-        if (claveProd === 1000 || claveProd === 1001) {
+        if (intercambio || claveProd === 1001) {
           return 999;
         }
 
@@ -309,12 +317,13 @@ export default function SalesScreen({ route }: { route?: any }) {
         });
       }
 
-      // Forzar inclusión de productos especiales (INTERCAMBIO 1000 y PRESTAMO 1001)
-      // aunque no tengan precio en ninguna lista
-      [1000, 1001].forEach((claveEspecial) => {
-        if (productosPorClave.has(claveEspecial)) {
-          todasLasClaves.add(claveEspecial);
-        }
+      // Forzar inclusión de productos especiales (PRESTAMO 1001)
+      if (productosPorClave.has(1001)) {
+        todasLasClaves.add(1001);
+      }
+      // Forzar inclusión de productos con intercambio=true
+      productosPorClave.forEach((prod: any, clave: number) => {
+        if (prod.intercambio) todasLasClaves.add(clave);
       });
 
       // Mapear todos los productos disponibles usando un Map por ID para evitar duplicados
@@ -323,12 +332,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       Array.from(todasLasClaves).forEach((claveNum) => {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
+        const intercambio = Boolean(productoBase?.intercambio);
         const productoId = productoBase?.id ?? claveNum;
         let descripcion = productoBase?.descripcion || "Sin descripción";
-        // Agregar "+ Agua" al producto INTERCAMBIO (clave 1000)
-        if (claveNum === 1000) {
-          descripcion = `${descripcion} `;
-        }
 
         // JERARQUÍA DE PRECIOS:
         // 1. Precio promocional (PrecioPromo)
@@ -355,7 +361,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
         if (precio === undefined) precio = 0;
 
-        const existencia = calcularExistencia(productoId, claveNum, esKit);
+        const existencia = calcularExistencia(productoId, claveNum, esKit, intercambio);
 
         const producto: Producto = {
           id: productoId,
@@ -364,6 +370,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           precio,
           existencia,
           esKit,
+          intercambio,
           usandoPrecioDefault,
           esPromocion,
         };
@@ -665,7 +672,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosPromoData,
       ).filter((p) => {
         const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (claveProdNum === 1000 || claveProdNum === 1001) return true;
+        if (p.intercambio || claveProdNum === 1001) return true;
         return p.existencia > 0;
       });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
@@ -673,7 +680,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       setProductos(productosFormateados);
       // Por defecto mostrar solo productos normales (sin kits ni promociones)
       setFilteredProductos(productosFormateados.filter((p) => !p.esKit && !p.esPromocion));
-      
+
       return clientesFormateados;
     } catch (error) {
       console.error("Error al cargar datos de Realm:", error);
@@ -705,12 +712,12 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   const handleClienteSeleccionado = (cliente: Cliente) => {
     // Buscar el cliente actualizado desde el array clientes (recargado de Realm)
-    const clienteActualizado = clientes.find(c => c.id === cliente.id) || cliente;
+    const clienteActualizado = clientes.find((c) => c.id === cliente.id) || cliente;
     console.log("[Sales] Cliente seleccionado:", clienteActualizado.nombre);
     console.log("[Sales] Coordenadas del cliente seleccionado:", {
       latitud: clienteActualizado.latitud,
       longitud: clienteActualizado.longitud,
-      origen: clientes.find(c => c.id === cliente.id) ? 'Realm actualizado' : 'objeto viejo'
+      origen: clientes.find((c) => c.id === cliente.id) ? "Realm actualizado" : "objeto viejo",
     });
     console.log("[Sales] Estado actual validandoUbicacion:", validandoUbicacion);
     setClientePendienteVisita(clienteActualizado);
@@ -1245,7 +1252,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 setSelectedClient(updatedCliente);
 
                 // Pequeño delay para asegurar que la actualización en Realm se complete totalmente
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise((resolve) => setTimeout(resolve, 500));
 
                 // Verificar DIRECTAMENTE en Realm si el cliente tiene las nuevas coordenadas
                 try {
@@ -1256,7 +1263,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                     if (clienteEnRealm) {
                       console.log(`[Sales] 📋 Cliente ${clienteAUbicar.id} DIRECTAMENTE desde Realm:`, {
                         latitud: (clienteEnRealm as any).latitud,
-                        longitud: (clienteEnRealm as any).longitud
+                        longitud: (clienteEnRealm as any).longitud,
                       });
                     }
                   }
@@ -1268,25 +1275,25 @@ export default function SalesScreen({ route }: { route?: any }) {
                 try {
                   const clientesActualizados = await loadDataFromRealm(currentSucursal);
                   console.log("[Sales] Lista de clientes recargada desde Realm");
-                  
+
                   // Verificar que el cliente específico tiene las nuevas coordenadas (usando el valor retornado, no el estado)
-                  const clienteActualizado = clientesActualizados.find(c => c.id === clienteAUbicar.id);
+                  const clienteActualizado = clientesActualizados.find((c) => c.id === clienteAUbicar.id);
                   if (clienteActualizado) {
                     console.log(`[Sales] 🔍 Cliente ${clienteActualizado.id} después de recarga:`, {
                       nombre: clienteActualizado.nombre,
                       latitud: clienteActualizado.latitud,
-                      longitud: clienteActualizado.longitud
+                      longitud: clienteActualizado.longitud,
                     });
-                    
+
                     // IMPORTANTE: Actualizar selectedClient inmediatamente con las coordenadas nuevas
                     if (selectedClient && selectedClient.id === clienteAUbicar.id) {
                       console.log("[Sales] 🔄 Actualizando selectedClient con coordenadas nuevas");
                       setSelectedClient(clienteActualizado);
                     }
-                    
+
                     // Forzar actualización del estado clientes inmediatamente
                     setClientes([...clientesActualizados]);
-                    
+
                     // Recargar visitas para recalcular clientesEntregaDia con coordenadas nuevas
                     console.log("[Sales] 🔄 Recargando visitas para recalcular arrays derivados...");
                     await reloadVisitasDelDia(currentSucursal, true);
@@ -1412,9 +1419,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosDefault,
         preciosPromo,
       ).filter((p) => {
-        // Productos especiales (INTERCAMBIO y PRESTAMO) siempre visibles
+        // Productos especiales (intercambio y PRESTAMO) siempre visibles
         const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (claveProdNum === 1000 || claveProdNum === 1001) {
+        if (p.intercambio || claveProdNum === 1001) {
           return true;
         }
         // Resto de productos solo si tienen existencia
@@ -1441,16 +1448,46 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Verificar si el carrito tiene producto INTERCAMBIO (clave 1000) y aún no se ha llenado el modal
-    const itemIntercambio = cart.find((ci) => ci.claveProd === "1000" || ci.id === 55);
+    // Verificar si el carrito tiene producto con intercambio=true y aún no se ha llenado el modal
+    const itemIntercambio = cart.find((ci) => ci.intercambio);
     if (itemIntercambio && !intercambioData && !intercambioDataRef.current) {
       console.log("[Sales] Producto INTERCAMBIO detectado, mostrando modal");
       console.log(`[Sales] Precio del producto INTERCAMBIO en carrito: $${itemIntercambio.precio}`);
 
-      // El costo del intercambio es el precio del producto de INTERCAMBIO (clave 1000)
-      // NO el precio del envase recibido
-      setCostoIntercambioCalculado(itemIntercambio.precio);
+      // Buscar el kit component con envaseIntercambio=true para obtener el idInsumo
+      try {
+        const kitsDelProducto = FullSyncService.getKits(5000).filter(
+          (k: any) => k.idProducto === itemIntercambio.id && k.envaseIntercambio,
+        );
+        if (kitsDelProducto.length > 0) {
+          const compIntercambio = kitsDelProducto[0];
+          const idInsumo = compIntercambio.idInsumo;
+          console.log(`[Sales] Kit envaseIntercambio encontrado: idInsumo=${idInsumo}`);
+          // Buscar el producto del idInsumo para obtener clave y descripción
+          const productoInsumo = productosBase.find((p: any) => p.id === idInsumo);
+          if (productoInsumo) {
+            setEnvaseIntercambioClave(parseInt(productoInsumo.claveProd || "0", 10));
+            setEnvaseIntercambioDesc(productoInsumo.descripcion || "Envase intercambio");
+            console.log(
+              `[Sales] Envase entregado dinámico: ${productoInsumo.descripcion} (clave ${productoInsumo.claveProd})`,
+            );
+          } else {
+            setEnvaseIntercambioClave(idInsumo);
+            setEnvaseIntercambioDesc(`Producto ${idInsumo}`);
+            console.warn(`[Sales] No se encontró producto para idInsumo=${idInsumo}`);
+          }
+        } else {
+          console.log("[Sales] No se encontró kit con envaseIntercambio=true, usando defaults");
+          setEnvaseIntercambioClave(undefined);
+          setEnvaseIntercambioDesc(undefined);
+        }
+      } catch (err) {
+        console.warn("[Sales] Error buscando envaseIntercambio:", err);
+        setEnvaseIntercambioClave(undefined);
+        setEnvaseIntercambioDesc(undefined);
+      }
 
+      setCostoIntercambioCalculado(itemIntercambio.precio);
       setPendingIntercambioCantidad(itemIntercambio.cantidad);
       setIntercambioModalOpen(true);
       return;
@@ -1573,7 +1610,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     // Validar inventario suficiente (excluir productos especiales sin inventario)
     const insufficientStock = updatedCart.filter((item) => {
       const claveProdNum = parseInt(item.claveProd || "0", 10);
-      if (claveProdNum === 1000 || claveProdNum === 1001) return false;
+      if (item.intercambio || claveProdNum === 1001) return false;
       return item.existencia < item.cantidad;
     });
     if (insufficientStock.length > 0) {
@@ -1703,7 +1740,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       await FullSyncService.createLocalVentas(
         validCart.map((item, index) => {
-          const esIntercambio = parseInt(item.claveProd || "0", 10) === 1000 || item.id === 55;
+          const esIntercambio = item.intercambio || false;
           const precioItem = esIntercambio
             ? intercambioDataRef.current?.costo ?? costoIntercambioCalculado
             : parseFloat(item.precio.toString()) || 0;
@@ -1758,7 +1795,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         // Ya no se registra la salida del ENVASE XALLAPAN
         const currentIntercambioData = intercambioData || intercambioDataRef.current;
         if (currentIntercambioData) {
-          const cantIntercambio = validCart.find((ci) => ci.claveProd === "1000" || ci.id === 55)?.cantidad || 1;
+          const cantIntercambio = validCart.find((ci) => ci.intercambio)?.cantidad || 1;
 
           // COMENTADO: Ya no se registra la salida del envase XALLAPAN entregado
           // envaseItems.push({
@@ -1822,7 +1859,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const inventarioUpdateItems = validCart
         .filter((item) => {
           const claveProdNum = parseInt(item.claveProd || "0", 10);
-          return claveProdNum !== 1000 && claveProdNum !== 1001;
+          return !item.intercambio && claveProdNum !== 1001;
         })
         .map((item) => ({
           sucursal,
@@ -1894,9 +1931,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (status.connected) {
         Alert.alert(
           "🖨️ Venta Procesada",
-          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(2)}\nPago: ${descripcionMedioPago}\n\nTicket enviado a: ${
-            status.printer?.name
-          }`,
+          `Cliente: ${client.nombre}\nTotal: $${updatedTotal.toFixed(
+            2,
+          )}\nPago: ${descripcionMedioPago}\n\nTicket enviado a: ${status.printer?.name}`,
         );
       } else {
         Alert.alert(
@@ -2774,11 +2811,13 @@ export default function SalesScreen({ route }: { route?: any }) {
           </View>
         </Modal>
 
-        {/* Modal Intercambio de Envases (clave 1000) */}
+        {/* Modal Intercambio de Envases (dinámico) */}
         <IntercambioEnvaseModal
           visible={intercambioModalOpen}
           cantidad={pendingIntercambioCantidad}
           costoAutomatico={costoIntercambioCalculado}
+          envaseEntregadoClave={envaseIntercambioClave}
+          envaseEntregadoDesc={envaseIntercambioDesc}
           onAccept={(data) => {
             console.log("[Sales] Intercambio aceptado:", data);
             const dataObj = {
@@ -2792,11 +2831,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             intercambioDataRef.current = dataObj;
             setIntercambioData(dataObj);
             // Actualizar el precio del item de intercambio en el carrito
-            setCart((prev) =>
-              prev.map((ci) =>
-                parseInt(ci.claveProd || "0", 10) === 1000 || ci.id === 55 ? { ...ci, precio: data.costo } : ci,
-              ),
-            );
+            setCart((prev) => prev.map((ci) => (ci.intercambio ? { ...ci, precio: data.costo } : ci)));
             setIntercambioModalOpen(false);
             // El usuario debe presionar "Procesar venta" manualmente
           }}

@@ -19,6 +19,7 @@ import FacturaService, { FacturaItem } from "../services/FacturaService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 import AuthService from "../services/AuthService";
 import VentaCancelacionService from "../services/VentaCancelacionService";
+import VentaModificacionService from "../services/VentaModificacionService";
 
 type ReporteItem = {
   id: number;
@@ -58,6 +59,7 @@ type GroupedSale = {
     cantProducto: number;
     precio: number;
     importe: number;
+    claveProd?: number;
   }>;
 };
 type TicketLine = string;
@@ -86,6 +88,20 @@ export default function ReporteVentasScreen() {
 
   const [ticketVisible, setTicketVisible] = useState(false);
   const [ticketContent, setTicketContent] = useState<TicketLine[]>([]);
+
+  const [modModalVisible, setModModalVisible] = useState(false);
+  const [modVentaSeleccionada, setModVentaSeleccionada] = useState<GroupedSale | null>(null);
+  const [cantidadesEditadas, setCantidadesEditadas] = useState<Record<number, string>>({});
+
+  const esVentaDeHoy = (row: GroupedSale): boolean => {
+    const hoy = new Date();
+    const fechaVenta = new Date(row.fecha);
+    return (
+      fechaVenta.getFullYear() === hoy.getFullYear() &&
+      fechaVenta.getMonth() === hoy.getMonth() &&
+      fechaVenta.getDate() === hoy.getDate()
+    );
+  };
 
   const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
   const totalEfectivo = useMemo(
@@ -177,17 +193,20 @@ export default function ReporteVentasScreen() {
       console.log("[Reporte] DEBUG - Rango de fechas:", { fecha1Parsed, fecha2Parsed });
       console.log("[Reporte] DEBUG - sucursalUsuario:", sucursalUsuario);
       console.log("[Reporte] DEBUG - soloLocales:", soloLocales);
-      
+
       // Mostrar primeras 5 ventas para debug
       if (allVentas.length > 0) {
-        console.log("[Reporte] DEBUG - Primeras ventas:", allVentas.slice(0, 5).map((v: any) => ({
-          id: v.id,
-          noVenta: v.noVenta,
-          idMovil: v.idMovil,
-          claveProd: v.claveProd,
-          fecha: v.fecha,
-          sucursal: v.sucursal,
-        })));
+        console.log(
+          "[Reporte] DEBUG - Primeras ventas:",
+          allVentas.slice(0, 5).map((v: any) => ({
+            id: v.id,
+            noVenta: v.noVenta,
+            idMovil: v.idMovil,
+            claveProd: v.claveProd,
+            fecha: v.fecha,
+            sucursal: v.sucursal,
+          })),
+        );
       }
 
       const filtered = allVentas.filter((venta) => {
@@ -296,12 +315,15 @@ export default function ReporteVentasScreen() {
         const group = groupedMap.get(groupKey)!;
         const productoImporte = venta.importe || 0;
         group.totalImporte += productoImporte;
-        group.productos.push({
-          nombreProducto: venta.nombreProducto || "Sin nombre",
-          cantProducto: venta.cantProducto || 0,
-          precio: venta.precio || 0,
-          importe: productoImporte,
-        });
+        if ((venta.cantProducto ?? 0) > 0) {
+          group.productos.push({
+            nombreProducto: venta.nombreProducto || "Sin nombre",
+            cantProducto: venta.cantProducto || 0,
+            precio: venta.precio || 0,
+            importe: productoImporte,
+            claveProd: venta.claveProd,
+          });
+        }
       });
 
       const groupedArray = Array.from(groupedMap.values());
@@ -491,6 +513,85 @@ export default function ReporteVentasScreen() {
       Alert.alert("Factura", "Esta venta no permite factura");
     } catch (error: any) {
       Alert.alert("Error", error?.message || "Ocurrió un error al manejar la factura");
+    }
+  };
+
+  const abrirModificarVenta = (row: GroupedSale) => {
+    if (!row.no_venta || row.no_venta === 0) {
+      Alert.alert("Error", "Solo se pueden modificar ventas sincronizadas con el servidor");
+      return;
+    }
+    const initialCants: Record<number, string> = {};
+    row.productos.forEach((p) => {
+      if (p.claveProd != null) {
+        initialCants[p.claveProd] = String(p.cantProducto);
+      }
+    });
+    setCantidadesEditadas(initialCants);
+    setModVentaSeleccionada(row);
+    setModModalVisible(true);
+  };
+
+  const modificarRenglon = async (
+    row: GroupedSale,
+    claveProd: number,
+    nombreProducto: string,
+    cantidadNueva: number,
+  ) => {
+    try {
+      setModModalVisible(false);
+      const esEliminar = cantidadNueva === 0;
+      Alert.alert(
+        esEliminar ? "Confirmar eliminación de renglón" : "Confirmar cambio de cantidad",
+        esEliminar
+          ? `¿Quitar "${nombreProducto}" de la venta #${row.no_venta}?\n\nEl renglón quedará en cantidad 0 y se ajustará el inventario.`
+          : `¿Cambiar cantidad de "${nombreProducto}" a ${cantidadNueva} en la venta #${row.no_venta}?\n\nSe ajustará el inventario por la diferencia.`,
+        [
+          { text: "No", style: "cancel", onPress: () => setModModalVisible(true) },
+          {
+            text: "Sí, Guardar",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await VentaModificacionService.getInstance().quitarProducto({
+                  noVenta: row.no_venta,
+                  sucursal: row.sucursal || 1,
+                  caja: row.caja,
+                  idMovil: row.idMovil,
+                  claveProd,
+                  nombreProducto,
+                  cantidadNueva,
+                  motivoModificacion: esEliminar
+                    ? "Eliminación de renglón desde consulta de ventas"
+                    : `Cambio de cantidad a ${cantidadNueva} desde consulta de ventas`,
+                });
+
+                Alert.alert(
+                  "Éxito",
+                  "Renglón actualizado localmente. Se actualizará el servidor en la próxima sincronización.",
+                  [
+                    {
+                      text: "OK",
+                      onPress: () => {
+                        loadVentas();
+                        if (isLocalView) {
+                          consultarLocal();
+                        } else {
+                          consultar();
+                        }
+                      },
+                    },
+                  ],
+                );
+              } catch (error: any) {
+                Alert.alert("Error", error?.message || "No se pudo modificar el renglón");
+              }
+            },
+          },
+        ],
+      );
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Ocurrió un error al modificar la venta");
     }
   };
 
@@ -707,6 +808,32 @@ export default function ReporteVentasScreen() {
                       />
                     </TouchableOpacity>
                     <TouchableOpacity
+                      onPress={() => abrirModificarVenta(item)}
+                      disabled={
+                        !item.no_venta ||
+                        item.no_venta === 0 ||
+                        item.totalImporte === 0 ||
+                        item.productos.length === 0 ||
+                        !esVentaDeHoy(item)
+                      }
+                      style={styles.iconBtn}
+                    >
+                      <Icon
+                        name="edit"
+                        type="material"
+                        color={
+                          !item.no_venta ||
+                          item.no_venta === 0 ||
+                          item.totalImporte === 0 ||
+                          item.productos.length === 0 ||
+                          !esVentaDeHoy(item)
+                            ? COLORS.muted
+                            : COLORS.warning
+                        }
+                        size={20}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       onPress={() => cancelarVenta(item)}
                       disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
                       style={styles.iconBtn}
@@ -752,6 +879,84 @@ export default function ReporteVentasScreen() {
           </View>
         )}
       </View>
+
+      <Modal visible={modModalVisible} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.modalTitle}>Modificar Venta #{modVentaSeleccionada?.no_venta}</Text>
+              <TouchableOpacity onPress={() => setModModalVisible(false)}>
+                <Icon name="close" type="material" color={COLORS.primary} size={24} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modSubtitle}>Edita la cantidad o elimina el renglón:</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {modVentaSeleccionada?.productos.length === 0 ? (
+                <Text style={[styles.muted, { textAlign: "center", marginTop: 12 }]}>
+                  No hay productos activos en esta venta.
+                </Text>
+              ) : (
+                modVentaSeleccionada?.productos.map((prod, idx) => {
+                  const clave = prod.claveProd ?? 0;
+                  const cantEdit = cantidadesEditadas[clave] ?? "";
+                  const cantNum = parseInt(cantEdit, 10);
+                  const cantValida =
+                    cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum >= 0 && cantNum !== prod.cantProducto;
+                  const inputConError =
+                    cantEdit.trim() !== "" && (!isNaN(cantNum) ? cantNum === prod.cantProducto : true);
+                  return (
+                    <View key={idx} style={styles.modProductoRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.modProductoNombre}>{prod.nombreProducto}</Text>
+                        <Text style={styles.modProductoDetalle}>
+                          Actual: {prod.cantProducto} ud • ${prod.precio.toFixed(2)} c/u
+                        </Text>
+                        <View style={styles.modCantRow}>
+                          <TextInput
+                            style={[styles.modCantInput, inputConError && styles.modCantInputError]}
+                            keyboardType="numeric"
+                            placeholder={String(prod.cantProducto)}
+                            placeholderTextColor={COLORS.muted}
+                            value={cantEdit}
+                            onChangeText={(txt) => setCantidadesEditadas((prev) => ({ ...prev, [clave]: txt }))}
+                            maxLength={4}
+                          />
+                          <TouchableOpacity
+                            style={[
+                              styles.modGuardarBtn,
+                              cantValida ? styles.modGuardarBtnActive : styles.modBtnDisabled,
+                            ]}
+                            disabled={!cantValida}
+                            onPress={() => modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, cantNum)}
+                          >
+                            <Icon
+                              name="check-circle"
+                              type="material"
+                              color={cantValida ? "#fff" : COLORS.muted}
+                              size={26}
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.modEliminarBtn}
+                            onPress={() => modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, 0)}
+                          >
+                            <Icon name="remove-circle" type="material" color={COLORS.error} size={26} />
+                          </TouchableOpacity>
+                        </View>
+                        {inputConError && cantEdit.trim() !== "" && (
+                          <Text style={styles.modCantHint}>
+                            {isNaN(cantNum) ? "Ingresa un número válido" : "La cantidad debe ser diferente a la actual"}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={ticketVisible} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
@@ -956,5 +1161,79 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: COLORS.textPrimary,
+  },
+  modSubtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  modProductoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SPACING.m,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  modProductoNombre: {
+    fontWeight: "600",
+    color: COLORS.textPrimary,
+    fontSize: 14,
+  },
+  modProductoDetalle: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  modProductoAccion: {
+    paddingLeft: SPACING.s,
+  },
+  modCantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: SPACING.s,
+    gap: 8,
+  },
+  modCantLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    minWidth: 80,
+  },
+  modCantInput: {
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 4,
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.textPrimary,
+    width: 64,
+    textAlign: "center",
+  },
+  modGuardarBtn: {
+    padding: 4,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.muted,
+  },
+  modGuardarBtnActive: {
+    borderColor: COLORS.success,
+    backgroundColor: COLORS.success,
+  },
+  modBtnDisabled: {
+    borderColor: COLORS.muted,
+    backgroundColor: "transparent",
+  },
+  modCantInputError: {
+    borderColor: COLORS.error,
+  },
+  modCantHint: {
+    color: COLORS.error,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  modEliminarBtn: {
+    padding: 4,
   },
 });
