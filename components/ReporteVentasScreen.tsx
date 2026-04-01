@@ -194,6 +194,49 @@ export default function ReporteVentasScreen() {
       console.log("[Reporte] DEBUG - sucursalUsuario:", sucursalUsuario);
       console.log("[Reporte] DEBUG - soloLocales:", soloLocales);
 
+      // Categorizar ventas
+      const ventasLocales = allVentas.filter((v: any) => v.noVenta == 0);
+      const ventasServer = allVentas.filter((v: any) => v.noVenta > 0);
+      const ventasServerConIdMovil = ventasServer.filter((v: any) => v.idMovil);
+      const ventasServerSinIdMovil = ventasServer.filter((v: any) => !v.idMovil);
+
+      console.log("[Reporte] 📊 CATEGORIZACIÓN DE VENTAS:", {
+        totalVentas: allVentas.length,
+        ventasLocales: ventasLocales.length,
+        ventasServer: ventasServer.length,
+        ventasServerConIdMovil: ventasServerConIdMovil.length,
+        ventasServerSinIdMovil: ventasServerSinIdMovil.length,
+      });
+
+      // Desglose detallado por categoría
+      console.log("[Reporte] 📋 DESGLOSE VENTAS LOCALES:", ventasLocales.slice(0, 10).map((v: any) => ({
+        id: v.id,
+        noVenta: v.noVenta,
+        nombreProducto: v.nombreProducto,
+        cantProducto: v.cantProducto,
+        importe: v.importe,
+        fecha: v.fecha,
+      })));
+
+      console.log("[Reporte] 📋 DESGLOSE VENTAS SERVER CON idMovil:", ventasServerConIdMovil.slice(0, 10).map((v: any) => ({
+        id: v.id,
+        noVenta: v.noVenta,
+        idMovil: v.idMovil,
+        nombreProducto: v.nombreProducto,
+        cantProducto: v.cantProducto,
+        importe: v.importe,
+        fecha: v.fecha,
+      })));
+
+      console.log("[Reporte] 📋 DESGLOSE VENTAS SERVER SIN idMovil:", ventasServerSinIdMovil.slice(0, 10).map((v: any) => ({
+        id: v.id,
+        noVenta: v.noVenta,
+        nombreProducto: v.nombreProducto,
+        cantProducto: v.cantProducto,
+        importe: v.importe,
+        fecha: v.fecha,
+      })));
+
       // Mostrar primeras 5 ventas para debug
       if (allVentas.length > 0) {
         console.log(
@@ -235,22 +278,43 @@ export default function ReporteVentasScreen() {
           }
           return result;
         } else {
-          // Consultar: ventas sincronizadas (tienen idMovil)
-          const result = inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0 && venta.idMovil;
-          if (!result) {
-            console.log("[Reporte] DEBUG - Venta remota rechazada:", {
-              id: venta.id,
-              inDateRange,
-              inSucursal,
-              noVenta: venta.noVenta,
-              claveProd: venta.claveProd,
-              idMovil: venta.idMovil,
-            });
+          // Consultar: todas las ventas del servidor (noVenta > 0)
+          // Pero excluir duplicados: si existe una venta con mismo noVenta+sucursal que tiene idMovil, excluir la que no tiene
+          const result = inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0;
+          
+          // Verificar si hay duplicado: mismo noVenta pero una tiene idMovil y otra no
+          if (result && !venta.idMovil) {
+            const noVenta = venta.noVenta;
+            const sucursal = venta.sucursal;
+            const tieneVersionSincronizada = allVentas.some((v: any) => 
+              v.noVenta === noVenta && 
+              v.sucursal === sucursal && 
+              v.idMovil && 
+              v.claveProd !== 0
+            );
+            if (tieneVersionSincronizada) {
+              console.log("[Reporte] 🔄 EXCLUIR DUPLICADO (pre-sync):", {
+                id: venta.id,
+                noVenta: venta.noVenta,
+                idMovil: venta.idMovil,
+              });
+              return false;
+            }
           }
+          
           return result;
         }
       });
       console.log("[Reporte] Filtered results", { count: filtered });
+      console.log("[Reporte] 📋 VENTAS FILTRADAS DETALLE:", filtered.slice(0, 15).map((v: any) => ({
+        id: v.id,
+        noVenta: v.noVenta,
+        idMovil: v.idMovil,
+        nombreProducto: v.nombreProducto,
+        cantProducto: v.cantProducto,
+        importe: v.importe,
+        fecha: v.fecha,
+      })));
       // consoleRealm("pagos", filtered);
       const mapped: ReporteItem[] = filtered.map((venta) => ({
         id: venta.id,
@@ -276,7 +340,9 @@ export default function ReporteVentasScreen() {
       // Agrupar ventas por idMovil (locales) o por noVenta+sucursal (remotas)
       const groupedMap = new Map<string, GroupedSale>();
 
-      filtered.forEach((venta) => {
+      console.log("[Reporte] 🔍 INICIANDO AGRUPAMIENTO - soloLocales:", soloLocales);
+
+      filtered.forEach((venta, idx) => {
         // Para ventas locales usar idMovil, para remotas usar noVenta+sucursal
         let groupKey: string;
         let displayId: number;
@@ -293,7 +359,17 @@ export default function ReporteVentasScreen() {
           groupKey = `remote_${noVenta}_${sucursal}`;
         }
 
+        console.log(`[Reporte] 📌 Venta ${idx}:`, {
+          id: venta.id,
+          noVenta: venta.noVenta,
+          idMovil: venta.idMovil,
+          nombreProducto: venta.nombreProducto,
+          groupKey,
+          esNuevoGrupo: !groupedMap.has(groupKey),
+        });
+
         if (!groupedMap.has(groupKey)) {
+          console.log(`[Reporte] ✅ CREANDO NUEVO GRUPO: ${groupKey}`);
           groupedMap.set(groupKey, {
             idMovil: displayId,
             no_venta: venta.noVenta || displayId,
@@ -310,6 +386,8 @@ export default function ReporteVentasScreen() {
             timbrado: venta.timbrado,
             vendedor: venta.vendedor || undefined,
           });
+        } else {
+          console.log(`[Reporte] 🔄 AGREGANDO A GRUPO EXISTENTE: ${groupKey}`);
         }
 
         const group = groupedMap.get(groupKey)!;
@@ -327,12 +405,18 @@ export default function ReporteVentasScreen() {
       });
 
       const groupedArray = Array.from(groupedMap.values());
-      console.log("[Reporte] Grouped results", {
+      console.log("[Reporte] ✅ AGRUPAMIENTO COMPLETADO", {
         totalGroups: groupedArray.length,
         groups: groupedArray.map((g) => ({
           no_venta: g.no_venta,
+          nombre: g.nombre,
           productos: g.productos.length,
           total: g.totalImporte,
+          productosDetalle: g.productos.map((p) => ({
+            nombre: p.nombreProducto,
+            cant: p.cantProducto,
+            importe: p.importe,
+          })),
         })),
       });
 
