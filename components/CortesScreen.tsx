@@ -146,7 +146,42 @@ export default function CortesScreen() {
       setRuta(user?.dSucursal);
       console.log(user);
 
-      const ventas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
+      const allVentas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
+      
+      // Filtrar para evitar duplicados: excluir versiones pre-sincronización cuando existe versión sincronizada
+      const ventas = allVentas.filter((v: any) => {
+        // Incluir ventas locales sin sincronizar (noVenta == 0)
+        if (v.noVenta == 0) return true;
+        
+        // Para ventas del servidor (noVenta > 0)
+        if (v.noVenta > 0) {
+          // Si NO tiene idMovil, verificar si existe versión sincronizada
+          if (!v.idMovil) {
+            const noVenta = v.noVenta;
+            const sucursal = v.sucursal;
+            const tieneVersionSincronizada = allVentas.some((venta: any) => 
+              venta.noVenta === noVenta && 
+              venta.sucursal === sucursal && 
+              venta.idMovil
+            );
+            // Si existe versión sincronizada, excluir esta (pre-sync)
+            if (tieneVersionSincronizada) {
+              console.log("[CortesScreen] 🔄 EXCLUIR DUPLICADO (pre-sync):", {
+                id: v.id,
+                noVenta: v.noVenta,
+                nombreProducto: v.nombreProducto,
+              });
+              return false;
+            }
+          }
+          // Incluir: tiene idMovil O no existe versión sincronizada
+          return true;
+        }
+        
+        return false;
+      });
+      
+      console.log("[CortesScreen] Total ventas:", allVentas.length, "Ventas filtradas (sin duplicados):", ventas.length);
 
       // Cargar kits y productos para expandir ventas de kits
       const allKits = FullSyncService.getKits(10000);
@@ -170,11 +205,39 @@ export default function CortesScreen() {
       const importesPorProd: Record<string, number> = {};
       const pagosPorTipo: Record<number, number> = {};
 
+      // Debug: contar ventas con claveProd 26
+      const ventasClave26 = ventas.filter((v: any) => v.claveProd === 26);
+      console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 26:", ventasClave26.length);
+      if (ventasClave26.length > 0) {
+        console.log("[CortesScreen] 📋 Detalles de ventas clave 26:", ventasClave26.map((v: any) => ({
+          id: v.id,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          precio: v.precio,
+          importe: v.importe,
+          fecha: v.fecha,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+        })));
+      }
+
       for (const v of ventas) {
         const claveProd: number = v.claveProd || 0;
         const cantVenta: number = v.cantProducto || 0;
         const tipoPago: number = v.tipoPago || 0;
         const importeVenta: number = v.importe || 0;
+
+        // Excluir producto con claveProd === 26
+        if (claveProd === 26) {
+          console.log("[CortesScreen] ⚠️ Excluyendo producto claveProd=26:", {
+            nombreProducto: v.nombreProducto,
+            cantProducto: cantVenta,
+            precio: v.precio,
+            importe: importeVenta,
+            fecha: v.fecha,
+          });
+          continue;
+        }
 
         const kitInsumos = kitsByProducto[claveProd];
 
