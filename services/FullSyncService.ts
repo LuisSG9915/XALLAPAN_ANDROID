@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 29,
+        schemaVersion: 30,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -101,6 +101,11 @@ class FullSyncService {
           // Migración v29: Nueva tabla FormaPago para formas de pago dinámicas
           if (oldRealm.schemaVersion < 29) {
             console.log("[Migration v29] Creando tabla FormaPago");
+          }
+
+          // Migración v30: Agregar intercambio a Producto y envaseIntercambio a Kit
+          if (oldRealm.schemaVersion < 30) {
+            console.log("[Migration v30] Agregando campo intercambio a Producto y envaseIntercambio a Kit");
           }
         },
       });

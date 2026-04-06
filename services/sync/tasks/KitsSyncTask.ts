@@ -37,6 +37,20 @@ export class KitsSyncTask extends SyncTask {
 
       const kits = await response.json();
       const registrosLeidos = Array.isArray(kits) ? kits.length : 0;
+      // DEBUG: ver campos que trae el servidor
+      if (Array.isArray(kits) && kits.length > 0) {
+        console.log(`[KitsSyncTask] DEBUG Campos del primer kit: ${JSON.stringify(Object.keys(kits[0]))}`);
+        const kitConEnvase = kits.find((k: any) => k.envaseIntercambio);
+        if (kitConEnvase) {
+          console.log(`[KitsSyncTask] DEBUG Kit con envaseIntercambio: ${JSON.stringify(kitConEnvase)}`);
+        } else {
+          console.log(
+            `[KitsSyncTask] DEBUG NINGÚN kit tiene envaseIntercambio truthy. Muestra kit[0]: ${JSON.stringify(
+              kits[0],
+            )}`,
+          );
+        }
+      }
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
       let registrosActualizados = 0;
@@ -53,6 +67,13 @@ export class KitsSyncTask extends SyncTask {
         for (const kit of kits) {
           const existing = this.realm.objectForPrimaryKey("Kit", kit.id);
 
+          if (kit.envaseIntercambio) {
+            console.log(
+              `[KitsSyncTask] DEBUG Kit id=${kit.id} idProducto=${kit.idProducto} idInsumo=${
+                kit.idInsumo
+              } envaseIntercambio=${kit.envaseIntercambio} (type=${typeof kit.envaseIntercambio})`,
+            );
+          }
           const kitData = {
             id: kit.id,
             idProducto: kit.idProducto ?? null,
@@ -60,7 +81,7 @@ export class KitsSyncTask extends SyncTask {
             cantidad: kit.cantidad ?? 0,
             precio: kit.precio ?? 0,
             descuento: kit.descuento ?? 0,
-            envaseIntercambio: kit.envaseIntercambio ?? false,
+            envaseIntercambio: kit.envaseIntercambio ? true : false,
             syncedAt: new Date(),
           };
 

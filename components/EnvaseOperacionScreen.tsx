@@ -80,8 +80,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     costo: number;
   } | null>(null);
   const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
-  const [envaseIntercambioClave, setEnvaseIntercambioClave] = useState<number | undefined>(undefined);
-  const [envaseIntercambioDesc, setEnvaseIntercambioDesc] = useState<string | undefined>(undefined);
+  const envaseIntercambioClaveRef = useRef<number | undefined>(undefined);
+  const envaseIntercambioDescRef = useRef<string | undefined>(undefined);
   const [prestamoData, setPrestamoData] = useState<{
     idProdPrestado: number;
     claveProdPrestado: number;
@@ -243,8 +243,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
         if (!productoIntercambio) {
           console.warn("[EnvaseOp] No se encontró producto con intercambio=true");
           setCostoIntercambioCalculado(0);
-          setEnvaseIntercambioClave(undefined);
-          setEnvaseIntercambioDesc(undefined);
+          envaseIntercambioClaveRef.current = undefined;
+          envaseIntercambioDescRef.current = undefined;
           setIntercambioModalOpen(true);
         } else {
           const idProductoIntercambio = productoIntercambio.id;
@@ -256,17 +256,17 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
             if (kitEnvase) {
               const idInsumo = kitEnvase.idInsumo;
               const prodInsumo = productos.find((p: any) => p.id === idInsumo);
-              setEnvaseIntercambioClave(prodInsumo ? parseInt(prodInsumo.claveProd || "0", 10) : idInsumo);
-              setEnvaseIntercambioDesc(prodInsumo?.descripcion || `Producto ${idInsumo}`);
+              envaseIntercambioClaveRef.current = prodInsumo ? parseInt(prodInsumo.claveProd || "0", 10) : idInsumo;
+              envaseIntercambioDescRef.current = prodInsumo?.descripcion || `Producto ${idInsumo}`;
               console.log(`[EnvaseOp] envaseIntercambio: idInsumo=${idInsumo}, desc=${prodInsumo?.descripcion}`);
             } else {
-              setEnvaseIntercambioClave(undefined);
-              setEnvaseIntercambioDesc(undefined);
+              envaseIntercambioClaveRef.current = undefined;
+              envaseIntercambioDescRef.current = undefined;
             }
           } catch (err) {
             console.warn("[EnvaseOp] Error buscando envaseIntercambio:", err);
-            setEnvaseIntercambioClave(undefined);
-            setEnvaseIntercambioDesc(undefined);
+            envaseIntercambioClaveRef.current = undefined;
+            envaseIntercambioDescRef.current = undefined;
           }
 
           const listaPrecios = selectedClient?.listaPrecio ?? 0;
@@ -918,8 +918,8 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           visible={intercambioModalOpen}
           cantidad={parseInt(cantidad, 10) || 1}
           costoAutomatico={costoIntercambioCalculado}
-          envaseEntregadoClave={envaseIntercambioClave}
-          envaseEntregadoDesc={envaseIntercambioDesc}
+          envaseEntregadoClave={envaseIntercambioClaveRef.current}
+          envaseEntregadoDesc={envaseIntercambioDescRef.current}
           onAccept={handleIntercambioAccept}
           onCancel={() => {
             console.log("[EnvaseOp] ❌ Modal cancelado por usuario");

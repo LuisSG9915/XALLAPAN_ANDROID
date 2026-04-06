@@ -47,6 +47,10 @@ export default function IntercambioEnvaseModal({
 
   useEffect(() => {
     console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoIntercambio:", costoAutomatico);
+    console.log(
+      `[IntercambioModal] DEBUG propEntregadoClave=${propEntregadoClave}, propEntregadoDesc=${propEntregadoDesc}`,
+    );
+    console.log(`[IntercambioModal] DEBUG claveEntregado=${claveEntregado}, descEntregado=${descEntregado}`);
     if (visible) {
       console.log("[IntercambioModal] ✅ Modal visible, cargando productos envase...");
       const productos = FullSyncService.getProductosEnvaseRecibe(50);
@@ -80,7 +84,7 @@ export default function IntercambioEnvaseModal({
       setMostrarLista(false);
       console.log("[IntercambioModal] ✅ Estado reseteado");
     }
-  }, [visible, costoAutomatico]);
+  }, [visible, costoAutomatico, claveEntregado, descEntregado]);
 
   const handleAccept = () => {
     if (!envaseRecibido) return;
@@ -104,11 +108,13 @@ export default function IntercambioEnvaseModal({
 
           {/* Envase a entregar - fijo */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>SELECCIONE EL ENVASE A ENTREGAR</Text>
-            <View style={styles.fixedValue}>
-              <Text style={styles.fixedValueText}>XALLAPAN</Text>
-              <Text style={styles.fixedValueSub}>Clave: {CLAVE_ENVASE_XALLAPAN}</Text>
-            </View>
+            <TouchableOpacity onPress={() => console.log(descEntregado + claveEntregado)}>
+              <Text style={styles.sectionLabel}>SELECCIONE EL ENVASE A ENTREGAR</Text>
+              <View style={styles.fixedValue}>
+                <Text style={styles.fixedValueText}>{descEntregado}</Text>
+                <Text style={styles.fixedValueSub}>Clave: {claveEntregado}</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           {/* Envase recibido - seleccionable */}
