@@ -65,6 +65,9 @@ export class UsuariosSyncTask extends SyncTask {
                 : usuario.reubicacion === 0
                 ? false
                 : null,
+            rfc: usuario.rfc ?? null,
+            telefono: usuario.telefono ?? null,
+            ticketFinal: usuario.ticketFinal ?? null,
             syncedAt: new Date(),
           };
 

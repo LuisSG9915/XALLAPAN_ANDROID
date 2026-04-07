@@ -209,33 +209,42 @@ export default function ReporteVentasScreen() {
       });
 
       // Desglose detallado por categoría
-      console.log("[Reporte] 📋 DESGLOSE VENTAS LOCALES:", ventasLocales.slice(0, 10).map((v: any) => ({
-        id: v.id,
-        noVenta: v.noVenta,
-        nombreProducto: v.nombreProducto,
-        cantProducto: v.cantProducto,
-        importe: v.importe,
-        fecha: v.fecha,
-      })));
+      console.log(
+        "[Reporte] 📋 DESGLOSE VENTAS LOCALES:",
+        ventasLocales.slice(0, 10).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          fecha: v.fecha,
+        })),
+      );
 
-      console.log("[Reporte] 📋 DESGLOSE VENTAS SERVER CON idMovil:", ventasServerConIdMovil.slice(0, 10).map((v: any) => ({
-        id: v.id,
-        noVenta: v.noVenta,
-        idMovil: v.idMovil,
-        nombreProducto: v.nombreProducto,
-        cantProducto: v.cantProducto,
-        importe: v.importe,
-        fecha: v.fecha,
-      })));
+      console.log(
+        "[Reporte] 📋 DESGLOSE VENTAS SERVER CON idMovil:",
+        ventasServerConIdMovil.slice(0, 10).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          fecha: v.fecha,
+        })),
+      );
 
-      console.log("[Reporte] 📋 DESGLOSE VENTAS SERVER SIN idMovil:", ventasServerSinIdMovil.slice(0, 10).map((v: any) => ({
-        id: v.id,
-        noVenta: v.noVenta,
-        nombreProducto: v.nombreProducto,
-        cantProducto: v.cantProducto,
-        importe: v.importe,
-        fecha: v.fecha,
-      })));
+      console.log(
+        "[Reporte] 📋 DESGLOSE VENTAS SERVER SIN idMovil:",
+        ventasServerSinIdMovil.slice(0, 10).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          fecha: v.fecha,
+        })),
+      );
 
       // Mostrar primeras 5 ventas para debug
       if (allVentas.length > 0) {
@@ -281,16 +290,13 @@ export default function ReporteVentasScreen() {
           // Consultar: todas las ventas del servidor (noVenta > 0)
           // Pero excluir duplicados: si existe una venta con mismo noVenta+sucursal que tiene idMovil, excluir la que no tiene
           const result = inDateRange && inSucursal && venta.noVenta > 0 && venta.claveProd !== 0;
-          
+
           // Verificar si hay duplicado: mismo noVenta pero una tiene idMovil y otra no
           if (result && !venta.idMovil) {
             const noVenta = venta.noVenta;
             const sucursal = venta.sucursal;
-            const tieneVersionSincronizada = allVentas.some((v: any) => 
-              v.noVenta === noVenta && 
-              v.sucursal === sucursal && 
-              v.idMovil && 
-              v.claveProd !== 0
+            const tieneVersionSincronizada = allVentas.some(
+              (v: any) => v.noVenta === noVenta && v.sucursal === sucursal && v.idMovil && v.claveProd !== 0,
             );
             if (tieneVersionSincronizada) {
               console.log("[Reporte] 🔄 EXCLUIR DUPLICADO (pre-sync):", {
@@ -301,20 +307,23 @@ export default function ReporteVentasScreen() {
               return false;
             }
           }
-          
+
           return result;
         }
       });
       console.log("[Reporte] Filtered results", { count: filtered });
-      console.log("[Reporte] 📋 VENTAS FILTRADAS DETALLE:", filtered.slice(0, 15).map((v: any) => ({
-        id: v.id,
-        noVenta: v.noVenta,
-        idMovil: v.idMovil,
-        nombreProducto: v.nombreProducto,
-        cantProducto: v.cantProducto,
-        importe: v.importe,
-        fecha: v.fecha,
-      })));
+      console.log(
+        "[Reporte] 📋 VENTAS FILTRADAS DETALLE:",
+        filtered.slice(0, 15).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          fecha: v.fecha,
+        })),
+      );
       // consoleRealm("pagos", filtered);
       const mapped: ReporteItem[] = filtered.map((venta) => ({
         id: venta.id,
@@ -469,6 +478,9 @@ export default function ReporteVentasScreen() {
         ticketNumber: String(groupedRow.idMovil || groupedRow.no_venta),
         sellerName: groupedRow.vendedor || currentUser?.claveEmpleado || undefined,
         branch: currentUser?.dSucursal || groupedRow.sucursal,
+        taxId: currentUser?.rfc || undefined,
+        phone: currentUser?.telefono || undefined,
+        ticketFinal: currentUser?.ticketFinal || undefined,
       };
 
       return saleTicketData;
@@ -534,6 +546,9 @@ export default function ReporteVentasScreen() {
       ticketNumber: String(row.no_venta),
       sellerName: vendedorFromVenta || currentUser?.claveEmpleado || undefined,
       branch: currentUser?.dSucursal || row.sucursal,
+      taxId: currentUser?.rfc || undefined,
+      phone: currentUser?.telefono || undefined,
+      ticketFinal: currentUser?.ticketFinal || undefined,
     };
 
     return saleTicketData;

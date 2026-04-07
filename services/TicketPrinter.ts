@@ -25,6 +25,8 @@ export interface SaleTicketData {
   businessName?: string;
   businessAddress?: string;
   taxId?: string;
+  phone?: string;
+  ticketFinal?: string;
   sellerName?: string;
   branch?: number | string;
 }
@@ -97,6 +99,30 @@ class TicketPrinter {
   }
 
   /**
+   * Divide un texto en múltiples líneas según el ancho máximo
+   */
+  wrapText(text: string, maxWidth: number): string[] {
+    if (text.length <= maxWidth) return [text];
+    const words = text.split(" ");
+    const lines: string[] = [];
+    let currentLine = "";
+    for (const word of words) {
+      if (currentLine.length === 0) {
+        currentLine = word;
+      } else if (currentLine.length + 1 + word.length <= maxWidth) {
+        currentLine += " " + word;
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine.length > 0) {
+      lines.push(currentLine);
+    }
+    return lines;
+  }
+
+  /**
    * Genera un ticket de venta genérico
    */
   generateSaleTicket(data: SaleTicketData): TicketContent {
@@ -119,11 +145,11 @@ class TicketPrinter {
 
     if (data.taxId) {
       lines.push(this.center(`RFC: ${data.taxId}`, width));
-    } else {
-      lines.push(this.center("RFC: XXXXXXXXXXXXXX", width));
     }
 
-    lines.push(this.center("TEL 01 271 8 22 10 10", width));
+    if (data.phone) {
+      lines.push(this.center(`TEL ${data.phone}`, width));
+    }
     lines.push(this.separator("-"));
 
     // Fecha y datos generales
@@ -145,20 +171,17 @@ class TicketPrinter {
 
     lines.push(this.separator("-"));
 
-    // Encabezado de productos (ancho fijo)
-    lines.push("CANT  DESC       PRECIO  IMPORTE");
-
     // Detalle de productos
     data.items.forEach((item) => {
+      const descLines = this.wrapText(item.description, width);
+      descLines.forEach((dl) => lines.push(dl));
       const cantidad = item.quantity.toString().padEnd(4).substring(0, 4);
-      const desc = item.description.substring(0, 10).padEnd(10);
       const precio = `$${item.price.toFixed(2)}`;
       const importe = `$${item.total.toFixed(2)}`;
-      const precioCol = precio.padStart(7).substring(0, 7);
-      const importeCol = importe.padStart(8).substring(0, 8);
-
-      const linea = `${cantidad}  ${desc}${precioCol} ${importeCol}`;
-      lines.push(linea);
+      const precioCol = precio.padStart(8);
+      const importeCol = importe.padStart(9);
+      const lineaNum = `  ${cantidad} x ${precioCol} ${importeCol}`;
+      lines.push(lineaNum);
     });
 
     lines.push(this.separator("-"));
@@ -174,7 +197,9 @@ class TicketPrinter {
     lines.push(this.leftRight(metodoLabel, `$${data.total.toFixed(2)}`, width));
 
     lines.push(this.separator());
-    lines.push(this.center("GRACIAS POR SU COMPRA", width));
+    const mensajeFinal = data.ticketFinal || "GRACIAS POR SU COMPRA";
+    const mensajeLines = this.wrapText(mensajeFinal, width);
+    mensajeLines.forEach((ml) => lines.push(this.center(ml, width)));
     lines.push(this.separator());
 
     return lines;

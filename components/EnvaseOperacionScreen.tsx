@@ -437,6 +437,9 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
           branch: sucursal,
+          taxId: currentUser?.rfc || undefined,
+          phone: currentUser?.telefono || undefined,
+          ticketFinal: currentUser?.ticketFinal || undefined,
         });
         console.log("[EnvaseOp] Ticket impreso");
       } catch (printError) {
