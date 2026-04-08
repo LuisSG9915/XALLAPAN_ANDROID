@@ -1786,7 +1786,25 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Intentar imprimir ticket (no crítico si falla)
       let ticketImpreso = false;
       try {
-        await TicketPrinter.printSaleTicket({
+        // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+      let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
+      try {
+        if (currentUser?.id) {
+          const realmUser = FullSyncService.getUsuarioById(currentUser.id);
+          if (realmUser) {
+            usuarioTicketData = {
+              rfc: realmUser.rfc,
+              telefono: realmUser.telefono,
+              ticketFinal: realmUser.ticketFinal,
+            };
+            console.log("[Sales] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+          }
+        }
+      } catch (e) {
+        console.error("[Sales] Error al obtener datos de usuario de Realm:", e);
+      }
+
+      await TicketPrinter.printSaleTicket({
           clientName: client.nombre,
           paymentMethod: descripcionMedioPago,
           items: validCart.map((item) => ({
@@ -1801,9 +1819,9 @@ export default function SalesScreen({ route }: { route?: any }) {
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
           branch: currentUser?.dSucursal || sucursal,
-          taxId: currentUser?.rfc || undefined,
-          phone: currentUser?.telefono || undefined,
-          ticketFinal: currentUser?.ticketFinal || undefined,
+          taxId: usuarioTicketData.rfc,
+          phone: usuarioTicketData.telefono,
+          ticketFinal: usuarioTicketData.ticketFinal,
         });
         ticketImpreso = true;
         console.log("[Sales] ✅ Ticket impreso correctamente");
@@ -1915,27 +1933,27 @@ export default function SalesScreen({ route }: { route?: any }) {
           });
         }
 
-        // PRESTAMO (clave 1001): salida del producto prestado
-        if (prestamoData) {
-          const cantPrestamo = validCart.find((ci) => ci.claveProd === "1001" || ci.id === 56)?.cantidad || 1;
-          const obsCompleta = [
-            prestamoData.observacion,
-            prestamoData.fechaDevolucion ? `Fecha devolucion: ${prestamoData.fechaDevolucion}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-          envaseItems.push({
-            sucursal,
-            claveProd: prestamoData.idProdPrestado,
-            folioMovto: 1,
-            cantidadEntrada: 0,
-            cantidadSalida: cantPrestamo,
-            costo: 0,
-            tipoMovto: 1200,
-            idMovil: saleIdMovil,
-            observacion: obsCompleta,
-          });
-        }
+        // // PRESTAMO (clave 1001): salida del producto prestado
+        // if (prestamoData) {
+        //   const cantPrestamo = validCart.find((ci) => ci.claveProd === "1001" || ci.id === 56)?.cantidad || 1;
+        //   const obsCompleta = [
+        //     prestamoData.observacion,
+        //     prestamoData.fechaDevolucion ? `Fecha devolucion: ${prestamoData.fechaDevolucion}` : "",
+        //   ]
+        //     .filter(Boolean)
+        //     .join(" | ");
+        //   envaseItems.push({
+        //     sucursal,
+        //     claveProd: prestamoData.idProdPrestado,
+        //     folioMovto: 1,
+        //     cantidadEntrada: 0,
+        //     cantidadSalida: cantPrestamo,
+        //     costo: 0,
+        //     tipoMovto: 1200,
+        //     idMovil: saleIdMovil,
+        //     observacion: obsCompleta,
+        //   });
+        // }
 
         if (envaseItems.length > 0) {
           console.log("[Sales] 📦 Guardando InventarioEnvase:", envaseItems.length, "registros");

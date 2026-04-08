@@ -31,6 +31,7 @@ type InvABordoItem = {
 type EnvasesData = {
   envVendido: number;
   envCambiado: number;
+  envCambiadoEco: number;
   envPrestado: number;
   cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
 };
@@ -74,6 +75,7 @@ export default function CortesScreen() {
   const [envases, setEnvases] = useState<EnvasesData>({
     envVendido: 0,
     envCambiado: 0,
+    envCambiadoEco: 0,
     envPrestado: 0,
     cambiadosPorProducto: [],
   });
@@ -226,6 +228,7 @@ export default function CortesScreen() {
         const cantVenta: number = v.cantProducto || 0;
         const tipoPago: number = v.tipoPago || 0;
         const importeVenta: number = v.importe || 0;
+        const tipoMovto: number = v.tipoMovto || 0;
 
         // Excluir producto con claveProd === 26
         if (claveProd === 26) {
@@ -239,6 +242,17 @@ export default function CortesScreen() {
           continue;
         }
 
+        // Excluir ventas con tipoMovto === 1200 (préstamo de envases)
+        if (tipoMovto === 1200) {
+          console.log("[CortesScreen] ⚠️ Excluyendo venta tipoMovto=1200 (préstamo):", {
+            nombreProducto: v.nombreProducto,
+            claveProd: claveProd,
+            cantProducto: cantVenta,
+            tipoMovto: tipoMovto,
+          });
+          continue;
+        }
+
         const kitInsumos = kitsByProducto[claveProd];
 
         if (kitInsumos && kitInsumos.length > 0) {
@@ -246,6 +260,13 @@ export default function CortesScreen() {
           let importeKitTotal = 0;
           for (const insumo of kitInsumos) {
             const idInsumo: number = insumo.idInsumo || 0;
+
+            // Si el kit es idProducto=56 (Préstamo de Envases), NO agregar el insumo 18
+            if (claveProd === 56 && idInsumo === 18) {
+              console.log(`[CortesScreen] ⚠️ Excluyendo insumo ${idInsumo} del kit ${claveProd} (Préstamo de Envases)`);
+              continue;
+            }
+
             const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
             const precioInsumo: number = Math.round((insumo.precio || 0)  * 100) / 100;
             const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
@@ -464,8 +485,12 @@ export default function CortesScreen() {
             <Text style={[styles.td, styles.tdRight]}>{envases.envVendido || "—"}</Text>
           </View>
           <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>Env Cambiado</Text>
+            <Text style={[styles.td, styles.tdFlex]}>Env Cambiado Xal</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envCambiado || "—"}</Text>
+          </View>
+          <View style={styles.tr}>
+            <Text style={[styles.td, styles.tdFlex]}>Env Cambiado Eco</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envCambiadoEco || "—"}</Text>
           </View>
           {envases.cambiadosPorProducto.length > 0 && (
             <View style={[styles.table, { marginTop: 6 }]}>

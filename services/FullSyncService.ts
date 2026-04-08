@@ -630,6 +630,17 @@ class FullSyncService {
       }
     }
 
+    // PASO 5.5: Enviar cierres de ruta pendientes al servidor
+    if (idUsuario) {
+      console.log("[FullSync] PASO 5.5 - Enviando cierres de ruta pendientes...");
+      const cierreResult = await this.sendPendingCierreRutaToServer(sucursal, idUsuario);
+      if (cierreResult.success && cierreResult.sent > 0) {
+        console.log(`[FullSync] ✅ ${cierreResult.sent} cierres de ruta enviados`);
+      } else if (!cierreResult.success && cierreResult.error) {
+        console.warn("[FullSync] ⚠️ Error enviando cierres de ruta:", cierreResult.error);
+      }
+    }
+
     // Crear SyncLog principal específico para incremental
     const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const fechaInicio = new Date();
@@ -848,6 +859,9 @@ class FullSyncService {
                       : usuario.reubicacion === 0
                       ? false
                       : null,
+                  rfc: usuario.rfc ?? null,
+                  telefono: usuario.telefono ?? null,
+                  ticketFinal: usuario.ticketFinal ?? null,
                   syncedAt: nowMexico,
                 };
 
@@ -1583,6 +1597,60 @@ class FullSyncService {
           }
         },
       },
+      {
+        name: "CierreRutaFetch",
+        run: async () => {
+          const tableName = "CierreRuta";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/cierre-ruta/full/${sucursal}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
+          );
+
+          try {
+            console.log(`[Incremental] CierreRuta - Obteniendo estado del servidor para sucursal=${sucursal}, vendedor=${idUsuario}...`);
+
+            const result = await this.fetchCierreRutaFromServer(sucursal, idUsuario ?? 0);
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: result.success,
+              registrosLeidos: result.registros,
+              registrosGuardados: result.registros,
+              registrosActualizados: 0,
+              error: result.error,
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: "sp_MovilesCierreRutaGet",
+              registrosLeidos: result.registros,
+              registrosGuardados: result.registros,
+              registrosActualizados: 0,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            console.error("[Incremental] CierreRuta - Error:", error);
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500",
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: "sp_MovilesCierreRutaGet",
+              registrosLeidos: 0,
+              registrosGuardados: 0,
+              registrosActualizados: 0,
+            };
+          }
+        },
+      },
     ];
 
     const totalTasks = tasks.length;
@@ -1702,6 +1770,24 @@ class FullSyncService {
       const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, idUsuario, onProgress);
 
       const result = await orchestrator.executeAll();
+
+      // PASO POST-SYNC: Obtener estado de cierre de ruta del servidor
+      // Esto asegura que al iniciar sesión se sepa si la ruta está cerrada o abierta
+      if (idUsuario) {
+        try {
+          console.log("[FullSync] Post-sync - Obteniendo estado de cierre de ruta...");
+          const cierreResult = await this.fetchCierreRutaFromServer(sucursal, idUsuario);
+          if (cierreResult.success && cierreResult.registros > 0) {
+            console.log(`[FullSync] ✅ Cierre de ruta sincronizado: ${cierreResult.registros} registro(s)`);
+          } else if (cierreResult.success) {
+            console.log("[FullSync] ℹ️ No hay cierres de ruta en el servidor");
+          } else {
+            console.warn("[FullSync] ⚠️ Error al obtener cierre de ruta:", cierreResult.error);
+          }
+        } catch (cierreError) {
+          console.warn("[FullSync] ⚠️ Error post-sync cierre de ruta:", cierreError);
+        }
+      }
 
       // Actualizar log final
       const fechaFinal = new Date();
@@ -2641,6 +2727,15 @@ class FullSyncService {
     return Array.from(this.realm.objects("Inventario").slice(offset, offset + limit));
   }
 
+  /**
+   * Obtiene el inventario por clave de producto y sucursal
+   */
+  getInventarioByClaveProdSucursal(claveProd: number, sucursal: number): any | null {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    const inventarios = this.realm.objects("Inventario").filtered("claveProd == $0 AND sucursal == $1", claveProd, sucursal);
+    return inventarios.length > 0 ? inventarios[0] : null;
+  }
+
   getCartera(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("Cartera").sorted("nombreCliente").slice(0, limit));
@@ -2770,11 +2865,12 @@ class FullSyncService {
   ): {
     envVendido: number;
     envCambiado: number;
+    envCambiadoEco: number;
     envPrestado: number;
     cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
   } {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      return { envVendido: 0, envCambiado: 0, envPrestado: 0, cambiadosPorProducto: [] };
+      return { envVendido: 0, envCambiado: 0, envCambiadoEco: 0, envPrestado: 0, cambiadosPorProducto: [] };
     }
 
     console.log("[getEnvasesHistorialForDate] Buscando entre:", startOfDay, "y", endOfDay);
@@ -2819,6 +2915,7 @@ class FullSyncService {
 
     let envVendido = 0;
     let envCambiado = 0;
+    let envCambiadoEco = 0;
     let envPrestado = 0;
     const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
 
@@ -2834,7 +2931,11 @@ class FullSyncService {
       } else if (tipo === 1100 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envCambiado += ", salida, " (tipo=1100, clave=18)");
         envCambiado += salida;
-      } else if (tipo === 1200 && clave === 18) {
+      } else if (tipo === 1100 && clave === 16) {
+        console.log("[getEnvasesHistorialForDate] ✅ envCambiadoEco += ", salida, " (tipo=1100, clave=16)");
+        envCambiadoEco += salida;
+      }
+       else if (tipo === 1200 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envPrestado += ", salida, " (tipo=1200, clave=18)");
         envPrestado += salida;
       }
@@ -2851,6 +2952,7 @@ class FullSyncService {
     console.log("[getEnvasesHistorialForDate] TOTALES:", {
       envVendido,
       envCambiado,
+      envCambiadoEco,
       envPrestado,
       cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length,
     });
@@ -2861,7 +2963,7 @@ class FullSyncService {
       cantidadEntrada: val.cantidadEntrada,
     }));
 
-    return { envVendido, envCambiado, envPrestado, cambiadosPorProducto };
+    return { envVendido, envCambiado, envCambiadoEco, envPrestado, cambiadosPorProducto };
   }
 
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {
@@ -3156,6 +3258,139 @@ class FullSyncService {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSyncService] Error sending ventas arrastre", error);
       return { success: false, sent: 0, error: errorMsg };
+    }
+  }
+
+  /**
+   * Envía cierres de ruta pendientes al servidor (arrastre).
+   * Similar a sendPendingVentasToServer pero para CierreRuta.
+   */
+  async sendPendingCierreRutaToServer(
+    sucursal: number,
+    idUsuario: number,
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (!this.realm || this.realm.isClosed) {
+      return { success: false, sent: 0, error: "Realm no inicializado" };
+    }
+
+    try {
+      // Obtener cierres no sincronizados (enviado == false o null)
+      const cierresPendientes = this.realm.objects("CierreRuta").filtered("enviado == false || enviado == null");
+      console.log('CIERRE EJECUTANDO')
+      if (cierresPendientes.length === 0) {
+        console.log('SIN CIERRE')
+        return { success: true, sent: 0 };
+      }
+
+      const formatDate = (date: Date | null): string => {
+        if (!date) return "";
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(date.getUTCDate()).padStart(2, "0");
+        const hours = String(date.getUTCHours()).padStart(2, "0");
+        const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+        const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+      };
+
+      const payload = Array.from(cierresPendientes).map((c: any) => ({
+        sucursal: c.sucursal ?? sucursal,
+        vendedor: c.vendedor ?? idUsuario,
+        fechaCierre: formatDate(c.fechaCierre),
+        rutaCerrada: c.rutaCerrada ?? false,
+        updatedAt: formatDate(c.updatedAt) || formatDate(new Date()),
+      }));
+
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesCierreRutaJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+
+      console.log(`[FullSync-CierreRuta] 📤 Enviando ${payload.length} cierre(s)...`);
+      console.log(`[FullSync-CierreRuta] 📦 Payload:`, JSON.stringify(payload, null, 2));
+      console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        // Marcar como enviados
+        this.realm.write(() => {
+          Array.from(cierresPendientes).forEach((c: any) => {
+            c.enviado = true;
+          });
+        });
+        console.log(`[FullSync-CierreRuta] ✅ ${payload.length} cierres enviados y marcados`);
+        return { success: true, sent: payload.length };
+      } else {
+        const errorText = await response.text().catch(() => "Error desconocido");
+        console.warn(`[FullSync-CierreRuta] ⚠️ Error HTTP ${response.status}: ${errorText}`);
+        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSync-CierreRuta] ❌ Error:", error);
+      return { success: false, sent: 0, error: errorMsg };
+    }
+  }
+
+  /**
+   * Obtiene cierres de ruta del servidor y actualiza el estado local.
+   * Permite que el cierre se sincronice entre dispositivos.
+   */
+  async fetchCierreRutaFromServer(
+    sucursal: number,
+    vendedor: number,
+  ): Promise<{ success: boolean; registros: number; error?: string }> {
+    if (!this.realm || this.realm.isClosed) {
+      return { success: false, registros: 0, error: "Realm no inicializado" };
+    }
+
+    try {
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/cierre-ruta/full/${sucursal}`;
+
+      console.log(`[FullSync-CierreRuta] 📥 Obteniendo cierres del servidor...`);
+      console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
+
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const cierres = await response.json();
+
+      if (!Array.isArray(cierres) || cierres.length === 0) {
+        return { success: true, registros: 0 };
+      }
+
+      this.realm.write(() => {
+        for (const cierre of cierres) {
+          const data = {
+            id: `${sucursal}-${vendedor}`,
+            sucursal: cierre.sucursal,
+            vendedor: cierre.vendedor,
+            fechaCierre: cierre.fechaCierre ? new Date(cierre.fechaCierre) : new Date(),
+            rutaCerrada: cierre.rutaCerrada ?? true,
+            updatedAt: cierre.updatedAt ? new Date(cierre.updatedAt) : new Date(),
+            enviado: true,
+          };
+
+          this.realm!.create("CierreRuta", data, UpdateMode.Modified);
+        }
+      });
+
+      console.log(`[FullSync-CierreRuta] ✅ ${cierres.length} cierres descargados del servidor`);
+      return { success: true, registros: cierres.length };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSync-CierreRuta] ❌ Error fetch:", error);
+      return { success: false, registros: 0, error: errorMsg };
     }
   }
 

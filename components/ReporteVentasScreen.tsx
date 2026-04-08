@@ -92,6 +92,8 @@ export default function ReporteVentasScreen() {
   const [modModalVisible, setModModalVisible] = useState(false);
   const [modVentaSeleccionada, setModVentaSeleccionada] = useState<GroupedSale | null>(null);
   const [cantidadesEditadas, setCantidadesEditadas] = useState<Record<number, string>>({});
+  const [existencias, setExistencias] = useState<Record<number, number>>({});
+  const [cargandoExistencias, setCargandoExistencias] = useState(false);
 
   const esVentaDeHoy = (row: GroupedSale): boolean => {
     const hoy = new Date();
@@ -469,6 +471,24 @@ export default function ReporteVentasScreen() {
 
       const currentUser = AuthService.currentUser;
 
+      // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+      let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
+      try {
+        if (currentUser?.id) {
+          const realmUser = FullSyncService.getUsuarioById(currentUser.id);
+          if (realmUser) {
+            usuarioTicketData = {
+              rfc: realmUser.rfc,
+              telefono: realmUser.telefono,
+              ticketFinal: realmUser.ticketFinal,
+            };
+            console.log("[ReporteVentas] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+          }
+        }
+      } catch (e) {
+        console.error("[ReporteVentas] Error al obtener datos de usuario de Realm:", e);
+      }
+
       const saleTicketData: SaleTicketData = {
         clientName,
         date,
@@ -478,9 +498,9 @@ export default function ReporteVentasScreen() {
         ticketNumber: String(groupedRow.idMovil || groupedRow.no_venta),
         sellerName: groupedRow.vendedor || currentUser?.claveEmpleado || undefined,
         branch: currentUser?.dSucursal || groupedRow.sucursal,
-        taxId: currentUser?.rfc || undefined,
-        phone: currentUser?.telefono || undefined,
-        ticketFinal: currentUser?.ticketFinal || undefined,
+        taxId: usuarioTicketData.rfc,
+        phone: usuarioTicketData.telefono,
+        ticketFinal: usuarioTicketData.ticketFinal,
       };
 
       return saleTicketData;
@@ -537,6 +557,24 @@ export default function ReporteVentasScreen() {
     const currentUser = AuthService.currentUser;
     const vendedorFromVenta = base?.vendedor || undefined;
 
+    // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+    let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
+    try {
+      if (currentUser?.id) {
+        const realmUser = FullSyncService.getUsuarioById(currentUser.id);
+        if (realmUser) {
+          usuarioTicketData = {
+            rfc: realmUser.rfc,
+            telefono: realmUser.telefono,
+            ticketFinal: realmUser.ticketFinal,
+          };
+          console.log("[ReporteVentas] Datos de ticket obtenidos de Realm (ReporteItem):", usuarioTicketData);
+        }
+      }
+    } catch (e) {
+      console.error("[ReporteVentas] Error al obtener datos de usuario de Realm:", e);
+    }
+
     const saleTicketData: SaleTicketData = {
       clientName,
       paymentMethod,
@@ -546,9 +584,9 @@ export default function ReporteVentasScreen() {
       ticketNumber: String(row.no_venta),
       sellerName: vendedorFromVenta || currentUser?.claveEmpleado || undefined,
       branch: currentUser?.dSucursal || row.sucursal,
-      taxId: currentUser?.rfc || undefined,
-      phone: currentUser?.telefono || undefined,
-      ticketFinal: currentUser?.ticketFinal || undefined,
+      taxId: usuarioTicketData.rfc,
+      phone: usuarioTicketData.telefono,
+      ticketFinal: usuarioTicketData.ticketFinal,
     };
 
     return saleTicketData;
@@ -615,7 +653,7 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const abrirModificarVenta = (row: GroupedSale) => {
+  const abrirModificarVenta = async (row: GroupedSale) => {
     if (!row.no_venta || row.no_venta === 0) {
       Alert.alert("Error", "Solo se pueden modificar ventas sincronizadas con el servidor");
       return;
@@ -629,6 +667,124 @@ export default function ReporteVentasScreen() {
     setCantidadesEditadas(initialCants);
     setModVentaSeleccionada(row);
     setModModalVisible(true);
+
+    // Cargar existencias de los productos
+    setCargandoExistencias(true);
+    try {
+      const currentUser = AuthService.currentUser;
+      const sucursal = currentUser?.sucursal_origen || row.sucursal || 1;
+      const existenciasMap: Record<number, number> = {};
+
+      for (const prod of row.productos) {
+        if (prod.claveProd != null) {
+          try {
+            const inventario = FullSyncService.getInventarioByClaveProdSucursal(prod.claveProd, sucursal);
+            existenciasMap[prod.claveProd] = inventario?.saldo ?? 0;
+          } catch (e) {
+            console.error(`[ReporteVentas] Error al obtener inventario para claveProd ${prod.claveProd}:`, e);
+            existenciasMap[prod.claveProd] = 0;
+          }
+        }
+      }
+
+      setExistencias(existenciasMap);
+      console.log("[ReporteVentas] Existencias cargadas:", existenciasMap);
+    } catch (error) {
+      console.error("[ReporteVentas] Error al cargar existencias:", error);
+    } finally {
+      setCargandoExistencias(false);
+    }
+  };
+
+  const guardarTodosLosCambios = async () => {
+    if (!modVentaSeleccionada) return;
+
+    // Validar que no haya cantidades inválidas
+    const cambios: Array<{ clave: number; cantNueva: number; nombre: string }> = [];
+    const errores: string[] = [];
+
+    for (const prod of modVentaSeleccionada.productos) {
+      const clave = prod.claveProd ?? 0;
+      const cantEdit = cantidadesEditadas[clave] ?? "";
+      const cantNum = parseInt(cantEdit, 10);
+      const existencia = existencias[clave] ?? 0;
+
+      if (cantEdit.trim() === "") continue;
+      if (isNaN(cantNum)) continue;
+      if (cantNum === prod.cantProducto) continue;
+      if (cantNum < 0) {
+        errores.push(`${prod.nombreProducto}: Cantidad no válida`);
+        continue;
+      }
+      if (cantNum > existencia) {
+        errores.push(`${prod.nombreProducto}: No hay suficiente existencia (max: ${existencia})`);
+        continue;
+      }
+
+      cambios.push({ clave, cantNueva: cantNum, nombre: prod.nombreProducto });
+    }
+
+    if (errores.length > 0) {
+      Alert.alert("Errores encontrados", errores.join("\n"));
+      return;
+    }
+
+    if (cambios.length === 0) {
+      Alert.alert("Sin cambios", "No hay modificaciones para guardar");
+      return;
+    }
+
+    // Mostrar resumen de cambios
+    const resumen = cambios.map(c => `• ${c.nombre}: ${c.cantNueva} ud`).join("\n");
+
+    Alert.alert(
+      "Confirmar todos los cambios",
+      `¿Guardar las siguientes modificaciones en la venta #${modVentaSeleccionada.no_venta}?\n\n${resumen}`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sí, Guardar Todo",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              for (const cambio of cambios) {
+                await VentaModificacionService.getInstance().quitarProducto({
+                  noVenta: modVentaSeleccionada.no_venta,
+                  sucursal: modVentaSeleccionada.sucursal || 1,
+                  caja: modVentaSeleccionada.caja,
+                  idMovil: modVentaSeleccionada.idMovil,
+                  claveProd: cambio.clave,
+                  nombreProducto: cambio.nombre,
+                  cantidadNueva: cambio.cantNueva,
+                  motivoModificacion: `Cambio de cantidad a ${cambio.cantNueva} desde consulta de ventas (guardado múltiple)`,
+                });
+              }
+
+              setModModalVisible(false);
+              Alert.alert(
+                "Éxito",
+                `${cambios.length} renglones actualizados. Se actualizará el servidor en la próxima sincronización.`,
+                [
+                  {
+                    text: "OK",
+                    onPress: () => {
+                      loadVentas();
+                      if (isLocalView) {
+                        consultarLocal();
+                      } else {
+                        consultar();
+                      }
+                    },
+                  },
+                ]
+              );
+            } catch (error: any) {
+              Alert.alert("Error", error?.message || "No se pudieron guardar los cambios");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const modificarRenglon = async (
@@ -638,7 +794,7 @@ export default function ReporteVentasScreen() {
     cantidadNueva: number,
   ) => {
     try {
-      setModModalVisible(false);
+      // Ya NO cerramos el modal - el usuario quiere seguir editando
       const esEliminar = cantidadNueva === 0;
       Alert.alert(
         esEliminar ? "Confirmar eliminación de renglón" : "Confirmar cambio de cantidad",
@@ -646,7 +802,7 @@ export default function ReporteVentasScreen() {
           ? `¿Quitar "${nombreProducto}" de la venta #${row.no_venta}?\n\nEl renglón quedará en cantidad 0 y se ajustará el inventario.`
           : `¿Cambiar cantidad de "${nombreProducto}" a ${cantidadNueva} en la venta #${row.no_venta}?\n\nSe ajustará el inventario por la diferencia.`,
         [
-          { text: "No", style: "cancel", onPress: () => setModModalVisible(true) },
+          { text: "No", style: "cancel" },
           {
             text: "Sí, Guardar",
             style: "destructive",
@@ -665,23 +821,11 @@ export default function ReporteVentasScreen() {
                     : `Cambio de cantidad a ${cantidadNueva} desde consulta de ventas`,
                 });
 
-                Alert.alert(
-                  "Éxito",
-                  "Renglón actualizado localmente. Se actualizará el servidor en la próxima sincronización.",
-                  [
-                    {
-                      text: "OK",
-                      onPress: () => {
-                        loadVentas();
-                        if (isLocalView) {
-                          consultarLocal();
-                        } else {
-                          consultar();
-                        }
-                      },
-                    },
-                  ],
-                );
+                // Limpiar el input del producto modificado (o marcar como 0 si es eliminación)
+                setCantidadesEditadas((prev) => ({ ...prev, [claveProd]: esEliminar ? "0" : "" }));
+
+                // Refrescar las ventas pero mantener el modal abierto
+                loadVentas();
               } catch (error: any) {
                 Alert.alert("Error", error?.message || "No se pudo modificar el renglón");
               }
@@ -906,46 +1050,50 @@ export default function ReporteVentasScreen() {
                         size={20}
                       />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => abrirModificarVenta(item)}
-                      disabled={
-                        !item.no_venta ||
-                        item.no_venta === 0 ||
-                        item.totalImporte === 0 ||
-                        item.productos.length === 0 ||
-                        !esVentaDeHoy(item)
-                      }
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="edit"
-                        type="material"
-                        color={
-                          !item.no_venta ||
-                          item.no_venta === 0 ||
-                          item.totalImporte === 0 ||
-                          item.productos.length === 0 ||
-                          !esVentaDeHoy(item)
-                            ? COLORS.muted
-                            : COLORS.warning
-                        }
-                        size={20}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => cancelarVenta(item)}
-                      disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="cancel"
-                        type="material"
-                        color={
-                          !item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error
-                        }
-                        size={20}
-                      />
-                    </TouchableOpacity>
+                    {!isLocalView && (
+                      <>
+                        <TouchableOpacity
+                          onPress={() => abrirModificarVenta(item)}
+                          disabled={
+                            !item.no_venta ||
+                            item.no_venta === 0 ||
+                            item.totalImporte === 0 ||
+                            item.productos.length === 0 ||
+                            !esVentaDeHoy(item)
+                          }
+                          style={styles.iconBtn}
+                        >
+                          <Icon
+                            name="edit"
+                            type="material"
+                            color={
+                              !item.no_venta ||
+                              item.no_venta === 0 ||
+                              item.totalImporte === 0 ||
+                              item.productos.length === 0 ||
+                              !esVentaDeHoy(item)
+                                ? COLORS.muted
+                                : COLORS.warning
+                            }
+                            size={20}
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => cancelarVenta(item)}
+                          disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
+                          style={styles.iconBtn}
+                        >
+                          <Icon
+                            name="cancel"
+                            type="material"
+                            color={
+                              !item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error
+                            }
+                            size={20}
+                          />
+                        </TouchableOpacity>
+                      </>
+                    )}
                   </View>
                 </View>
               </View>
@@ -989,26 +1137,45 @@ export default function ReporteVentasScreen() {
               </TouchableOpacity>
             </View>
             <Text style={styles.modSubtitle}>Edita la cantidad o elimina el renglón:</Text>
+            {cargandoExistencias && (
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                <Icon name="sync" type="material" color={COLORS.primary} size={16} style={{ marginRight: 8 }} />
+                <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>Cargando existencias...</Text>
+              </View>
+            )}
             <ScrollView style={{ maxHeight: 400 }}>
               {modVentaSeleccionada?.productos.length === 0 ? (
                 <Text style={[styles.muted, { textAlign: "center", marginTop: 12 }]}>
                   No hay productos activos en esta venta.
                 </Text>
               ) : (
-                modVentaSeleccionada?.productos.map((prod, idx) => {
+                modVentaSeleccionada?.productos
+                  .filter((prod) => {
+                    const clave = prod.claveProd ?? 0;
+                    const cantEdit = cantidadesEditadas[clave] ?? "";
+                    const cantNum = parseInt(cantEdit, 10);
+                    // No mostrar productos que ya fueron marcados para eliminar (cantidad 0)
+                    return !(cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum === 0);
+                  })
+                  .map((prod, idx) => {
                   const clave = prod.claveProd ?? 0;
                   const cantEdit = cantidadesEditadas[clave] ?? "";
                   const cantNum = parseInt(cantEdit, 10);
-                  const cantValida =
-                    cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum >= 0 && cantNum !== prod.cantProducto;
+                  const existencia = existencias[clave] ?? 0;
+                  const cantValidaBase = cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum >= 0 && cantNum !== prod.cantProducto;
+                  const excedeExistencia = cantNum > existencia;
+                  const cantValida = cantValidaBase && !excedeExistencia;
                   const inputConError =
-                    cantEdit.trim() !== "" && (!isNaN(cantNum) ? cantNum === prod.cantProducto : true);
+                    cantEdit.trim() !== "" && (!isNaN(cantNum) ? (cantNum === prod.cantProducto || excedeExistencia) : true);
                   return (
                     <View key={idx} style={styles.modProductoRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.modProductoNombre}>{prod.nombreProducto}</Text>
                         <Text style={styles.modProductoDetalle}>
                           Actual: {prod.cantProducto} ud • ${prod.precio.toFixed(2)} c/u
+                        </Text>
+                        <Text style={[styles.modProductoDetalle, { color: existencia > 0 ? COLORS.success : COLORS.error }]}>
+                          Existencia: {existencia} ud
                         </Text>
                         <View style={styles.modCantRow}>
                           <TextInput
@@ -1017,10 +1184,14 @@ export default function ReporteVentasScreen() {
                             placeholder={String(prod.cantProducto)}
                             placeholderTextColor={COLORS.muted}
                             value={cantEdit}
-                            onChangeText={(txt) => setCantidadesEditadas((prev) => ({ ...prev, [clave]: txt }))}
+                            onChangeText={(txt) => {
+                              // Validar que solo sean números
+                              if (!/^\d*$/.test(txt)) return;
+                              setCantidadesEditadas((prev) => ({ ...prev, [clave]: txt }));
+                            }}
                             maxLength={4}
                           />
-                          <TouchableOpacity
+                          {/* <TouchableOpacity
                             style={[
                               styles.modGuardarBtn,
                               cantValida ? styles.modGuardarBtnActive : styles.modBtnDisabled,
@@ -1034,17 +1205,24 @@ export default function ReporteVentasScreen() {
                               color={cantValida ? "#fff" : COLORS.muted}
                               size={26}
                             />
-                          </TouchableOpacity>
+                          </TouchableOpacity> */}
                           <TouchableOpacity
                             style={styles.modEliminarBtn}
-                            onPress={() => modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, 0)}
+                            onPress={() => {
+                              // NO ocultar inmediatamente - esperar confirmación en modificarRenglon
+                              modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, 0);
+                            }}
                           >
                             <Icon name="remove-circle" type="material" color={COLORS.error} size={26} />
                           </TouchableOpacity>
                         </View>
                         {inputConError && cantEdit.trim() !== "" && (
                           <Text style={styles.modCantHint}>
-                            {isNaN(cantNum) ? "Ingresa un número válido" : "La cantidad debe ser diferente a la actual"}
+                            {isNaN(cantNum)
+                              ? "Ingresa un número válido"
+                              : excedeExistencia
+                              ? `No puedes vender más de ${existencia} unidades`
+                              : "La cantidad debe ser diferente a la actual"}
                           </Text>
                         )}
                       </View>
@@ -1053,6 +1231,18 @@ export default function ReporteVentasScreen() {
                 })
               )}
             </ScrollView>
+
+            {/* Botón OK para guardar todos los cambios */}
+            <View style={{ marginTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.m }}>
+              <TouchableOpacity
+                style={styles.guardarTodoBtn}
+                onPress={guardarTodosLosCambios}
+                disabled={cargandoExistencias || modVentaSeleccionada?.productos.length === 0}
+              >
+                <Icon name="check-circle" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
+                <Text style={styles.guardarTodoBtnText}>OK - Guardar Todos los Cambios</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1334,5 +1524,19 @@ const styles = StyleSheet.create({
   },
   modEliminarBtn: {
     padding: 4,
+  },
+  guardarTodoBtn: {
+    flexDirection: "row",
+    backgroundColor: COLORS.success,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.l,
+    borderRadius: BORDER_RADIUS.l,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guardarTodoBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 16,
   },
 });

@@ -1,5 +1,5 @@
 import Realm from "realm";
-import { ALL_SCHEMAS } from "./RealmSchemas";
+import { allSchemas } from "./RealmSchemas";
 
 class CierreRutaService {
   private realm: Realm | null = null;
@@ -42,6 +42,7 @@ class CierreRutaService {
           fechaCierre: cerrada ? new Date() : null,
           rutaCerrada: cerrada,
           updatedAt: new Date(),
+          enviado: false, // Marcar como pendiente de sincronizar
         },
         Realm.UpdateMode.Modified
       );

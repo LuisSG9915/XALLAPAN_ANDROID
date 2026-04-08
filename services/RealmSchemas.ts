@@ -233,6 +233,7 @@ export const CierreRutaSchema = {
     fechaCierre: "date?",
     rutaCerrada: "bool",
     updatedAt: "date",
+    enviado: "bool?",
   },
   primaryKey: "id",
 };

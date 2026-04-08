@@ -56,9 +56,13 @@ export default function LoginScreen({ navigation }: any) {
       setSyncing(true);
       setSyncProgress([]);
 
-      const syncResult = await FullSyncService.syncAll(sucursal, (progress: SyncProgress) => {
-        setSyncProgress((prev) => [...prev, progress]);
-      });
+      const syncResult = await FullSyncService.syncAll(
+        sucursal,
+        (progress: SyncProgress) => {
+          setSyncProgress((prev) => [...prev, progress]);
+        },
+        user?.id || 0, // Pasar el idUsuario para que se sincronice el cierre de ruta
+      );
 
       setSyncing(false);
 

@@ -388,7 +388,9 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         const sucursal = user.sucursal_origen || user.sucursal || 1;
         const vendedor = user.id || 0;
+        console.log(`[App] Cargando estado de ruta para sucursal=${sucursal}, vendedor=${vendedor}...`);
         const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+        console.log(`[App] Estado de ruta obtenido: ${rutaStatus ? 'CERRADA' : 'ABIERTA'}`);
         setRutaCerrada(rutaStatus);
 
         checkPendingTraspasos(user);
