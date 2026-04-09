@@ -7,5 +7,4 @@ cd..
 
 
 
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
-& "w:\XALLAPAN_ANDROID\build-android.ps1"
+adb shell pm enable com.awesomeproject
