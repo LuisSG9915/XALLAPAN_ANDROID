@@ -420,6 +420,34 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
 
       // Print ticket
       try {
+        // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+        let usuarioTicketData: {
+          nombreCia?: string;
+          rfc?: string;
+          domicilio?: string;
+          regimenFiscal?: string;
+          telefono?: string;
+          ticketFinal?: string;
+        } = {};
+        try {
+          if (currentUser?.id) {
+            const realmUser = FullSyncService.getUsuarioById(currentUser.id);
+            if (realmUser) {
+              usuarioTicketData = {
+                nombreCia: realmUser.nombreCia,
+                rfc: realmUser.rfc,
+                domicilio: realmUser.domicilio,
+                regimenFiscal: realmUser.regimenFiscal,
+                telefono: realmUser.telefono,
+                ticketFinal: realmUser.ticketFinal,
+              };
+              console.log("[EnvaseOp] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+            }
+          }
+        } catch (e) {
+          console.error("[EnvaseOp] Error al obtener datos de usuario de Realm:", e);
+        }
+
         await TicketPrinter.printSaleTicket({
           clientName: selectedClient.nombre,
           paymentMethod: descripcionMedioPago,
@@ -432,14 +460,16 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
             },
           ],
           total: precioVenta * cantNum,
-          businessName: APP_NAME,
+          businessName: usuarioTicketData.nombreCia || APP_NAME,
           date: now,
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
           branch: sucursal,
-          taxId: currentUser?.rfc || undefined,
-          phone: currentUser?.telefono || undefined,
-          ticketFinal: currentUser?.ticketFinal || undefined,
+          taxId: usuarioTicketData.rfc,
+          domicilio: usuarioTicketData.domicilio,
+          regimenFiscal: usuarioTicketData.regimenFiscal,
+          phone: usuarioTicketData.telefono,
+          ticketFinal: usuarioTicketData.ticketFinal,
         });
         console.log("[EnvaseOp] Ticket impreso");
       } catch (printError) {

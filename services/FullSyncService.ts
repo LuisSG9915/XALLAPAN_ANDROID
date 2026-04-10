@@ -209,11 +209,11 @@ class FullSyncService {
    * Retorna un Date object con la hora correcta de México.
    */
   getMexicoNow(): Date {
-    // Obtener la hora actual en UTC
-    const nowUTC = new Date();
+    // Obtener la hora actual en la zona horaria de México usando toLocaleString
+    const now = new Date();
 
-    // Formatear la hora de México usando Intl
-    const formatter = new Intl.DateTimeFormat("en-US", {
+    // Crear un string ISO con la hora de México
+    const mexicoTimeString = now.toLocaleString("en-US", {
       timeZone: "America/Mexico_City",
       year: "numeric",
       month: "2-digit",
@@ -224,21 +224,24 @@ class FullSyncService {
       hour12: false,
     });
 
-    const parts = formatter.formatToParts(nowUTC);
-    const get = (type: string) => parts.find((p) => p.type === type)?.value || "0";
+    // El string viene en formato: "MM/DD/YYYY, HH:mm:ss"
+    // Necesitamos parsearlo y crear un Date
+    const [datePart, timePart] = mexicoTimeString.split(", ");
+    const [month, day, year] = datePart.split("/");
+    const [hour, minute, second] = timePart.split(":");
 
-    // Crear fecha usando Date.UTC para que se interprete como UTC
-    // Luego ajustar para que represente la hora de México
-    const mexicoDateUTC = Date.UTC(
-      parseInt(get("year"), 10),
-      parseInt(get("month"), 10) - 1,
-      parseInt(get("day"), 10),
-      parseInt(get("hour"), 10),
-      parseInt(get("minute"), 10),
-      parseInt(get("second"), 10),
+    // Crear fecha con los valores de México como si fueran locales
+    // Esto representa la hora de México en el dispositivo
+    const mexicoDate = new Date(
+      parseInt(year, 10),
+      parseInt(month, 10) - 1, // mes es 0-indexed
+      parseInt(day, 10),
+      parseInt(hour, 10),
+      parseInt(minute, 10),
+      parseInt(second, 10),
     );
 
-    return new Date(mexicoDateUTC);
+    return mexicoDate;
   }
 
   /**
@@ -246,15 +249,15 @@ class FullSyncService {
    * Útil para enviar al servidor preservando la hora local de México.
    */
   formatMexicoDateForServer(date: Date): string {
-    // El Date almacenado ya representa la hora de México como UTC
-    // Por lo tanto, usamos getUTC* para leer los componentes sin conversión adicional
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
-    const hours = String(date.getUTCHours()).padStart(2, "0");
-    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-    const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-    const ms = String(date.getUTCMilliseconds()).padStart(3, "0");
+    // El Date ahora almacena la hora de México como hora local
+    // Por lo tanto, usamos get* (sin UTC) para leer los componentes sin conversión
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    const ms = String(date.getMilliseconds()).padStart(3, "0");
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
   }
 
@@ -1188,6 +1191,19 @@ class FullSyncService {
             }
 
             const ventas = await response.json();
+            console.log("[Incremental] 🔍 VENTAS RECIBIDAS DEL SERVIDOR:", {
+              total: Array.isArray(ventas) ? ventas.length : 0,
+              primerasVentas: Array.isArray(ventas)
+                ? ventas.slice(0, 3).map((v: any) => ({
+                    id: v.id,
+                    noVenta: v.noVenta,
+                    idMovil: v.idMovil,
+                    tieneIdMovil: v.idMovil !== undefined && v.idMovil !== null,
+                    nombreProducto: v.nombreProducto,
+                    fecha: v.fecha,
+                  }))
+                : [],
+            });
             console.log(ventas, "Ventas sincronizadas");
             const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
             let registrosGuardados = 0;
@@ -1217,6 +1233,7 @@ class FullSyncService {
 
                 if (existingById) {
                   // Actualizar registro existente por ID
+                  (existingById as any).idMovil = venta.idMovil ?? null;
                   (existingById as any).noVenta = venta.noVenta;
                   (existingById as any).cantProducto = venta.cantProducto;
                   (existingById as any).precio = venta.precio;
@@ -1239,6 +1256,7 @@ class FullSyncService {
                   if (localVentas.length > 0) {
                     // Actualizar solo los campos específicos en cada registro encontrado
                     for (const localVenta of localVentas) {
+                      (localVenta as any).idMovil = venta.idMovil ?? null;
                       (localVenta as any).noVenta = venta.noVenta;
                       (localVenta as any).cantProducto = venta.cantProducto;
                       (localVenta as any).precio = venta.precio;
@@ -1612,7 +1630,9 @@ class FullSyncService {
           );
 
           try {
-            console.log(`[Incremental] CierreRuta - Obteniendo estado del servidor para sucursal=${sucursal}, vendedor=${idUsuario}...`);
+            console.log(
+              `[Incremental] CierreRuta - Obteniendo estado del servidor para sucursal=${sucursal}, vendedor=${idUsuario}...`,
+            );
 
             const result = await this.fetchCierreRutaFromServer(sucursal, idUsuario ?? 0);
 
@@ -2732,7 +2752,9 @@ class FullSyncService {
    */
   getInventarioByClaveProdSucursal(claveProd: number, sucursal: number): any | null {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
-    const inventarios = this.realm.objects("Inventario").filtered("claveProd == $0 AND sucursal == $1", claveProd, sucursal);
+    const inventarios = this.realm
+      .objects("Inventario")
+      .filtered("claveProd == $0 AND sucursal == $1", claveProd, sucursal);
     return inventarios.length > 0 ? inventarios[0] : null;
   }
 
@@ -2934,8 +2956,7 @@ class FullSyncService {
       } else if (tipo === 1100 && clave === 16) {
         console.log("[getEnvasesHistorialForDate] ✅ envCambiadoEco += ", salida, " (tipo=1100, clave=16)");
         envCambiadoEco += salida;
-      }
-       else if (tipo === 1200 && clave === 18) {
+      } else if (tipo === 1200 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envPrestado += ", salida, " (tipo=1200, clave=18)");
         envPrestado += salida;
       }
@@ -3211,19 +3232,31 @@ class FullSyncService {
       const payload = ventasLocales.map((venta: any) => {
         const cliente = venta.cveCliente ? this.getClienteFullById(venta.cveCliente) : null;
 
+        const fechaVenta = venta.fecha ?? this.getMexicoNow();
+        const fechaFormateada = this.formatMexicoDateForServer(fechaVenta);
+        const fechaTransferFormateada = this.formatMexicoDateForServer(this.getMexicoNow());
+
+        console.log("📤 [FullSync] FECHA ENVIADA AL SERVIDOR:", {
+          ventaId: venta.id,
+          idMovil: venta.idMovil,
+          fechaOriginal: fechaVenta,
+          fechaFormateada: fechaFormateada,
+          fechaTransfer: fechaTransferFormateada,
+        });
+
         return {
           sucursal: venta.sucursal ?? sucursal,
           clave_prod: venta.claveProd ?? 0,
           Cant_producto: venta.cantProducto ?? 0,
           precio: venta.precio ?? 0,
           Cve_cliente: venta.cveCliente ?? 0,
-          fecha: this.formatMexicoDateForServer(venta.fecha ?? this.getMexicoNow()),
+          fecha: fechaFormateada,
           tipo_pago: venta.tipoPago ?? 1,
           usuario: idUsuario,
           longitud: venta?.longitud ?? 0,
           latitud: venta?.latitud ?? 0,
           id_movil: venta.idMovil,
-          fechaTransfer: this.formatMexicoDateForServer(this.getMexicoNow()),
+          fechaTransfer: fechaTransferFormateada,
           observacion: venta.observacion ?? "",
           folio_movto: 1,
         };
@@ -3276,9 +3309,9 @@ class FullSyncService {
     try {
       // Obtener cierres no sincronizados (enviado == false o null)
       const cierresPendientes = this.realm.objects("CierreRuta").filtered("enviado == false || enviado == null");
-      console.log('CIERRE EJECUTANDO')
+      console.log("CIERRE EJECUTANDO");
       if (cierresPendientes.length === 0) {
-        console.log('SIN CIERRE')
+        console.log("SIN CIERRE");
         return { success: true, sent: 0 };
       }
 

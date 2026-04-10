@@ -35,6 +35,17 @@ export class VentasSyncTask extends SyncTask {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       const ventas = await response.json();
+      console.log("[VentasSyncTask] 🔍 VENTAS RECIBIDAS DEL SERVIDOR (FULL SYNC):", {
+        total: ventas.length,
+        primerasVentas: ventas.slice(0, 3).map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+          tieneIdMovil: v.idMovil !== undefined && v.idMovil !== null,
+          nombreProducto: v.nombreProducto,
+          fecha: v.fecha,
+        })),
+      });
       const registrosLeidos = ventas.length;
       const nowMexico = this.getMexicoNow();
       let registrosGuardados = 0;
@@ -66,6 +77,7 @@ export class VentasSyncTask extends SyncTask {
 
           if (existingById) {
             // Actualizar registro existente por ID
+            (existingById as any).idMovil = venta.idMovil ?? null;
             (existingById as any).noVenta = venta.noVenta;
             (existingById as any).cantProducto = venta.cantProducto;
             (existingById as any).precio = venta.precio;
@@ -86,6 +98,7 @@ export class VentasSyncTask extends SyncTask {
             if (localVentas.length > 0) {
               // Actualizar solo los campos específicos en cada registro encontrado
               for (const localVenta of localVentas) {
+                (localVenta as any).idMovil = venta.idMovil ?? null;
                 (localVenta as any).noVenta = venta.noVenta;
                 (localVenta as any).cantProducto = venta.cantProducto;
                 (localVenta as any).precio = venta.precio;

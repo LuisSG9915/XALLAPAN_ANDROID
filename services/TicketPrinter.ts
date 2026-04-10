@@ -25,6 +25,8 @@ export interface SaleTicketData {
   businessName?: string;
   businessAddress?: string;
   taxId?: string;
+  domicilio?: string;
+  regimenFiscal?: string;
   phone?: string;
   ticketFinal?: string;
   sellerName?: string;
@@ -147,6 +149,15 @@ class TicketPrinter {
       lines.push(this.center(`RFC: ${data.taxId}`, width));
     }
 
+    if (data.domicilio) {
+      const domicilioLines = this.wrapText(data.domicilio, width);
+      domicilioLines.forEach((dl) => lines.push(this.center(dl, width)));
+    }
+
+    if (data.regimenFiscal) {
+      lines.push(this.center(`Régimen: ${data.regimenFiscal}`, width));
+    }
+
     if (data.phone) {
       lines.push(this.center(`TEL ${data.phone}`, width));
     }
@@ -166,7 +177,7 @@ class TicketPrinter {
     lines.push(`Cliente: ${data.clientName}`);
 
     if (data.ticketNumber) {
-      lines.push(`Id Venta: ${data.ticketNumber}`);
+      lines.push(`FOLIO: ${data.ticketNumber}`);
     }
 
     lines.push(this.separator("-"));

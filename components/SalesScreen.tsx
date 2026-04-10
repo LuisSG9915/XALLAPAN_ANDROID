@@ -1748,6 +1748,12 @@ export default function SalesScreen({ route }: { route?: any }) {
       const vendedor =
         (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = FullSyncService.getMexicoNow();
+      console.log("🕒 [Sales] FECHA GENERADA PARA VENTA:", {
+        fecha: now,
+        fechaISO: now.toISOString(),
+        fechaLocal: now.toLocaleString("es-MX", { timeZone: "America/Mexico_City" }),
+        fechaString: now.toString(),
+      });
 
       // Filtrar productos con cantidad válida (última línea de defensa)
       const validCart = updatedCart.filter((item) => item.cantidad > 0);
@@ -1787,24 +1793,34 @@ export default function SalesScreen({ route }: { route?: any }) {
       let ticketImpreso = false;
       try {
         // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
-      let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
-      try {
-        if (currentUser?.id) {
-          const realmUser = FullSyncService.getUsuarioById(currentUser.id);
-          if (realmUser) {
-            usuarioTicketData = {
-              rfc: realmUser.rfc,
-              telefono: realmUser.telefono,
-              ticketFinal: realmUser.ticketFinal,
-            };
-            console.log("[Sales] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+        let usuarioTicketData: {
+          nombreCia?: string;
+          rfc?: string;
+          domicilio?: string;
+          regimenFiscal?: string;
+          telefono?: string;
+          ticketFinal?: string;
+        } = {};
+        try {
+          if (currentUser?.id) {
+            const realmUser = FullSyncService.getUsuarioById(currentUser.id);
+            if (realmUser) {
+              usuarioTicketData = {
+                nombreCia: realmUser.nombreCia,
+                rfc: realmUser.rfc,
+                domicilio: realmUser.domicilio,
+                regimenFiscal: realmUser.regimenFiscal,
+                telefono: realmUser.telefono,
+                ticketFinal: realmUser.ticketFinal,
+              };
+              console.log("[Sales] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+            }
           }
+        } catch (e) {
+          console.error("[Sales] Error al obtener datos de usuario de Realm:", e);
         }
-      } catch (e) {
-        console.error("[Sales] Error al obtener datos de usuario de Realm:", e);
-      }
 
-      await TicketPrinter.printSaleTicket({
+        await TicketPrinter.printSaleTicket({
           clientName: client.nombre,
           paymentMethod: descripcionMedioPago,
           items: validCart.map((item) => ({
@@ -1814,12 +1830,14 @@ export default function SalesScreen({ route }: { route?: any }) {
             total: item.precio * item.cantidad,
           })),
           total: updatedTotal,
-          businessName: APP_NAME,
+          businessName: usuarioTicketData.nombreCia || APP_NAME,
           date: now,
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
           branch: currentUser?.dSucursal || sucursal,
           taxId: usuarioTicketData.rfc,
+          domicilio: usuarioTicketData.domicilio,
+          regimenFiscal: usuarioTicketData.regimenFiscal,
           phone: usuarioTicketData.telefono,
           ticketFinal: usuarioTicketData.ticketFinal,
         });

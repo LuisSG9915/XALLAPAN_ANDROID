@@ -23,6 +23,7 @@ import VentaModificacionService from "../services/VentaModificacionService";
 
 type ReporteItem = {
   id: number;
+  idMovil?: number;
   no_venta: number;
   fecha: string;
   nombre: string;
@@ -348,42 +349,54 @@ export default function ReporteVentasScreen() {
       console.log({ mapped });
       setItems(mapped);
 
-      // Agrupar ventas por idMovil (locales) o por noVenta+sucursal (remotas)
+      // CONSOLE LOG DETALLADO DE VENTAS DE HOY
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      const ventasHoy = filtered.filter((v: any) => {
+        const fechaV = new Date(v.fecha);
+        return fechaV >= hoy;
+      });
+      console.log("🔍 [REPORTE] VENTAS DE HOY - DETALLE COMPLETO:", {
+        total: ventasHoy.length,
+        ventas: ventasHoy.map((v: any) => ({
+          id: v.id,
+          noVenta: v.noVenta,
+          idMovil: v.idMovil,
+          nombreProducto: v.nombreProducto,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          nombreCliente: v.nombreCliente,
+          fecha: v.fecha,
+          sucursal: v.sucursal,
+        })),
+      });
+
+      // Agrupar ventas por idMovil SIEMPRE (tanto locales como remotas)
       const groupedMap = new Map<string, GroupedSale>();
 
       console.log("[Reporte] 🔍 INICIANDO AGRUPAMIENTO - soloLocales:", soloLocales);
 
       filtered.forEach((venta, idx) => {
-        // Para ventas locales usar idMovil, para remotas usar noVenta+sucursal
-        let groupKey: string;
-        let displayId: number;
-
-        if (soloLocales) {
-          // Ventas locales: agrupar por idMovil
-          displayId = venta.idMovil || venta.id;
-          groupKey = `local_${displayId}`;
-        } else {
-          // Ventas remotas: agrupar por noVenta + sucursal
-          const noVenta = venta.noVenta || venta.id;
-          const sucursal = venta.sucursal || 0;
-          displayId = noVenta;
-          groupKey = `remote_${noVenta}_${sucursal}`;
-        }
+        // USAR SIEMPRE idMovil para agrupar y mostrar
+        const idMovil = venta.idMovil || venta.id;
+        const groupKey = `venta_${idMovil}_${venta.sucursal || 0}`;
+        const displayId = idMovil;
 
         console.log(`[Reporte] 📌 Venta ${idx}:`, {
           id: venta.id,
           noVenta: venta.noVenta,
           idMovil: venta.idMovil,
+          displayId,
           nombreProducto: venta.nombreProducto,
           groupKey,
           esNuevoGrupo: !groupedMap.has(groupKey),
         });
 
         if (!groupedMap.has(groupKey)) {
-          console.log(`[Reporte] ✅ CREANDO NUEVO GRUPO: ${groupKey}`);
+          console.log(`[Reporte] ✅ CREANDO NUEVO GRUPO: ${groupKey} con idMovil=${displayId}`);
           groupedMap.set(groupKey, {
             idMovil: displayId,
-            no_venta: venta.noVenta || displayId,
+            no_venta: venta.noVenta || 0,
             fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
             nombre: venta.nombreCliente || "Sin nombre",
             totalImporte: 0,
@@ -416,9 +429,18 @@ export default function ReporteVentasScreen() {
       });
 
       const groupedArray = Array.from(groupedMap.values());
+
+      // Ordenar por fecha descendente (más reciente primero)
+      groupedArray.sort((a, b) => {
+        const dateA = new Date(a.fecha).getTime();
+        const dateB = new Date(b.fecha).getTime();
+        return dateB - dateA; // Descendente
+      });
+
       console.log("[Reporte] ✅ AGRUPAMIENTO COMPLETADO", {
         totalGroups: groupedArray.length,
         groups: groupedArray.map((g) => ({
+          idMovil: g.idMovil,
           no_venta: g.no_venta,
           nombre: g.nombre,
           productos: g.productos.length,
@@ -472,13 +494,23 @@ export default function ReporteVentasScreen() {
       const currentUser = AuthService.currentUser;
 
       // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
-      let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
+      let usuarioTicketData: {
+        nombreCia?: string;
+        rfc?: string;
+        domicilio?: string;
+        regimenFiscal?: string;
+        telefono?: string;
+        ticketFinal?: string;
+      } = {};
       try {
         if (currentUser?.id) {
           const realmUser = FullSyncService.getUsuarioById(currentUser.id);
           if (realmUser) {
             usuarioTicketData = {
+              nombreCia: realmUser.nombreCia,
               rfc: realmUser.rfc,
+              domicilio: realmUser.domicilio,
+              regimenFiscal: realmUser.regimenFiscal,
               telefono: realmUser.telefono,
               ticketFinal: realmUser.ticketFinal,
             };
@@ -498,7 +530,10 @@ export default function ReporteVentasScreen() {
         ticketNumber: String(groupedRow.idMovil || groupedRow.no_venta),
         sellerName: groupedRow.vendedor || currentUser?.claveEmpleado || undefined,
         branch: currentUser?.dSucursal || groupedRow.sucursal,
+        businessName: usuarioTicketData.nombreCia,
         taxId: usuarioTicketData.rfc,
+        domicilio: usuarioTicketData.domicilio,
+        regimenFiscal: usuarioTicketData.regimenFiscal,
         phone: usuarioTicketData.telefono,
         ticketFinal: usuarioTicketData.ticketFinal,
       };
@@ -558,13 +593,23 @@ export default function ReporteVentasScreen() {
     const vendedorFromVenta = base?.vendedor || undefined;
 
     // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
-    let usuarioTicketData: { rfc?: string; telefono?: string; ticketFinal?: string } = {};
+    let usuarioTicketData: {
+      nombreCia?: string;
+      rfc?: string;
+      domicilio?: string;
+      regimenFiscal?: string;
+      telefono?: string;
+      ticketFinal?: string;
+    } = {};
     try {
       if (currentUser?.id) {
         const realmUser = FullSyncService.getUsuarioById(currentUser.id);
         if (realmUser) {
           usuarioTicketData = {
+            nombreCia: realmUser.nombreCia,
             rfc: realmUser.rfc,
+            domicilio: realmUser.domicilio,
+            regimenFiscal: realmUser.regimenFiscal,
             telefono: realmUser.telefono,
             ticketFinal: realmUser.ticketFinal,
           };
@@ -581,10 +626,13 @@ export default function ReporteVentasScreen() {
       items,
       total,
       date,
-      ticketNumber: String(row.no_venta),
+      ticketNumber: String(row.idMovil || row.no_venta),
       sellerName: vendedorFromVenta || currentUser?.claveEmpleado || undefined,
       branch: currentUser?.dSucursal || row.sucursal,
+      businessName: usuarioTicketData.nombreCia,
       taxId: usuarioTicketData.rfc,
+      domicilio: usuarioTicketData.domicilio,
+      regimenFiscal: usuarioTicketData.regimenFiscal,
       phone: usuarioTicketData.telefono,
       ticketFinal: usuarioTicketData.ticketFinal,
     };
@@ -735,7 +783,7 @@ export default function ReporteVentasScreen() {
     }
 
     // Mostrar resumen de cambios
-    const resumen = cambios.map(c => `• ${c.nombre}: ${c.cantNueva} ud`).join("\n");
+    const resumen = cambios.map((c) => `• ${c.nombre}: ${c.cantNueva} ud`).join("\n");
 
     Alert.alert(
       "Confirmar todos los cambios",
@@ -776,14 +824,14 @@ export default function ReporteVentasScreen() {
                       }
                     },
                   },
-                ]
+                ],
               );
             } catch (error: any) {
               Alert.alert("Error", error?.message || "No se pudieron guardar los cambios");
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -1016,13 +1064,13 @@ export default function ReporteVentasScreen() {
         ) : (
           <FlatList
             data={groupedItems}
-            keyExtractor={(i) => String(i.no_venta) + "_" + String(i.idMovil)}
+            keyExtractor={(i) => String(i.idMovil || i.no_venta)}
             scrollEnabled={false}
             renderItem={({ item }) => (
               <View style={styles.rowItem}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.invTitle}>
-                    #{item.no_venta} • {item.nombre}
+                    #{item.idMovil || item.no_venta} • {item.nombre}
                   </Text>
                   <Text style={styles.muted}>
                     {new Date(item.fecha).toLocaleString("es-MX")} • {item.tipoPago}
@@ -1087,7 +1135,9 @@ export default function ReporteVentasScreen() {
                             name="cancel"
                             type="material"
                             color={
-                              !item.no_venta || item.no_venta === 0 || item.totalImporte === 0 ? COLORS.muted : COLORS.error
+                              !item.no_venta || item.no_venta === 0 || item.totalImporte === 0
+                                ? COLORS.muted
+                                : COLORS.error
                             }
                             size={20}
                           />
@@ -1158,40 +1208,47 @@ export default function ReporteVentasScreen() {
                     return !(cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum === 0);
                   })
                   .map((prod, idx) => {
-                  const clave = prod.claveProd ?? 0;
-                  const cantEdit = cantidadesEditadas[clave] ?? "";
-                  const cantNum = parseInt(cantEdit, 10);
-                  const existencia = existencias[clave] ?? 0;
-                  const cantValidaBase = cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum >= 0 && cantNum !== prod.cantProducto;
-                  const excedeExistencia = cantNum > existencia;
-                  const cantValida = cantValidaBase && !excedeExistencia;
-                  const inputConError =
-                    cantEdit.trim() !== "" && (!isNaN(cantNum) ? (cantNum === prod.cantProducto || excedeExistencia) : true);
-                  return (
-                    <View key={idx} style={styles.modProductoRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.modProductoNombre}>{prod.nombreProducto}</Text>
-                        <Text style={styles.modProductoDetalle}>
-                          Actual: {prod.cantProducto} ud • ${prod.precio.toFixed(2)} c/u
-                        </Text>
-                        <Text style={[styles.modProductoDetalle, { color: existencia > 0 ? COLORS.success : COLORS.error }]}>
-                          Existencia: {existencia} ud
-                        </Text>
-                        <View style={styles.modCantRow}>
-                          <TextInput
-                            style={[styles.modCantInput, inputConError && styles.modCantInputError]}
-                            keyboardType="numeric"
-                            placeholder={String(prod.cantProducto)}
-                            placeholderTextColor={COLORS.muted}
-                            value={cantEdit}
-                            onChangeText={(txt) => {
-                              // Validar que solo sean números
-                              if (!/^\d*$/.test(txt)) return;
-                              setCantidadesEditadas((prev) => ({ ...prev, [clave]: txt }));
-                            }}
-                            maxLength={4}
-                          />
-                          {/* <TouchableOpacity
+                    const clave = prod.claveProd ?? 0;
+                    const cantEdit = cantidadesEditadas[clave] ?? "";
+                    const cantNum = parseInt(cantEdit, 10);
+                    const existencia = existencias[clave] ?? 0;
+                    const cantValidaBase =
+                      cantEdit.trim() !== "" && !isNaN(cantNum) && cantNum >= 0 && cantNum !== prod.cantProducto;
+                    const excedeExistencia = cantNum > existencia;
+                    const cantValida = cantValidaBase && !excedeExistencia;
+                    const inputConError =
+                      cantEdit.trim() !== "" &&
+                      (!isNaN(cantNum) ? cantNum === prod.cantProducto || excedeExistencia : true);
+                    return (
+                      <View key={idx} style={styles.modProductoRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.modProductoNombre}>{prod.nombreProducto}</Text>
+                          <Text style={styles.modProductoDetalle}>
+                            Actual: {prod.cantProducto} ud • ${prod.precio.toFixed(2)} c/u
+                          </Text>
+                          <Text
+                            style={[
+                              styles.modProductoDetalle,
+                              { color: existencia > 0 ? COLORS.success : COLORS.error },
+                            ]}
+                          >
+                            Existencia: {existencia} ud
+                          </Text>
+                          <View style={styles.modCantRow}>
+                            <TextInput
+                              style={[styles.modCantInput, inputConError && styles.modCantInputError]}
+                              keyboardType="numeric"
+                              placeholder={String(prod.cantProducto)}
+                              placeholderTextColor={COLORS.muted}
+                              value={cantEdit}
+                              onChangeText={(txt) => {
+                                // Validar que solo sean números
+                                if (!/^\d*$/.test(txt)) return;
+                                setCantidadesEditadas((prev) => ({ ...prev, [clave]: txt }));
+                              }}
+                              maxLength={4}
+                            />
+                            {/* <TouchableOpacity
                             style={[
                               styles.modGuardarBtn,
                               cantValida ? styles.modGuardarBtnActive : styles.modBtnDisabled,
@@ -1206,34 +1263,36 @@ export default function ReporteVentasScreen() {
                               size={26}
                             />
                           </TouchableOpacity> */}
-                          <TouchableOpacity
-                            style={styles.modEliminarBtn}
-                            onPress={() => {
-                              // NO ocultar inmediatamente - esperar confirmación en modificarRenglon
-                              modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, 0);
-                            }}
-                          >
-                            <Icon name="remove-circle" type="material" color={COLORS.error} size={26} />
-                          </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.modEliminarBtn}
+                              onPress={() => {
+                                // NO ocultar inmediatamente - esperar confirmación en modificarRenglon
+                                modificarRenglon(modVentaSeleccionada!, clave, prod.nombreProducto, 0);
+                              }}
+                            >
+                              <Icon name="remove-circle" type="material" color={COLORS.error} size={26} />
+                            </TouchableOpacity>
+                          </View>
+                          {inputConError && cantEdit.trim() !== "" && (
+                            <Text style={styles.modCantHint}>
+                              {isNaN(cantNum)
+                                ? "Ingresa un número válido"
+                                : excedeExistencia
+                                ? `No puedes vender más de ${existencia} unidades`
+                                : "La cantidad debe ser diferente a la actual"}
+                            </Text>
+                          )}
                         </View>
-                        {inputConError && cantEdit.trim() !== "" && (
-                          <Text style={styles.modCantHint}>
-                            {isNaN(cantNum)
-                              ? "Ingresa un número válido"
-                              : excedeExistencia
-                              ? `No puedes vender más de ${existencia} unidades`
-                              : "La cantidad debe ser diferente a la actual"}
-                          </Text>
-                        )}
                       </View>
-                    </View>
-                  );
-                })
+                    );
+                  })
               )}
             </ScrollView>
 
             {/* Botón OK para guardar todos los cambios */}
-            <View style={{ marginTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.m }}>
+            <View
+              style={{ marginTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.m }}
+            >
               <TouchableOpacity
                 style={styles.guardarTodoBtn}
                 onPress={guardarTodosLosCambios}

@@ -66,6 +66,9 @@ export class UsuariosSyncTask extends SyncTask {
                 ? false
                 : null,
             rfc: usuario.rfc ?? null,
+            domicilio: usuario.domicilio ?? null,
+            regimenFiscal: usuario.regimenFiscal ?? null,
+            nombreCia: usuario.nombreCia ?? null,
             telefono: usuario.telefono ?? null,
             ticketFinal: usuario.ticketFinal ?? null,
             syncedAt: new Date(),
