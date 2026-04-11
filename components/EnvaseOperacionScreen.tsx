@@ -387,14 +387,14 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       const formaPagoSel = formasPago.find((fp: any) => fp.tipo === metodoPago);
       const descripcionMedioPago = formaPagoSel?.descripcion ?? "Efectivo";
 
-      // Determine claveProd for the sale line (dinámico para intercambio, fijo para préstamo)
+      // Determine claveProd for the sale line (dinámico para intercambio y préstamo)
       let productoVenta: any;
       if (type === "intercambio") {
         productoVenta = productosBase.find((p: any) => p.intercambio);
       } else {
-        productoVenta = productosBase.find((p: any) => parseInt(p.claveProd || "0", 10) === 1001);
+        productoVenta = productosBase.find((p: any) => p.prestamo);
       }
-      const idProductoVenta = productoVenta?.id ?? (type === "intercambio" ? 0 : 1001);
+      const idProductoVenta = productoVenta?.id ?? (type === "intercambio" ? 0 : 0);
       const descripcionVenta =
         productoVenta?.descripcion || (type === "intercambio" ? "INTERCAMBIO ENVASE" : "PRESTAMO ENVASE");
 

@@ -351,13 +351,13 @@ class FullSyncService {
           );
 
           const formatDate = (date: Date): string => {
-            const year = date.getUTCFullYear();
-            const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-            const day = String(date.getUTCDate()).padStart(2, "0");
-            const hours = String(date.getUTCHours()).padStart(2, "0");
-            const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-            const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            const hours = String(date.getHours()).padStart(2, "0");
+            const minutes = String(date.getMinutes()).padStart(2, "0");
+            const seconds = String(date.getSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
           };
 
           const payload = Array.from(cancelacionesPendientes).map((cancelacion: any) => ({
@@ -421,13 +421,13 @@ class FullSyncService {
           );
 
           const formatDate = (date: Date): string => {
-            const year = date.getUTCFullYear();
-            const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-            const day = String(date.getUTCDate()).padStart(2, "0");
-            const hours = String(date.getUTCHours()).padStart(2, "0");
-            const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-            const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            const hours = String(date.getHours()).padStart(2, "0");
+            const minutes = String(date.getMinutes()).padStart(2, "0");
+            const seconds = String(date.getSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
           };
 
           const payload = Array.from(modificacionesPendientes).map((mod: any) => ({
@@ -2889,10 +2889,18 @@ class FullSyncService {
     envCambiado: number;
     envCambiadoEco: number;
     envPrestado: number;
+    envPrestadoEco: number;
     cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
   } {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      return { envVendido: 0, envCambiado: 0, envCambiadoEco: 0, envPrestado: 0, cambiadosPorProducto: [] };
+      return {
+        envVendido: 0,
+        envCambiado: 0,
+        envCambiadoEco: 0,
+        envPrestado: 0,
+        envPrestadoEco: 0,
+        cambiadosPorProducto: [],
+      };
     }
 
     console.log("[getEnvasesHistorialForDate] Buscando entre:", startOfDay, "y", endOfDay);
@@ -2939,6 +2947,7 @@ class FullSyncService {
     let envCambiado = 0;
     let envCambiadoEco = 0;
     let envPrestado = 0;
+    let envPrestadoEco = 0;
     const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
 
     for (const r of registros) {
@@ -2959,6 +2968,9 @@ class FullSyncService {
       } else if (tipo === 1200 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envPrestado += ", salida, " (tipo=1200, clave=18)");
         envPrestado += salida;
+      } else if (tipo === 1200 && clave === 16) {
+        console.log("[getEnvasesHistorialForDate] ✅ envPrestadoEco += ", salida, " (tipo=1200, clave=16)");
+        envPrestadoEco += salida;
       }
 
       if (tipo === 1000 && entrada > 0) {
@@ -2975,6 +2987,7 @@ class FullSyncService {
       envCambiado,
       envCambiadoEco,
       envPrestado,
+      envPrestadoEco,
       cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length,
     });
 
@@ -2984,7 +2997,7 @@ class FullSyncService {
       cantidadEntrada: val.cantidadEntrada,
     }));
 
-    return { envVendido, envCambiado, envCambiadoEco, envPrestado, cambiadosPorProducto };
+    return { envVendido, envCambiado, envCambiadoEco, envPrestado, envPrestadoEco, cambiadosPorProducto };
   }
 
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {
@@ -3317,13 +3330,13 @@ class FullSyncService {
 
       const formatDate = (date: Date | null): string => {
         if (!date) return "";
-        const year = date.getUTCFullYear();
-        const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-        const day = String(date.getUTCDate()).padStart(2, "0");
-        const hours = String(date.getUTCHours()).padStart(2, "0");
-        const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-        const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000Z`;
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+        const seconds = String(date.getSeconds()).padStart(2, "0");
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
       };
 
       const payload = Array.from(cierresPendientes).map((c: any) => ({
@@ -3635,6 +3648,16 @@ class FullSyncService {
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
       formasPago: this.realm.objects("FormaPago").length,
     };
+  }
+
+  getFormasPagoPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("FormaPago")
+        .sorted("tipo")
+        .slice(offset, offset + limit),
+    );
   }
 
   getFormasPago(): any[] {

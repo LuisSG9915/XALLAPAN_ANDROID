@@ -28,7 +28,7 @@ type ReporteItem = {
   fecha: string;
   nombre: string;
   importe: number;
-  tipoPago: "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "";
+  tipoPago: string;
   facturacion?: boolean;
   timbrado?: "0" | "1";
   folioFactura?: boolean;
@@ -47,7 +47,7 @@ type GroupedSale = {
   fecha: string;
   nombre: string;
   totalImporte: number;
-  tipoPago: "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "";
+  tipoPago: string;
   sucursal?: number;
   cve_cliente?: number;
   caja?: number;
@@ -86,6 +86,7 @@ export default function ReporteVentasScreen() {
   const [groupedItems, setGroupedItems] = useState<GroupedSale[]>([]);
   const [debugInfo, setDebugInfo] = useState<string>("");
   const [isLocalView, setIsLocalView] = useState(false);
+  const [formasPagoMap, setFormasPagoMap] = useState<Record<number, string>>({});
 
   const [ticketVisible, setTicketVisible] = useState(false);
   const [ticketContent, setTicketContent] = useState<TicketLine[]>([]);
@@ -107,22 +108,17 @@ export default function ReporteVentasScreen() {
   };
 
   const total = useMemo(() => items.reduce((s, i) => s + i.importe, 0), [items]);
-  const totalEfectivo = useMemo(
-    () => items.filter((i) => i.tipoPago === "Efectivo").reduce((s, i) => s + i.importe, 0),
-    [items],
-  );
-  const totalCredito = useMemo(
-    () => items.filter((i) => i.tipoPago === "Credito").reduce((s, i) => s + i.importe, 0),
-    [items],
-  );
-  const totalTransferencia = useMemo(
-    () => items.filter((i) => i.tipoPago === "Transferencia").reduce((s, i) => s + i.importe, 0),
-    [items],
-  );
-  const totalCupones = useMemo(
-    () => items.filter((i) => i.tipoPago === "Cupon").reduce((s, i) => s + i.importe, 0),
-    [items],
-  );
+  const totalesPorTipoPago = useMemo(() => {
+    const map: Record<string, number> = {};
+    items.forEach((i) => {
+      const k = i.tipoPago || "Sin tipo";
+      map[k] = (map[k] || 0) + i.importe;
+    });
+    const keys = Object.keys(map);
+    const result: Array<[string, number]> = keys.map((k) => [k, map[k]]);
+    result.sort((a, b) => b[1] - a[1]);
+    return result;
+  }, [items]);
 
   useEffect(() => {
     loadVentas();
@@ -133,6 +129,15 @@ export default function ReporteVentasScreen() {
       await FullSyncService.initialize();
       const ventas = FullSyncService.getVentas(500);
       setAllVentas(ventas);
+
+      // Cargar formas de pago de la tabla local
+      const formasPago = FullSyncService.getFormasPago();
+      const fpMap: Record<number, string> = {};
+      formasPago.forEach((fp: any) => {
+        fpMap[fp.tipo] = fp.descripcion || `Tipo ${fp.tipo}`;
+      });
+      setFormasPagoMap(fpMap);
+      console.log("[ReporteVentas] Formas de pago cargadas:", fpMap);
     } catch (error) {
       console.error("Error al cargar ventas:", error);
       Alert.alert("Error", "No se pudieron cargar las ventas de la base local");
@@ -157,11 +162,13 @@ export default function ReporteVentasScreen() {
     }
   };
 
-  const mapTipoPago = (tipo: number | undefined): "Efectivo" | "Credito" | "Transferencia" | "Cupon" | "" => {
-    if (tipo === 1) return "Efectivo";
-    if (tipo === 2) return "Transferencia";
-    if (tipo === 3) return "Credito";
-    if (tipo === 4) return "Cupon";
+  const getDescripcionPago = (venta: any): string => {
+    // Usar descripcionMedioPago que ya viene en cada venta
+    if (venta.descripcionMedioPago) return venta.descripcionMedioPago;
+    // Fallback: lookup en FormaPago local
+    if (venta.tipoPago !== undefined && venta.tipoPago !== null) {
+      return formasPagoMap[venta.tipoPago] || `Tipo ${venta.tipoPago}`;
+    }
     return "";
   };
 
@@ -170,6 +177,15 @@ export default function ReporteVentasScreen() {
     setLoading(true);
     setIsLocalView(soloLocales);
     try {
+      // Cargar formas de pago directamente para evitar problemas de timing con React state
+      const formasPago = FullSyncService.getFormasPago();
+      const fpMapLocal: Record<number, string> = {};
+      formasPago.forEach((fp: any) => {
+        fpMapLocal[fp.tipo] = fp.descripcion || `Tipo ${fp.tipo}`;
+      });
+      setFormasPagoMap(fpMapLocal);
+      console.log("[ReporteVentas] Formas de pago en filtrarVentas:", fpMapLocal);
+
       if (!allVentas || allVentas.length === 0) {
         Alert.alert("Sin datos", "No hay ventas cargadas. Intenta sincronizar primero.");
         setLoading(false);
@@ -335,7 +351,7 @@ export default function ReporteVentasScreen() {
         fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
         nombre: venta.nombreCliente || "Sin nombre",
         importe: venta.importe || 0,
-        tipoPago: mapTipoPago(venta.tipoPago),
+        tipoPago: getDescripcionPago(venta),
         facturacion: !!venta.facturacionMovil,
         timbrado: venta.folioFactura ? "1" : "0",
         folioFactura: !!venta.folioFactura,
@@ -400,7 +416,7 @@ export default function ReporteVentasScreen() {
             fecha: venta.fecha ? new Date(venta.fecha).toISOString() : new Date().toISOString(),
             nombre: venta.nombreCliente || "Sin nombre",
             totalImporte: 0,
-            tipoPago: mapTipoPago(venta.tipoPago),
+            tipoPago: getDescripcionPago(venta),
             sucursal: venta.sucursal,
             cve_cliente: venta.cveCliente,
             caja: venta.caja,
@@ -491,6 +507,13 @@ export default function ReporteVentasScreen() {
 
       const total = groupedRow.totalImporte;
 
+      // Determinar si la forma de pago tiene pago0 activo
+      const formasPagoAll = FullSyncService.getFormasPago();
+      const ventaBase = allVentas.find((v: any) => (v.idMovil || v.id) === groupedRow.idMovil);
+      const tipoPagoCode = ventaBase?.tipoPago;
+      const formaPagoSel = formasPagoAll.find((fp: any) => fp.tipo === tipoPagoCode);
+      const esPago0 = Boolean(formaPagoSel?.pago0);
+
       const currentUser = AuthService.currentUser;
 
       // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
@@ -536,6 +559,7 @@ export default function ReporteVentasScreen() {
         regimenFiscal: usuarioTicketData.regimenFiscal,
         phone: usuarioTicketData.telefono,
         ticketFinal: usuarioTicketData.ticketFinal,
+        pago0: esPago0,
       };
 
       return saleTicketData;
@@ -562,6 +586,12 @@ export default function ReporteVentasScreen() {
 
     const clientName = base?.nombreCliente || reporteRow.nombre;
     const paymentMethod = reporteRow.tipoPago;
+
+    // Determinar si la forma de pago tiene pago0 activo
+    const formasPagoAll2 = FullSyncService.getFormasPago();
+    const tipoPagoCode2 = base?.tipoPago;
+    const formaPagoSel2 = formasPagoAll2.find((fp: any) => fp.tipo === tipoPagoCode2);
+    const esPago02 = Boolean(formaPagoSel2?.pago0);
 
     const items =
       relacionadas.length > 0
@@ -635,6 +665,7 @@ export default function ReporteVentasScreen() {
       regimenFiscal: usuarioTicketData.regimenFiscal,
       phone: usuarioTicketData.telefono,
       ticketFinal: usuarioTicketData.ticketFinal,
+      pago0: esPago02,
     };
 
     return saleTicketData;
@@ -1157,22 +1188,14 @@ export default function ReporteVentasScreen() {
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.moneySmall}>${total.toFixed(2)}</Text>
             </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.totalLabel}>Total Efectivo</Text>
-              <Text style={styles.moneySmall}>${totalEfectivo.toFixed(2)}</Text>
-            </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.totalLabel}>Total Créditos</Text>
-              <Text style={styles.moneySmall}>${totalCredito.toFixed(2)}</Text>
-            </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.totalLabel}>Total Transferencias</Text>
-              <Text style={styles.moneySmall}>${totalTransferencia.toFixed(2)}</Text>
-            </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.totalLabel}>Total Cupones</Text>
-              <Text style={styles.moneySmall}>${totalCupones.toFixed(2)}</Text>
-            </View>
+            {totalesPorTipoPago.map(([tipoPago, totalTipo]) => (
+              <React.Fragment key={tipoPago}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.totalLabel}>Total {tipoPago}</Text>
+                  <Text style={styles.moneySmall}>${totalTipo.toFixed(2)}</Text>
+                </View>
+              </React.Fragment>
+            ))}
           </View>
         )}
       </View>

@@ -45,6 +45,7 @@ type Producto = {
   existencia: number;
   esKit?: boolean;
   intercambio?: boolean;
+  prestamo?: boolean;
   usandoPrecioDefault?: boolean;
   esPromocion?: boolean;
 };
@@ -123,7 +124,7 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
   const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
 
-  // Prestamo de envases (clave 1001)
+  // Prestamo de envases
   const [prestamoModalOpen, setPrestamoModalOpen] = useState(false);
   const [prestamoData, setPrestamoData] = useState<{
     idProdPrestado: number;
@@ -310,9 +311,10 @@ export default function SalesScreen({ route }: { route?: any }) {
         claveProd: number | undefined,
         esKit: boolean,
         intercambio: boolean = false,
+        prestamo: boolean = false,
       ) => {
         // Productos especiales (INTERCAMBIO y PRESTAMO) siempre tienen existencia infinita
-        if (intercambio || claveProd === 1001) {
+        if (intercambio || prestamo) {
           return 999;
         }
 
@@ -368,13 +370,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         });
       }
 
-      // Forzar inclusión de productos especiales (PRESTAMO 1001)
-      if (productosPorClave.has(1001)) {
-        todasLasClaves.add(1001);
-      }
-      // Forzar inclusión de productos con intercambio=true
+      // Forzar inclusión de productos especiales (PRESTAMO e INTERCAMBIO)
       productosPorClave.forEach((prod: any, clave: number) => {
-        if (prod.intercambio) todasLasClaves.add(clave);
+        if (prod.prestamo || prod.intercambio) todasLasClaves.add(clave);
       });
 
       // Mapear todos los productos disponibles usando un Map por ID para evitar duplicados
@@ -384,6 +382,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
         const intercambio = Boolean(productoBase?.intercambio);
+        const prestamo = Boolean(productoBase?.prestamo);
         const productoId = productoBase?.id ?? claveNum;
         let descripcion = productoBase?.descripcion || "Sin descripción";
 
@@ -412,7 +411,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
         if (precio === undefined) precio = 0;
 
-        const existencia = calcularExistencia(productoId, claveNum, esKit, intercambio);
+        const existencia = calcularExistencia(productoId, claveNum, esKit, intercambio, prestamo);
 
         const producto: Producto = {
           id: productoId,
@@ -422,6 +421,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           existencia,
           esKit,
           intercambio,
+          prestamo,
           usandoPrecioDefault,
           esPromocion,
         };
@@ -723,7 +723,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosPromoData,
       ).filter((p) => {
         const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (p.intercambio || claveProdNum === 1001) return true;
+        if (p.intercambio || p.prestamo) return true;
         return p.existencia > 0;
       });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
@@ -1401,14 +1401,27 @@ export default function SalesScreen({ route }: { route?: any }) {
   };
 
   const addToCart = (p: Producto) => {
-    // Interceptar producto PRESTAMO (clave 1001) para mostrar modal
-    if (p.claveProd === "1001" || p.id === 56) {
+    // Interceptar producto PRESTAMO para mostrar modal
+    if (p.prestamo) {
       console.log("[Sales] Producto PRESTAMO detectado, mostrando modal de prestamo");
       setPendingPrestamoProducto(p);
       setPendingPrestamoCantidad(1);
       setProductoModalOpen(false);
       setPrestamoModalOpen(true);
       return;
+    }
+
+    // Validar existencia antes de agregar (excepto productos especiales)
+    if (!p.intercambio && !p.prestamo) {
+      const enCarrito = cart.find((ci) => ci.id === p.id);
+      const cantidadActual = enCarrito ? enCarrito.cantidad : 0;
+      if (cantidadActual + 1 > p.existencia) {
+        Alert.alert(
+          "Inventario insuficiente",
+          `No hay suficiente existencia de "${p.descripcion}" (disponible: ${p.existencia}, en carrito: ${cantidadActual})`,
+        );
+        return;
+      }
     }
 
     setCart((prev) => {
@@ -1426,6 +1439,15 @@ export default function SalesScreen({ route }: { route?: any }) {
   const updateQuantity = (id: number, cantidad: number) => {
     if (cantidad <= 0) {
       console.warn(`[Sales] ⚠️ Intento de actualizar cantidad a ${cantidad} para producto ${id}, bloqueado`);
+      return;
+    }
+    // Validar existencia (excepto productos especiales)
+    const producto = cart.find((ci) => ci.id === id);
+    if (producto && !producto.intercambio && !producto.prestamo && cantidad > producto.existencia) {
+      Alert.alert(
+        "Inventario insuficiente",
+        `No hay suficiente existencia de "${producto.descripcion}" (disponible: ${producto.existencia})`,
+      );
       return;
     }
     setCart((prev) => prev.map((ci) => (ci.id === id ? { ...ci, cantidad } : ci)));
@@ -1472,7 +1494,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       ).filter((p) => {
         // Productos especiales (intercambio y PRESTAMO) siempre visibles
         const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (p.intercambio || claveProdNum === 1001) {
+        if (p.intercambio || p.prestamo) {
           return true;
         }
         // Resto de productos solo si tienen existencia
@@ -1698,7 +1720,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     // Validar inventario suficiente (excluir productos especiales sin inventario)
     const insufficientStock = updatedCart.filter((item) => {
       const claveProdNum = parseInt(item.claveProd || "0", 10);
-      if (item.intercambio || claveProdNum === 1001) return false;
+      if (item.intercambio || item.prestamo) return false;
       return item.existencia < item.cantidad;
     });
     if (insufficientStock.length > 0) {
@@ -1745,6 +1767,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const tipoPagoCode = metodoPago ?? 1;
       const formaPagoSel = formasPago.find((fp: any) => fp.tipo === metodoPago);
       const descripcionMedioPago = formaPagoSel?.descripcion ?? "Efectivo";
+      const esPago0 = Boolean(formaPagoSel?.pago0);
       const vendedor =
         (currentUser?.claveEmpleado as string | undefined) || (currentUser?.nombre as string | undefined) || "";
       const now = FullSyncService.getMexicoNow();
@@ -1829,7 +1852,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             price: item.precio,
             total: item.precio * item.cantidad,
           })),
-          total: updatedTotal,
+          total: esPago0 ? 0 : updatedTotal,
           businessName: usuarioTicketData.nombreCia || APP_NAME,
           date: now,
           ticketNumber: String(saleIdMovil),
@@ -1951,14 +1974,25 @@ export default function SalesScreen({ route }: { route?: any }) {
           });
         }
 
-        // // PRESTAMO (clave 1001): salida del producto prestado
-        // if (prestamoData) {
-        //   const cantPrestamo = validCart.find((ci) => ci.claveProd === "1001" || ci.id === 56)?.cantidad || 1;
-        //   const obsCompleta = [
-        //     prestamoData.observacion,
-        //     prestamoData.fechaDevolucion ? `Fecha devolucion: ${prestamoData.fechaDevolucion}` : "",
-        //   ]
-        //     .filter(Boolean)
+        // // PRESTAMO: salida del producto prestado
+        // const cantPrestamo = validCart.find((ci) => ci.prestamo)?.cantidad || 1;
+        // const obsCompleta = [
+        //   prestamoData.observacion,
+        //   prestamoData.fechaDevolucion ? `Fecha devolucion: ${prestamoData.fechaDevolucion}` : "",
+        // ]
+        //   .filter(Boolean)
+        //   .join(" | ");
+        // envaseItems.push({
+        //   sucursal,
+        //   claveProd: prestamoData.idProdPrestado,
+        //   folioMovto: 1,
+        //   cantidadEntrada: 0,
+        //   cantidadSalida: cantPrestamo,
+        //   costo: 0,
+        //   tipoMovto: 1200,
+        //   idMovil: saleIdMovil,
+        //   observacion: obsCompleta,
+        // });
         //     .join(" | ");
         //   envaseItems.push({
         //     sucursal,
@@ -1986,7 +2020,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const inventarioUpdateItems = validCart
         .filter((item) => {
           const claveProdNum = parseInt(item.claveProd || "0", 10);
-          return !item.intercambio && claveProdNum !== 1001;
+          return !item.intercambio && !item.prestamo;
         })
         .map((item) => ({
           sucursal,
@@ -2331,7 +2365,9 @@ export default function SalesScreen({ route }: { route?: any }) {
 
           <View style={styles.totalRow}>
             <Text style={styles.totalText}>Total</Text>
-            <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>
+              {formasPago.find((fp: any) => fp.tipo === metodoPago)?.pago0 ? "$0.00" : `$${total.toFixed(2)}`}
+            </Text>
           </View>
 
           <TouchableOpacity
@@ -2807,9 +2843,12 @@ export default function SalesScreen({ route }: { route?: any }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
                       <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
-                      <Text style={styles.listSubtitle}>
-                        Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
-                      </Text>
+                      {!item.prestamo && (
+                        <Text style={styles.listSubtitle}>
+                          Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
+                        </Text>
+                      )}
+                      {item.prestamo && <Text style={styles.precioDefaultBadge}>PRÉSTAMO</Text>}
                       {item.esPromocion && <Text style={styles.precioPromoBadge}>🎉 PRECIO ESPECIAL</Text>}
                       {item.usandoPrecioDefault && !item.esPromocion && (
                         <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>
@@ -2979,7 +3018,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           </View>
         </Modal>
 
-        {/* Modal Préstamo de Envases (clave 1001) */}
+        {/* Modal Préstamo de Envases */}
         <PrestamoEnvaseModal
           visible={prestamoModalOpen}
           clienteNombre={selectedClient?.nombre || "Sin cliente"}

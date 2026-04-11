@@ -40,7 +40,8 @@ type EntityType =
   | "inventarioEnvase"
   | "inventarioEnvasesHistorial"
   | "reubicaciones"
-  | "visitasRealizadas";
+  | "visitasRealizadas"
+  | "formasPago";
 
 interface EntityTab {
   key: EntityType;
@@ -57,6 +58,7 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "preciosPromo", title: "Precios Promo", icon: "local-offer" },
   { key: "inventario", title: "Inventario", icon: "bar-chart" },
   { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
+  { key: "formasPago", title: "Formas de Pago", icon: "payment" },
   { key: "usuarios", title: "Usuarios", icon: "person" },
   { key: "syncStatus", title: "Sync Status", icon: "sync" },
   { key: "syncLog", title: "Sync Log", icon: "list-alt" },
@@ -136,6 +138,9 @@ export default function DataViewScreen() {
           break;
         case "cartera":
           setData(FullSyncService.getCarteraPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "formasPago":
+          setData(FullSyncService.getFormasPagoPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "clientes":
           setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));

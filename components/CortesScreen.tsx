@@ -33,6 +33,7 @@ type EnvasesData = {
   envCambiado: number;
   envCambiadoEco: number;
   envPrestado: number;
+  envPrestadoEco: number;
   cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
 };
 
@@ -77,6 +78,7 @@ export default function CortesScreen() {
     envCambiado: 0,
     envCambiadoEco: 0,
     envPrestado: 0,
+    envPrestadoEco: 0,
     cambiadosPorProducto: [],
   });
 
@@ -149,22 +151,20 @@ export default function CortesScreen() {
       console.log(user);
 
       const allVentas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
-      
+
       // Filtrar para evitar duplicados: excluir versiones pre-sincronización cuando existe versión sincronizada
       const ventas = allVentas.filter((v: any) => {
         // Incluir ventas locales sin sincronizar (noVenta == 0)
         if (v.noVenta == 0) return true;
-        
+
         // Para ventas del servidor (noVenta > 0)
         if (v.noVenta > 0) {
           // Si NO tiene idMovil, verificar si existe versión sincronizada
           if (!v.idMovil) {
             const noVenta = v.noVenta;
             const sucursal = v.sucursal;
-            const tieneVersionSincronizada = allVentas.some((venta: any) => 
-              venta.noVenta === noVenta && 
-              venta.sucursal === sucursal && 
-              venta.idMovil
+            const tieneVersionSincronizada = allVentas.some(
+              (venta: any) => venta.noVenta === noVenta && venta.sucursal === sucursal && venta.idMovil,
             );
             // Si existe versión sincronizada, excluir esta (pre-sync)
             if (tieneVersionSincronizada) {
@@ -179,11 +179,16 @@ export default function CortesScreen() {
           // Incluir: tiene idMovil O no existe versión sincronizada
           return true;
         }
-        
+
         return false;
       });
-      
-      console.log("[CortesScreen] Total ventas:", allVentas.length, "Ventas filtradas (sin duplicados):", ventas.length);
+
+      console.log(
+        "[CortesScreen] Total ventas:",
+        allVentas.length,
+        "Ventas filtradas (sin duplicados):",
+        ventas.length,
+      );
 
       // Cargar kits y productos para expandir ventas de kits
       const allKits = FullSyncService.getKits(10000);
@@ -211,16 +216,19 @@ export default function CortesScreen() {
       const ventasClave26 = ventas.filter((v: any) => v.claveProd === 26);
       console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 26:", ventasClave26.length);
       if (ventasClave26.length > 0) {
-        console.log("[CortesScreen] 📋 Detalles de ventas clave 26:", ventasClave26.map((v: any) => ({
-          id: v.id,
-          nombreProducto: v.nombreProducto,
-          cantProducto: v.cantProducto,
-          precio: v.precio,
-          importe: v.importe,
-          fecha: v.fecha,
-          noVenta: v.noVenta,
-          idMovil: v.idMovil,
-        })));
+        console.log(
+          "[CortesScreen] 📋 Detalles de ventas clave 26:",
+          ventasClave26.map((v: any) => ({
+            id: v.id,
+            nombreProducto: v.nombreProducto,
+            cantProducto: v.cantProducto,
+            precio: v.precio,
+            importe: v.importe,
+            fecha: v.fecha,
+            noVenta: v.noVenta,
+            idMovil: v.idMovil,
+          })),
+        );
       }
 
       for (const v of ventas) {
@@ -262,13 +270,13 @@ export default function CortesScreen() {
             const idInsumo: number = insumo.idInsumo || 0;
 
             // Si el kit es idProducto=56 (Préstamo de Envases), NO agregar el insumo 18
-            if (claveProd === 56 && idInsumo === 18) {
+            if ((claveProd === 56 && idInsumo === 18) || (claveProd === 66 && idInsumo === 16)) {
               console.log(`[CortesScreen] ⚠️ Excluyendo insumo ${idInsumo} del kit ${claveProd} (Préstamo de Envases)`);
               continue;
             }
 
             const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
-            const precioInsumo: number = Math.round((insumo.precio || 0)  * 100) / 100;
+            const precioInsumo: number = Math.round((insumo.precio || 0) * 100) / 100;
             const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
 
             ventasPorProducto[nombreInsumo] = (ventasPorProducto[nombreInsumo] || 0) + cantInsumo;
@@ -509,6 +517,10 @@ export default function CortesScreen() {
           <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Prestado</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envPrestado || "—"}</Text>
+          </View>
+          <View style={styles.tr}>
+            <Text style={[styles.td, styles.tdFlex]}>Env Prestado Eco</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envPrestadoEco || "—"}</Text>
           </View>
         </View>
       </View>

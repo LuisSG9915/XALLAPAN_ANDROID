@@ -31,6 +31,7 @@ export interface SaleTicketData {
   ticketFinal?: string;
   sellerName?: string;
   branch?: number | string;
+  pago0?: boolean;
 }
 
 export interface PrecorteTicketData {
@@ -58,6 +59,7 @@ export interface CorteTicketData {
     envVendido: number;
     envCambiado: number;
     envPrestado: number;
+    envPrestadoEco: number;
     cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
   };
 }
@@ -197,15 +199,12 @@ class TicketPrinter {
 
     lines.push(this.separator("-"));
 
-    // Forma de pago y total
-    const metodo = (data.paymentMethod || "").toString().toLowerCase();
-    let metodoLabel = "EFECTIVO";
-    if (metodo.includes("cred")) metodoLabel = "CREDITO";
-    else if (metodo.includes("trans")) metodoLabel = "TRANSFERENCIA";
-    else if (metodo.includes("cup")) metodoLabel = "CUPON";
+    // Forma de pago y total - usa descripción directamente de la tabla FormaPago
+    const metodoLabel = (data.paymentMethod || "N/A").toString().toUpperCase();
+    const totalTicket = data.pago0 ? 0 : data.total;
 
     lines.push(this.center("FORMA DE PAGO", width));
-    lines.push(this.leftRight(metodoLabel, `$${data.total.toFixed(2)}`, width));
+    lines.push(this.leftRight(metodoLabel, `$${totalTicket.toFixed(2)}`, width));
 
     lines.push(this.separator());
     const mensajeFinal = data.ticketFinal || "GRACIAS POR SU COMPRA";
@@ -419,6 +418,7 @@ class TicketPrinter {
     lines.push(this.leftRight("Env Vendido", env ? String(env.envVendido) : "---", width));
     lines.push(this.leftRight("Env Cambiado", env ? String(env.envCambiado) : "---", width));
     lines.push(this.leftRight("Env Prestado", env ? String(env.envPrestado) : "---", width));
+    lines.push(this.leftRight("Env Prestado Eco", env ? String(env.envPrestadoEco) : "---", width));
     if (env && env.cambiadosPorProducto.length > 0) {
       lines.push("");
       lines.push("[B]ENV RECIBIDOS");

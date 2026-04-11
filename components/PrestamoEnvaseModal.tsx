@@ -52,16 +52,23 @@ export default function PrestamoEnvaseModal({
       setShowDatePicker(false);
       setSinFecha(false);
 
-      // Buscar producto por claveProd 16001
-      const prod = FullSyncService.getProductoByClaveProd("16001");
+      // Buscar producto con prestamo = true
+      const productos = FullSyncService.getProductos();
+      let prod: any = null;
+      for (let i = 0; i < productos.length; i++) {
+        if (productos[i].prestamo) {
+          prod = productos[i];
+          break;
+        }
+      }
       if (prod) {
         setIdProdPrestado(prod.id || 0);
         const clave = parseInt(prod.claveProd || "0", 10);
-        setClaveProdPrestado(clave || CLAVE_DEFAULT_PRESTAMO);
+        setClaveProdPrestado(clave || 0);
         setDescProdPrestado(prod.descripcion || "ENVASE XALLAPAN VENDIDO");
       } else {
         setIdProdPrestado(0);
-        setClaveProdPrestado(CLAVE_DEFAULT_PRESTAMO);
+        setClaveProdPrestado(0);
         setDescProdPrestado("ENVASE XALLAPAN VENDIDO");
       }
     }
