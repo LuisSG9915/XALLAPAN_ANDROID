@@ -37,13 +37,6 @@ type EnvasesData = {
   cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
 };
 
-const TIPO_PAGO_MAP: Record<number, string> = {
-  1: "CONTADO",
-  2: "TRANSFERENCIA",
-  3: "CRÉDITO",
-  4: "CUPONES",
-};
-
 export default function CortesScreen() {
   const today = useMemo(() => {
     const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -314,10 +307,18 @@ export default function CortesScreen() {
           })),
       );
 
+      const formasPago = FullSyncService.getFormasPago();
+      const formaPagoMap: Record<number, string> = {};
+      for (const fp of formasPago) {
+        if (fp.tipo != null) {
+          formaPagoMap[fp.tipo] = fp.descripcion || `Tipo ${fp.tipo}`;
+        }
+      }
+
       setTiposPago(
         Object.entries(pagosPorTipo)
           .map(([tipo, total]) => ({
-            descripcion: TIPO_PAGO_MAP[parseInt(tipo, 10)] || `Tipo ${tipo}`,
+            descripcion: formaPagoMap[parseInt(tipo, 10)] || `Tipo ${tipo}`,
             total,
           }))
           .filter((t) => t.total > 0),
