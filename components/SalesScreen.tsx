@@ -313,11 +313,6 @@ export default function SalesScreen({ route }: { route?: any }) {
         intercambio: boolean = false,
         prestamo: boolean = false,
       ) => {
-        // Productos especiales (INTERCAMBIO y PRESTAMO) siempre tienen existencia infinita
-        if (intercambio || prestamo) {
-          return 999;
-        }
-
         if (esKit && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
@@ -722,8 +717,6 @@ export default function SalesScreen({ route }: { route?: any }) {
         undefined,
         preciosPromoData,
       ).filter((p) => {
-        const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (p.intercambio || p.prestamo) return true;
         return p.existencia > 0;
       });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
@@ -1411,17 +1404,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Validar existencia antes de agregar (excepto productos especiales)
-    if (!p.intercambio && !p.prestamo) {
-      const enCarrito = cart.find((ci) => ci.id === p.id);
-      const cantidadActual = enCarrito ? enCarrito.cantidad : 0;
-      if (cantidadActual + 1 > p.existencia) {
-        Alert.alert(
-          "Inventario insuficiente",
-          `No hay suficiente existencia de "${p.descripcion}" (disponible: ${p.existencia}, en carrito: ${cantidadActual})`,
-        );
-        return;
-      }
+    // Validar existencia antes de agregar
+    const enCarrito = cart.find((ci) => ci.id === p.id);
+    const cantidadActual = enCarrito ? enCarrito.cantidad : 0;
+    if (cantidadActual + 1 > p.existencia) {
+      Alert.alert(
+        "Inventario insuficiente",
+        `No hay suficiente existencia de "${p.descripcion}" (disponible: ${p.existencia}, en carrito: ${cantidadActual})`,
+      );
+      return;
     }
 
     setCart((prev) => {
@@ -1441,9 +1432,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.warn(`[Sales] ⚠️ Intento de actualizar cantidad a ${cantidad} para producto ${id}, bloqueado`);
       return;
     }
-    // Validar existencia (excepto productos especiales)
+    // Validar existencia
     const producto = cart.find((ci) => ci.id === id);
-    if (producto && !producto.intercambio && !producto.prestamo && cantidad > producto.existencia) {
+    if (producto && cantidad > producto.existencia) {
       Alert.alert(
         "Inventario insuficiente",
         `No hay suficiente existencia de "${producto.descripcion}" (disponible: ${producto.existencia})`,
@@ -1492,12 +1483,6 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosDefault,
         preciosPromo,
       ).filter((p) => {
-        // Productos especiales (intercambio y PRESTAMO) siempre visibles
-        const claveProdNum = parseInt(p.claveProd || "0", 10);
-        if (p.intercambio || p.prestamo) {
-          return true;
-        }
-        // Resto de productos solo si tienen existencia
         return p.existencia > 0;
       });
       console.log(productosData);
@@ -1717,10 +1702,8 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Validar inventario suficiente (excluir productos especiales sin inventario)
+    // Validar inventario suficiente
     const insufficientStock = updatedCart.filter((item) => {
-      const claveProdNum = parseInt(item.claveProd || "0", 10);
-      if (item.intercambio || item.prestamo) return false;
       return item.existencia < item.cantidad;
     });
     if (insufficientStock.length > 0) {
@@ -2843,11 +2826,9 @@ export default function SalesScreen({ route }: { route?: any }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>{item.descripcion}</Text>
                       <Text style={styles.listSubtitle}>Clave: {item.claveProd}</Text>
-                      {!item.prestamo && (
-                        <Text style={styles.listSubtitle}>
-                          Existencia: {item.existencia} + Kit: {item.esKit ? "Sí" : "No"}
-                        </Text>
-                      )}
+                      <Text style={styles.listSubtitle}>
+                        Existencia: {item.existencia} {item.esKit ? " | Kit: Sí" : ""}
+                      </Text>
                       {item.prestamo && <Text style={styles.precioDefaultBadge}>PRÉSTAMO</Text>}
                       {item.esPromocion && <Text style={styles.precioPromoBadge}>🎉 PRECIO ESPECIAL</Text>}
                       {item.usandoPrecioDefault && !item.esPromocion && (

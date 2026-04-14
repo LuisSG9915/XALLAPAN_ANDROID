@@ -30,6 +30,7 @@ type InvABordoItem = {
 
 type EnvasesData = {
   envVendido: number;
+  envVendidoEco: number;
   envCambiado: number;
   envCambiadoEco: number;
   envPrestado: number;
@@ -68,6 +69,7 @@ export default function CortesScreen() {
   const [tiposPago, setTiposPago] = useState<TipoPagoTotal[]>([]);
   const [envases, setEnvases] = useState<EnvasesData>({
     envVendido: 0,
+    envVendidoEco: 0,
     envCambiado: 0,
     envCambiadoEco: 0,
     envPrestado: 0,
@@ -490,8 +492,12 @@ export default function CortesScreen() {
             <Text style={[styles.th, styles.thRight]}>CANT</Text>
           </View>
           <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>Env Vendido</Text>
+            <Text style={[styles.td, styles.tdFlex]}>Env Vendido Xal</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envVendido || "—"}</Text>
+          </View>
+          <View style={styles.tr}>
+            <Text style={[styles.td, styles.tdFlex]}>Env Vendido Eco</Text>
+            <Text style={[styles.td, styles.tdRight]}>{envases.envVendidoEco || "—"}</Text>
           </View>
           <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Cambiado Xal</Text>

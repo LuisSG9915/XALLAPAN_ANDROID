@@ -57,6 +57,7 @@ export interface CorteTicketData {
   tiposPago: Array<{ descripcion: string; total: number }>;
   envases?: {
     envVendido: number;
+    envVendidoEco: number;
     envCambiado: number;
     envPrestado: number;
     envPrestadoEco: number;
@@ -415,7 +416,8 @@ class TicketPrinter {
     lines.push(this.separator("-", width));
     lines.push(this.leftRight("Concepto", "Cant", width));
     const env = data.envases;
-    lines.push(this.leftRight("Env Vendido", env ? String(env.envVendido) : "---", width));
+    lines.push(this.leftRight("Env Vendido Xal", env ? String(env.envVendido) : "---", width));
+    lines.push(this.leftRight("Env Vendido Eco", env ? String(env.envVendidoEco) : "---", width));
     lines.push(this.leftRight("Env Cambiado", env ? String(env.envCambiado) : "---", width));
     lines.push(this.leftRight("Env Prestado", env ? String(env.envPrestado) : "---", width));
     lines.push(this.leftRight("Env Prestado Eco", env ? String(env.envPrestadoEco) : "---", width));

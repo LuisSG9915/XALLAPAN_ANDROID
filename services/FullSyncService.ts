@@ -2886,6 +2886,7 @@ class FullSyncService {
     endOfDay: Date,
   ): {
     envVendido: number;
+    envVendidoEco: number;
     envCambiado: number;
     envCambiadoEco: number;
     envPrestado: number;
@@ -2895,6 +2896,7 @@ class FullSyncService {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       return {
         envVendido: 0,
+        envVendidoEco: 0,
         envCambiado: 0,
         envCambiadoEco: 0,
         envPrestado: 0,
@@ -2910,7 +2912,7 @@ class FullSyncService {
         .objects("InventarioEnvasesHistorial")
         .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay),
     ) as any[];
-
+    console.log("registros", registros);
     console.log("[getEnvasesHistorialForDate] Registros encontrados:", registros.length);
     if (registros.length > 0) {
       console.log(
@@ -2941,9 +2943,26 @@ class FullSyncService {
       } catch (err) {
         console.log("[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:", err);
       }
+      try {
+        const inventarioEnvases = this.realm?.objectForPrimaryKey("Inventario", 16);
+        if (inventarioEnvases) {
+          console.log("[getEnvasesHistorialForDate] 📦 Inventario claveProd=16:", {
+            id: (inventarioEnvases as any).id,
+            descripcion: (inventarioEnvases as any).descripcion,
+            saldo: (inventarioEnvases as any).saldo,
+            entrada: (inventarioEnvases as any).entrada,
+            salida: (inventarioEnvases as any).salida,
+          });
+        } else {
+          console.log("[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=16");
+        }
+      } catch (err) {
+        console.log("[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:", err);
+      }
     }
 
     let envVendido = 0;
+    let envVendidoEco = 0;
     let envCambiado = 0;
     let envCambiadoEco = 0;
     let envPrestado = 0;
@@ -2959,6 +2978,9 @@ class FullSyncService {
       if (tipo === 2 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envVendido += ", salida, " (tipo=2, clave=18)");
         envVendido += salida;
+      } else if (tipo === 2 && clave === 16) {
+        console.log("[getEnvasesHistorialForDate] ✅ envVendidoEco += ", salida, " (tipo=2, clave=16)");
+        envVendidoEco += salida;
       } else if (tipo === 1100 && clave === 18) {
         console.log("[getEnvasesHistorialForDate] ✅ envCambiado += ", salida, " (tipo=1100, clave=18)");
         envCambiado += salida;
@@ -2984,6 +3006,7 @@ class FullSyncService {
 
     console.log("[getEnvasesHistorialForDate] TOTALES:", {
       envVendido,
+      envVendidoEco,
       envCambiado,
       envCambiadoEco,
       envPrestado,
@@ -2997,7 +3020,7 @@ class FullSyncService {
       cantidadEntrada: val.cantidadEntrada,
     }));
 
-    return { envVendido, envCambiado, envCambiadoEco, envPrestado, envPrestadoEco, cambiadosPorProducto };
+    return { envVendido, envVendidoEco, envCambiado, envCambiadoEco, envPrestado, envPrestadoEco, cambiadosPorProducto };
   }
 
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {
