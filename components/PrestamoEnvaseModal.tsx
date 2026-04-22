@@ -18,6 +18,7 @@ type PrestamoEnvaseModalProps = {
   visible: boolean;
   clienteNombre: string;
   cantidad: number;
+  productoSeleccionado?: { id: number; claveProd: string; descripcion: string } | null;
   onAccept: (data: {
     idProdPrestado: number;
     claveProdPrestado: number;
@@ -34,6 +35,7 @@ export default function PrestamoEnvaseModal({
   visible,
   clienteNombre,
   cantidad,
+  productoSeleccionado,
   onAccept,
   onCancel,
 }: PrestamoEnvaseModalProps) {
@@ -52,20 +54,55 @@ export default function PrestamoEnvaseModal({
       setShowDatePicker(false);
       setSinFecha(false);
 
-      // Buscar producto con prestamo = true
+      // Usar el producto seleccionado por el usuario (pasado como prop)
       const productos = FullSyncService.getProductos();
-      let prod: any = null;
-      for (let i = 0; i < productos.length; i++) {
-        if (productos[i].prestamo) {
-          prod = productos[i];
-          break;
-        }
-      }
+      const prod: any = productoSeleccionado
+        ? productos.find((p: any) => p.id === productoSeleccionado.id) || productoSeleccionado
+        : productos.find((p: any) => p.prestamo);
       if (prod) {
         setIdProdPrestado(prod.id || 0);
         const clave = parseInt(prod.claveProd || "0", 10);
         setClaveProdPrestado(clave || 0);
-        setDescProdPrestado(prod.descripcion || "ENVASE XALLAPAN VENDIDO");
+        console.log("[Prestamo] Producto prestamo encontrado:", {
+          id: prod.id,
+          claveProd: prod.claveProd,
+          descripcion: prod.descripcion,
+        });
+
+        // Buscar insumo del kit del producto prestamo con envasePrestado = true
+        const kits = FullSyncService.getKitsByProducto(prod.id);
+        console.log(
+          "[Prestamo] Kits del producto:",
+          kits.map((k: any) => ({
+            id: k.id,
+            idProducto: k.idProducto,
+            idInsumo: k.idInsumo,
+            envaseIntercambio: k.envaseIntercambio,
+            envasePrestado: k.envasePrestado,
+          })),
+        );
+        const kitPrestado = kits.find((k: any) => k.envasePrestado);
+        console.log(
+          "[Prestamo] Kit con envasePrestado:",
+          kitPrestado ? { id: kitPrestado.id, idInsumo: kitPrestado.idInsumo } : "ninguno",
+        );
+        if (kitPrestado) {
+          // Buscar la descripción del insumo (idInsumo es el id del producto insumo)
+          const insumo = productos.find((p: any) => p.id === kitPrestado.idInsumo);
+          console.log(
+            "[Prestamo] Insumo encontrado por id:",
+            insumo
+              ? { id: insumo.id, claveProd: insumo.claveProd, descripcion: insumo.descripcion }
+              : `NO encontrado (buscado id=${kitPrestado.idInsumo})`,
+          );
+          if (insumo) {
+            setDescProdPrestado(insumo.descripcion || prod.descripcion || "ENVASE XALLAPAN VENDIDO");
+          } else {
+            setDescProdPrestado(prod.descripcion || "ENVASE XALLAPAN VENDIDO");
+          }
+        } else {
+          setDescProdPrestado(prod.descripcion || "ENVASE XALLAPAN VENDIDO");
+        }
       } else {
         setIdProdPrestado(0);
         setClaveProdPrestado(0);

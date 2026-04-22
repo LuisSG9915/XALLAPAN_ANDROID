@@ -82,6 +82,7 @@ export class KitsSyncTask extends SyncTask {
             precio: kit.precio ?? 0,
             descuento: kit.descuento ?? 0,
             envaseIntercambio: kit.envaseIntercambio ? true : false,
+            envasePrestado: kit.envasePrestado ? true : false,
             syncedAt: new Date(),
           };
 

@@ -23,7 +23,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 30,
+        schemaVersion: 31,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración para Cartera
           const newCartera = newRealm.objects("Cartera");
@@ -106,6 +106,11 @@ class FullSyncService {
           // Migración v30: Agregar intercambio a Producto y envaseIntercambio a Kit
           if (oldRealm.schemaVersion < 30) {
             console.log("[Migration v30] Agregando campo intercambio a Producto y envaseIntercambio a Kit");
+          }
+
+          // Migración v31: Agregar envasePrestado a Kit
+          if (oldRealm.schemaVersion < 31) {
+            console.log("[Migration v31] Agregando campo envasePrestado a Kit");
           }
         },
       });
@@ -3020,7 +3025,15 @@ class FullSyncService {
       cantidadEntrada: val.cantidadEntrada,
     }));
 
-    return { envVendido, envVendidoEco, envCambiado, envCambiadoEco, envPrestado, envPrestadoEco, cambiadosPorProducto };
+    return {
+      envVendido,
+      envVendidoEco,
+      envCambiado,
+      envCambiadoEco,
+      envPrestado,
+      envPrestadoEco,
+      cambiadosPorProducto,
+    };
   }
 
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {

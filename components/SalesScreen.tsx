@@ -3004,6 +3004,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           visible={prestamoModalOpen}
           clienteNombre={selectedClient?.nombre || "Sin cliente"}
           cantidad={pendingPrestamoCantidad}
+          productoSeleccionado={pendingPrestamoProducto}
           onAccept={(data) => {
             console.log("[Sales] Préstamo aceptado:", data);
             setPrestamoData({

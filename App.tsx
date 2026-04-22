@@ -318,7 +318,7 @@ function App() {
             {(props) => <AppContent {...props} servicesReady={servicesReady} />}
           </Stack.Screen>
           <Stack.Screen name="Sales" component={SalesScreen} options={{ title: " Punto de Venta" }} />
-          <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} />
+          {/* <Stack.Screen name="Billing" component={BillingScreen} options={{ title: " Cobranza" }} /> */}
           <Stack.Screen name="Precorte" component={PrecorteScreen} options={{ title: " Inventario" }} />
           <Stack.Screen name="Traspaso" component={TraspasoRecepcionScreen} options={{ title: " Cargas" }} />
           <Stack.Screen
@@ -331,7 +331,7 @@ function App() {
             component={ClienteGruposScreen}
             options={{ title: ' Grupos de Clientes' }}
           /> */}
-          <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} />
+          {/* <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} /> */}
           <Stack.Screen
             name="PrinterSettings"
             component={PrinterSettingsScreen}
@@ -347,11 +347,7 @@ function App() {
             component={EnvaseOperacionScreen}
             options={{ title: "Operaciones de Envase", headerShown: false }}
           />
-          <Stack.Screen
-            name="Cortes"
-            component={CortesScreen}
-            options={{ title: " Corte" }}
-          />
+          <Stack.Screen name="Cortes" component={CortesScreen} options={{ title: " Corte" }} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
@@ -390,7 +386,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         const vendedor = user.id || 0;
         console.log(`[App] Cargando estado de ruta para sucursal=${sucursal}, vendedor=${vendedor}...`);
         const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
-        console.log(`[App] Estado de ruta obtenido: ${rutaStatus ? 'CERRADA' : 'ABIERTA'}`);
+        console.log(`[App] Estado de ruta obtenido: ${rutaStatus ? "CERRADA" : "ABIERTA"}`);
         setRutaCerrada(rutaStatus);
 
         checkPendingTraspasos(user);
@@ -709,7 +705,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>

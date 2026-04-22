@@ -81,6 +81,7 @@ export const KitSchema = {
     precio: "float?",
     descuento: "float?",
     envaseIntercambio: "bool?",
+    envasePrestado: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",

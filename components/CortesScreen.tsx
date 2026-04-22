@@ -184,7 +184,7 @@ export default function CortesScreen() {
         "Ventas filtradas (sin duplicados):",
         ventas.length,
       );
-
+      console.log({ ventas });
       // Cargar kits y productos para expandir ventas de kits
       const allKits = FullSyncService.getKits(10000);
       const kitsByProducto: Record<number, any[]> = {};
@@ -202,7 +202,7 @@ export default function CortesScreen() {
       for (const p of allProductos) {
         productoNombreMap[p.id] = p.descripcion || `Producto ${p.id}`;
       }
-
+      console.log(allProductos);
       const ventasPorProducto: Record<string, number> = {};
       const importesPorProd: Record<string, number> = {};
       const pagosPorTipo: Record<number, number> = {};
@@ -233,17 +233,17 @@ export default function CortesScreen() {
         const importeVenta: number = v.importe || 0;
         const tipoMovto: number = v.tipoMovto || 0;
 
-        // Excluir producto con claveProd === 26
-        if (claveProd === 26) {
-          console.log("[CortesScreen] ⚠️ Excluyendo producto claveProd=26:", {
-            nombreProducto: v.nombreProducto,
-            cantProducto: cantVenta,
-            precio: v.precio,
-            importe: importeVenta,
-            fecha: v.fecha,
-          });
-          continue;
-        }
+        // // Excluir producto con claveProd === 26 porque lo excluia?
+        // if (claveProd === 26) {
+        //   console.log("[CortesScreen] ⚠️ Excluyendo producto claveProd=26:", {
+        //     nombreProducto: v.nombreProducto,
+        //     cantProducto: cantVenta,
+        //     precio: v.precio,
+        //     importe: importeVenta,
+        //     fecha: v.fecha,
+        //   });
+        //   continue;
+        // }
 
         // Excluir ventas con tipoMovto === 1200 (préstamo de envases)
         if (tipoMovto === 1200) {
