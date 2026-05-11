@@ -46,6 +46,7 @@ type Producto = {
   esKit?: boolean;
   intercambio?: boolean;
   prestamo?: boolean;
+  inventariable?: boolean;
   usandoPrecioDefault?: boolean;
   esPromocion?: boolean;
 };
@@ -121,6 +122,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     observacion: string;
     costo: number;
   } | null>(null);
+  const [pendingIntercambioProducto, setPendingIntercambioProducto] = useState<Producto | null>(null);
   const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
   const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
 
@@ -185,6 +187,17 @@ export default function SalesScreen({ route }: { route?: any }) {
     [],
   );
 
+  // Helpers para detectar intercambio y préstamo por cat_kits (ya no por producto.intercambio/prestamo)
+  const esProductoIntercambio = useCallback((productoId: number): boolean => {
+    const kits = FullSyncService.getKitsByProducto(productoId);
+    return kits.some((k: any) => k.recuperaEnvaseOtro);
+  }, []);
+
+  const esProductoPrestamo = useCallback((productoId: number): boolean => {
+    const kits = FullSyncService.getKitsByProducto(productoId);
+    return kits.some((k: any) => k.controlPresamo);
+  }, []);
+
   const buildProductosFormateados = useCallback(
     (
       preciosSource: any[],
@@ -195,57 +208,22 @@ export default function SalesScreen({ route }: { route?: any }) {
       preciosPromo?: any[],
     ): Producto[] => {
       console.log({ productosData });
-      // DEBUG intercambio
-      const prodsIntercambio = productosData.filter((p: any) => p.intercambio);
-      console.log(`[Sales] DEBUG productos con intercambio=true: ${prodsIntercambio.length}`);
-      prodsIntercambio.forEach((p: any) =>
-        console.log(
-          `[Sales] DEBUG intercambio: id=${p.id}, clave=${p.claveProd}, desc=${p.descripcion}, intercambio=${p.intercambio}`,
-        ),
-      );
+      // DEBUG intercambio/prestamo (ahora detectado por cat_kits)
       console.log(`[Sales] DEBUG total kits en kitsData: ${kitsData.length}`);
-      const kitsConEnvase = kitsData.filter((k: any) => k.envaseIntercambio);
-      console.log(`[Sales] DEBUG kits con envaseIntercambio=true: ${kitsConEnvase.length}`);
-      kitsConEnvase.forEach((k: any) =>
+      const kitsConRecuperaOtro = kitsData.filter((k: any) => k.recuperaEnvaseOtro);
+      const kitsConControlPresamo = kitsData.filter((k: any) => k.controlPresamo);
+      console.log(`[Sales] DEBUG kits con recuperaEnvaseOtro=true: ${kitsConRecuperaOtro.length}`);
+      console.log(`[Sales] DEBUG kits con controlPresamo=true: ${kitsConControlPresamo.length}`);
+      kitsConRecuperaOtro.forEach((k: any) =>
         console.log(
-          `[Sales] DEBUG kit envaseIntercambio: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}, envaseIntercambio=${k.envaseIntercambio}`,
+          `[Sales] DEBUG kit recuperaEnvaseOtro: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`,
         ),
       );
-      // Buscar kits para productos de intercambio
-      prodsIntercambio.forEach((p: any) => {
-        const kitsDeEste = kitsData.filter((k: any) => k.idProducto === p.id);
-        console.log(`[Sales] DEBUG kits para producto id=${p.id} (${p.descripcion}): ${kitsDeEste.length}`);
-        kitsDeEste.forEach((k: any) =>
-          console.log(
-            `[Sales] DEBUG   kit id=${k.id}, idInsumo=${k.idInsumo}, envaseIntercambio=${
-              k.envaseIntercambio
-            } (${typeof k.envaseIntercambio})`,
-          ),
-        );
-      });
-      // Buscar kit 1042 directamente
-      const kit1042 = kitsData.find((k: any) => k.id === 1042);
-      console.log(
-        `[Sales] DEBUG kit id=1042 existe? ${
-          kit1042
-            ? JSON.stringify({
-                id: kit1042.id,
-                idProducto: kit1042.idProducto,
-                idInsumo: kit1042.idInsumo,
-                envaseIntercambio: kit1042.envaseIntercambio,
-              })
-            : "NO"
-        }`,
-      );
-      // Buscar kits con idProducto=65
-      const kitsConIdProducto65 = kitsData.filter((k: any) => k.idProducto === 65);
-      console.log(`[Sales] DEBUG kits con idProducto=65: ${kitsConIdProducto65.length}`);
-      kitsConIdProducto65.forEach((k: any) =>
+      kitsConControlPresamo.forEach((k: any) =>
         console.log(
-          `[Sales] DEBUG kit id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}, envaseIntercambio=${k.envaseIntercambio}`,
+          `[Sales] DEBUG kit controlPresamo: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`,
         ),
       );
-      console.log(inventarioData.filter((i: any) => i.sucursal == currentSucursal && i.id < 10000));
       // Mapa de precios promocionales (PRIMERA JERARQUÍA)
       const preciosPromoMap = new Map<number, number>();
       // ... rest of the code remains the same ...
@@ -312,8 +290,10 @@ export default function SalesScreen({ route }: { route?: any }) {
         esKit: boolean,
         intercambio: boolean = false,
         prestamo: boolean = false,
+        inventariable: boolean = false,
       ) => {
-        if (esKit && productoId !== undefined) {
+        // Si es kit pero es inventariable, tratarlo como producto normal (saldo directo)
+        if (esKit && !inventariable && productoId !== undefined) {
           const componentes = kitsPorProducto.get(productoId) || [];
           if (!componentes.length) return 0;
           let minimo = Infinity;
@@ -340,6 +320,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           return minimo === Infinity ? 0 : minimo;
         }
 
+        // Producto normal o kit inventariable: usar saldo directo del inventario
         if (claveProd === undefined || Number.isNaN(claveProd)) return 0;
         return inventarioPorClave.get(claveProd) || 0;
       };
@@ -365,9 +346,12 @@ export default function SalesScreen({ route }: { route?: any }) {
         });
       }
 
-      // Forzar inclusión de productos especiales (PRESTAMO e INTERCAMBIO)
+      // Forzar inclusión de productos especiales (PRESTAMO e INTERCAMBIO detectados por cat_kits)
       productosPorClave.forEach((prod: any, clave: number) => {
-        if (prod.prestamo || prod.intercambio) todasLasClaves.add(clave);
+        const prodKits = kitsData.filter((k: any) => k.idProducto === prod.id);
+        if (prodKits.some((k: any) => k.recuperaEnvaseOtro || k.controlPresamo)) {
+          todasLasClaves.add(clave);
+        }
       });
 
       // Mapear todos los productos disponibles usando un Map por ID para evitar duplicados
@@ -376,9 +360,12 @@ export default function SalesScreen({ route }: { route?: any }) {
       Array.from(todasLasClaves).forEach((claveNum) => {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
         const esKit = Boolean(productoBase?.esKit);
-        const intercambio = Boolean(productoBase?.intercambio);
-        const prestamo = Boolean(productoBase?.prestamo);
+        const inventariable = Boolean(productoBase?.inventariable);
         const productoId = productoBase?.id ?? claveNum;
+        // Detectar intercambio y prestamo por cat_kits (no por producto.intercambio/prestamo)
+        const prodKits = esKit ? kitsData.filter((k: any) => k.idProducto === productoId) : [];
+        const intercambio = prodKits.some((k: any) => k.recuperaEnvaseOtro);
+        const prestamo = prodKits.some((k: any) => k.controlPresamo);
         let descripcion = productoBase?.descripcion || "Sin descripción";
 
         // JERARQUÍA DE PRECIOS:
@@ -406,7 +393,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
         if (precio === undefined) precio = 0;
 
-        const existencia = calcularExistencia(productoId, claveNum, esKit, intercambio, prestamo);
+        const existencia = calcularExistencia(productoId, claveNum, esKit, intercambio, prestamo, inventariable);
 
         const producto: Producto = {
           id: productoId,
@@ -417,6 +404,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           esKit,
           intercambio,
           prestamo,
+          inventariable,
           usandoPrecioDefault,
           esPromocion,
         };
@@ -1394,14 +1382,43 @@ export default function SalesScreen({ route }: { route?: any }) {
   };
 
   const addToCart = (p: Producto) => {
-    // Interceptar producto PRESTAMO para mostrar modal
-    if (p.prestamo) {
-      console.log("[Sales] Producto PRESTAMO detectado, mostrando modal de prestamo");
+    // Consultar kits del producto para detectar intercambio (recuperaEnvaseOtro) o prestamo (controlPresamo)
+    const kitsDelProducto = FullSyncService.getKitsByProducto(p.id);
+    const tieneRecuperaEnvaseOtro = kitsDelProducto.some((k: any) => k.recuperaEnvaseOtro);
+    const tieneControlPresamo = kitsDelProducto.some((k: any) => k.controlPresamo);
+
+    // Interceptar producto PRESTAMO (controlPresamo en kit) para mostrar modal
+    if (tieneControlPresamo) {
+      console.log("[Sales] Producto con PRESTAMO (controlPresamo) detectado, mostrando modal de prestamo");
       setPendingPrestamoProducto(p);
       setPendingPrestamoCantidad(1);
       setProductoModalOpen(false);
       setPrestamoModalOpen(true);
       return;
+    }
+
+    // Interceptar producto INTERCAMBIO (recuperaEnvaseOtro en kit) para mostrar modal
+    if (tieneRecuperaEnvaseOtro) {
+      console.log("[Sales] Producto con INTERCAMBIO (recuperaEnvaseOtro) detectado, mostrando modal de intercambio");
+      // Buscar el kit con recuperaEnvaseOtro para obtener el idInsumo (envase entregado)
+      const kitIntercambio = kitsDelProducto.find((k: any) => k.recuperaEnvaseOtro);
+      if (kitIntercambio) {
+        const idInsumo = kitIntercambio.idInsumo;
+        const productoInsumo = productosBase.find((prod: any) => prod.id === idInsumo);
+        if (productoInsumo) {
+          envaseIntercambioClaveRef.current = parseInt(productoInsumo.claveProd || "0", 10);
+          envaseIntercambioDescRef.current = productoInsumo.descripcion || "Envase intercambio";
+        } else {
+          envaseIntercambioClaveRef.current = idInsumo;
+          envaseIntercambioDescRef.current = `Producto ${idInsumo}`;
+        }
+        setCostoIntercambioCalculado(p.precio);
+        setPendingIntercambioProducto(p);
+        setPendingIntercambioCantidad(1);
+        setIntercambioModalOpen(true);
+        setProductoModalOpen(false);
+        return;
+      }
     }
 
     // Validar existencia antes de agregar
@@ -1506,13 +1523,22 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Verificar si el carrito tiene producto con intercambio=true y aún no se ha llenado el modal
-    const itemIntercambio = cart.find((ci) => ci.intercambio);
+    // Verificar si el carrito tiene producto con kits que tengan recuperaEnvaseOtro=true
+    // (Intercambio detectado por cat_kits, no por producto.intercambio)
+    let itemIntercambio: CartItem | undefined;
+    for (const item of cart) {
+      const kitsDelItem = FullSyncService.getKitsByProducto(item.id);
+      if (kitsDelItem.some((k: any) => k.recuperaEnvaseOtro)) {
+        itemIntercambio = item;
+        break;
+      }
+    }
+
     if (itemIntercambio && !intercambioData && !intercambioDataRef.current) {
-      console.log("[Sales] Producto INTERCAMBIO detectado, mostrando modal");
+      console.log("[Sales] Producto con INTERCAMBIO (recuperaEnvaseOtro) detectado en carrito, mostrando modal");
       console.log(`[Sales] Precio del producto INTERCAMBIO en carrito: $${itemIntercambio.precio}`);
 
-      // Buscar el kit component con envaseIntercambio=true para obtener el idInsumo
+      // Buscar el kit component con recuperaEnvaseOtro=true para obtener el idInsumo
       try {
         console.log(`[Sales] DEBUG itemIntercambio.id=${itemIntercambio.id} (type=${typeof itemIntercambio.id})`);
         console.log(`[Sales] DEBUG itemIntercambio.claveProd=${itemIntercambio.claveProd}`);
@@ -1539,7 +1565,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               })}`,
             );
             // Buscar cualquier kit con idProducto=65 con comparación relajada
-            const kitsBuscados = totalKits.filter((k: any) => String(k.idProducto) === String(itemIntercambio.id));
+            const kitsBuscados = totalKits.filter((k: any) => String(k.idProducto) === String(itemIntercambio!.id));
             console.log(
               `[Sales] DEBUG Kits con idProducto=${itemIntercambio.id} (string compare): ${kitsBuscados.length}`,
             );
@@ -1549,15 +1575,15 @@ export default function SalesScreen({ route }: { route?: any }) {
           console.log(
             `[Sales] DEBUG Kit[${i}]: id=${k.id}, idProducto=${k.idProducto}(${typeof k.idProducto}), idInsumo=${
               k.idInsumo
-            }, envaseIntercambio=${k.envaseIntercambio}(${typeof k.envaseIntercambio})`,
+            }, recuperaEnvaseOtro=${k.recuperaEnvaseOtro}(${typeof k.recuperaEnvaseOtro})`,
           );
         });
-        const kitsDelProducto = kitsParaEsteProducto.filter((k: any) => k.envaseIntercambio);
-        console.log(`[Sales] DEBUG Kits con envaseIntercambio=true: ${kitsDelProducto.length}`);
+        const kitsDelProducto = kitsParaEsteProducto.filter((k: any) => k.recuperaEnvaseOtro);
+        console.log(`[Sales] DEBUG Kits con recuperaEnvaseOtro=true: ${kitsDelProducto.length}`);
         if (kitsDelProducto.length > 0) {
           const compIntercambio = kitsDelProducto[0];
           const idInsumo = compIntercambio.idInsumo;
-          console.log(`[Sales] Kit envaseIntercambio encontrado: idInsumo=${idInsumo}`);
+          console.log(`[Sales] Kit recuperaEnvaseOtro encontrado: idInsumo=${idInsumo}`);
           // Buscar el producto del idInsumo para obtener clave y descripción
           const productoInsumo = productosBase.find((p: any) => p.id === idInsumo);
           if (productoInsumo) {
@@ -1572,12 +1598,12 @@ export default function SalesScreen({ route }: { route?: any }) {
             console.warn(`[Sales] No se encontró producto para idInsumo=${idInsumo}`);
           }
         } else {
-          console.log("[Sales] No se encontró kit con envaseIntercambio=true, usando defaults");
+          console.log("[Sales] No se encontró kit con recuperaEnvaseOtro=true, usando defaults");
           envaseIntercambioClaveRef.current = undefined;
           envaseIntercambioDescRef.current = undefined;
         }
       } catch (err) {
-        console.warn("[Sales] Error buscando envaseIntercambio:", err);
+        console.warn("[Sales] Error buscando recuperaEnvaseOtro:", err);
         envaseIntercambioClaveRef.current = undefined;
         envaseIntercambioDescRef.current = undefined;
       }
@@ -1873,7 +1899,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       await FullSyncService.createLocalVentas(
         validCart.map((item, index) => {
-          const esIntercambio = item.intercambio || false;
+          const esIntercambio = esProductoIntercambio(item.id);
           const precioItem = esIntercambio
             ? intercambioDataRef.current?.costo ?? costoIntercambioCalculado
             : parseFloat(item.precio.toString()) || 0;
@@ -1928,7 +1954,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         // Ya no se registra la salida del ENVASE XALLAPAN
         const currentIntercambioData = intercambioData || intercambioDataRef.current;
         if (currentIntercambioData) {
-          const cantIntercambio = validCart.find((ci) => ci.intercambio)?.cantidad || 1;
+          const cantIntercambio = validCart.find((ci) => esProductoIntercambio(ci.id))?.cantidad || 1;
 
           // COMENTADO: Ya no se registra la salida del envase XALLAPAN entregado
           // envaseItems.push({
@@ -2003,7 +2029,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const inventarioUpdateItems = validCart
         .filter((item) => {
           const claveProdNum = parseInt(item.claveProd || "0", 10);
-          return !item.intercambio && !item.prestamo;
+          return !esProductoIntercambio(item.id) && !esProductoPrestamo(item.id);
         })
         .map((item) => ({
           sucursal,
@@ -2829,7 +2855,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                       <Text style={styles.listSubtitle}>
                         Existencia: {item.existencia} {item.esKit ? " | Kit: Sí" : ""}
                       </Text>
-                      {item.prestamo && <Text style={styles.precioDefaultBadge}>PRÉSTAMO</Text>}
+                      {esProductoPrestamo(item.id) && <Text style={styles.precioDefaultBadge}>PRÉSTAMO</Text>}
                       {item.esPromocion && <Text style={styles.precioPromoBadge}>🎉 PRECIO ESPECIAL</Text>}
                       {item.usandoPrecioDefault && !item.esPromocion && (
                         <Text style={styles.precioDefaultBadge}>(DOMIC.)</Text>
@@ -2965,6 +2991,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           costoAutomatico={costoIntercambioCalculado}
           envaseEntregadoClave={envaseIntercambioClaveRef.current}
           envaseEntregadoDesc={envaseIntercambioDescRef.current}
+          productoId={pendingIntercambioProducto?.id}
           onAccept={(data) => {
             console.log("[Sales] Intercambio aceptado:", data);
             const dataObj = {
@@ -2977,8 +3004,17 @@ export default function SalesScreen({ route }: { route?: any }) {
             };
             intercambioDataRef.current = dataObj;
             setIntercambioData(dataObj);
-            // Actualizar el precio del item de intercambio en el carrito
-            setCart((prev) => prev.map((ci) => (ci.intercambio ? { ...ci, precio: data.costo } : ci)));
+            // Agregar el producto al carrito si no estaba, luego actualizar su precio
+            setCart((prev) => {
+              const alreadyIn = prev.some((ci) => pendingIntercambioProducto && ci.id === pendingIntercambioProducto.id);
+              const base = alreadyIn
+                ? prev
+                : pendingIntercambioProducto
+                ? [...prev, { ...pendingIntercambioProducto, cantidad: 1 }]
+                : prev;
+              return base.map((ci) => (esProductoIntercambio(ci.id) ? { ...ci, precio: data.costo } : ci));
+            });
+            setPendingIntercambioProducto(null);
             setIntercambioModalOpen(false);
             // El usuario debe presionar "Procesar venta" manualmente
           }}

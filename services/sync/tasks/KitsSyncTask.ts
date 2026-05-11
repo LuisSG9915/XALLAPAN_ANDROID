@@ -83,6 +83,10 @@ export class KitsSyncTask extends SyncTask {
             descuento: kit.descuento ?? 0,
             envaseIntercambio: kit.envaseIntercambio ? true : false,
             envasePrestado: kit.envasePrestado ? true : false,
+            recuperaEnvase: kit.recuperaEnvase ? true : false,
+            claveIntercambio: kit.claveIntercambio ?? 0,
+            recuperaEnvaseOtro: kit.recuperaEnvaseOtro ? true : false,
+            controlPresamo: kit.controlPresamo ? true : false,
             syncedAt: new Date(),
           };
 

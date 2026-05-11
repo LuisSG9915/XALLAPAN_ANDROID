@@ -331,7 +331,7 @@ function App() {
             component={ClienteGruposScreen}
             options={{ title: ' Grupos de Clientes' }}
           /> */}
-          {/* <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} /> */}
+          <Stack.Screen name="DataView" component={DataViewScreen} options={{ title: "📊 Datos Sincronizados" }} />
           <Stack.Screen
             name="PrinterSettings"
             component={PrinterSettingsScreen}

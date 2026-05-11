@@ -65,6 +65,7 @@ export const ProductoSchema = {
     envaseRecibe: "bool?",
     intercambio: "bool?",
     prestamo: "bool?",
+    inventariable: "bool?",
     fechaAct: "date?",
     syncedAt: "date",
   },
@@ -82,6 +83,21 @@ export const KitSchema = {
     descuento: "float?",
     envaseIntercambio: "bool?",
     envasePrestado: "bool?",
+    recuperaEnvase: "bool?",
+    claveIntercambio: "int?",
+    recuperaEnvaseOtro: "bool?",
+    controlPresamo: "bool?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
+export const KitIntercambioSchema = {
+  name: "KitIntercambio",
+  properties: {
+    id: "int",
+    idProducto: "int?",
+    idEnvaseOtro: "int?",
     syncedAt: "date",
   },
   primaryKey: "id",
@@ -491,6 +507,7 @@ export const allSchemas = [
   UsuarioSchema,
   ProductoSchema,
   KitSchema,
+  KitIntercambioSchema,
   PrecioSchema,
   PrecioPromoSchema,
   InventarioSchema,

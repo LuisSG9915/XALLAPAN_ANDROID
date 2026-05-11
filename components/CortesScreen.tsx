@@ -36,6 +36,10 @@ type EnvasesData = {
   envPrestado: number;
   envPrestadoEco: number;
   cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
+  intercambioPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+  prestamoPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+  vendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+  recuperadosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
 };
 
 export default function CortesScreen() {
@@ -75,6 +79,10 @@ export default function CortesScreen() {
     envPrestado: 0,
     envPrestadoEco: 0,
     cambiadosPorProducto: [],
+    intercambioPorProducto: [],
+    prestamoPorProducto: [],
+    vendidosPorProducto: [],
+    recuperadosPorProducto: [],
   });
 
   const formatFechaHoraMexico = (): string => {
@@ -196,19 +204,38 @@ export default function CortesScreen() {
         }
       }
 
-      // Mapa de productos para obtener nombre del insumo
+      // Mapa de productos para obtener nombre del insumo y propiedades
       const allProductos = FullSyncService.getProductos(10000);
       const productoNombreMap: Record<number, string> = {};
+      const productoPorClaveMap: Record<number, any> = {};
       for (const p of allProductos) {
         productoNombreMap[p.id] = p.descripcion || `Producto ${p.id}`;
+        // Indexar por id para buscar por ID de producto
+        if (p.id != null) {
+          productoPorClaveMap[p.id] = p;
+        }
+        // También indexar por claveProd (convertida a número) para buscar por clave de venta
+        const claveProdNum = p.claveProd ? parseInt(p.claveProd, 10) : null;
+        if (claveProdNum != null && !isNaN(claveProdNum)) {
+          productoPorClaveMap[claveProdNum] = p;
+        }
       }
       console.log(allProductos);
       const ventasPorProducto: Record<string, number> = {};
       const importesPorProd: Record<string, number> = {};
       const pagosPorTipo: Record<number, number> = {};
+      // Acumulador para envases vendidos de kits con recuperaEnvase
+      const envasesVendidosPorInsumo: Record<number, { descripcion: string; cantidad: number }> = {};
 
-      // Debug: contar ventas con claveProd 26
+      // Debug: contar ventas con claveProd 26 y 68 (AX)
       const ventasClave26 = ventas.filter((v: any) => v.claveProd === 26);
+      // DEBUG: Verificar si el kit 68 tiene insumos asignados
+      const kit68Insumos = kitsByProducto[68];
+      console.log("[CortesScreen] 🔍 Kit 68 (AX) tiene insumos?:", kit68Insumos?.length || 0);
+      if (kit68Insumos?.length > 0) {
+        console.log("[CortesScreen] 📋 Insumos del kit 68:", kit68Insumos.map((k: any) => ({ idInsumo: k.idInsumo, cantidad: k.cantidad })));
+      }
+
       console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 26:", ventasClave26.length);
       if (ventasClave26.length > 0) {
         console.log(
@@ -226,12 +253,46 @@ export default function CortesScreen() {
         );
       }
 
+      // DEBUG: Ver todas las ventas del kit 68 (AX)
+      const ventasAX = ventas.filter((v: any) => v.claveProd === 68);
+      console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 68 (AX):", ventasAX.length);
+      console.log("[CortesScreen] 📋 Detalles de ventas AX:",
+        ventasAX.map((v: any) => ({
+          id: v.id,
+          idMovil: v.idMovil,
+          noVenta: v.noVenta,
+          cantProducto: v.cantProducto,
+          importe: v.importe,
+          tipoMovto: v.tipoMovto,
+          fecha: v.fecha,
+        }))
+      );
+
+      // DEBUG: Ver si hay ventas locales duplicadas (noVenta=0) del kit 68
+      const ventasAXLocal = allVentas.filter((v: any) => v.claveProd === 68 && v.noVenta === 0);
+      console.log("[CortesScreen] 📊 VENTAS LOCALES noVenta=0 de AX:", ventasAXLocal.length);
+      if (ventasAXLocal.length > 0) {
+        console.log("[CortesScreen] 📋 Detalles ventas AX locales:",
+          ventasAXLocal.map((v: any) => ({ id: v.id, idMovil: v.idMovil, noVenta: v.noVenta }))
+        );
+      }
+
+      // DEBUG: Rastrear acumulación de AX
+      let axAcumuladoAntes = 0;
+
       for (const v of ventas) {
         const claveProd: number = v.claveProd || 0;
         const cantVenta: number = v.cantProducto || 0;
         const tipoPago: number = v.tipoPago || 0;
         const importeVenta: number = v.importe || 0;
         const tipoMovto: number = v.tipoMovto || 0;
+
+        // DEBUG: Ver acumulación de AX en cada iteración
+        if (claveProd === 68) {
+          console.log(`[CortesScreen] 🔄 Procesando venta AX: id=${v.id}, noVenta=${v.noVenta}, cant=${cantVenta}, axAntes=${ventasPorProducto["AX"] || 0}`);
+        }
+        // DEBUG: Alertar si cualquier venta modifica el acumulador de "AX"
+        const axAntesLoop = ventasPorProducto["AX"] || 0;
 
         // // Excluir producto con claveProd === 26 porque lo excluia?
         // if (claveProd === 26) {
@@ -257,9 +318,22 @@ export default function CortesScreen() {
         }
 
         const kitInsumos = kitsByProducto[claveProd];
+        const productoInfo = productoPorClaveMap[claveProd];
+        const esKitInventariable = productoInfo?.esKit && productoInfo?.inventariable;
 
-        if (kitInsumos && kitInsumos.length > 0) {
-          // Es un kit: expandir en sus insumos
+        // DEBUG: Log de productos inventariables
+        if (productoInfo?.esKit && productoInfo?.inventariable) {
+          console.log(`[CortesScreen] 📦 Kit inventariable detectado: claveProd=${claveProd}, nombre="${v.nombreProducto}", cant=${cantVenta}, idMovil=${v.idMovil}, noVenta=${v.noVenta}`);
+        }
+
+        // DEBUG: Verificar kit 69
+        if (claveProd === 69) {
+          console.log(`[CortesScreen] 🔍 DEBUG Kit 69: productoInfo=`, productoInfo, `esKitInventariable=${esKitInventariable}, kitInsumos.length=${kitInsumos?.length || 0}`);
+        }
+
+        // Es un kit con insumos Y NO es inventariable: expandir en sus insumos
+        // Si es kit pero inventariable, tratarlo como producto normal
+        if (kitInsumos && kitInsumos.length > 0 && !esKitInventariable) {
           let importeKitTotal = 0;
           for (const insumo of kitInsumos) {
             const idInsumo: number = insumo.idInsumo || 0;
@@ -267,6 +341,23 @@ export default function CortesScreen() {
             // Si el kit es idProducto=56 (Préstamo de Envases), NO agregar el insumo 18
             if ((claveProd === 56 && idInsumo === 18) || (claveProd === 66 && idInsumo === 16)) {
               console.log(`[CortesScreen] ⚠️ Excluyendo insumo ${idInsumo} del kit ${claveProd} (Préstamo de Envases)`);
+              continue;
+            }
+
+            // Si el kit tiene recuperaEnvaseOtro o controlPresamo, acumular en envases vendidos
+            if (insumo.recuperaEnvaseOtro === true || insumo.controlPresamo === true) {
+              const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
+              const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
+
+              // Acumular envase vendido por idInsumo
+              if (!envasesVendidosPorInsumo[idInsumo]) {
+                envasesVendidosPorInsumo[idInsumo] = { descripcion: nombreInsumo, cantidad: 0 };
+              }
+              envasesVendidosPorInsumo[idInsumo].cantidad += cantInsumo;
+
+              console.log(
+                `[CortesScreen] ♻️ Envase vendido acumulado: ${nombreInsumo} (idInsumo=${idInsumo}) +${cantInsumo} del kit ${claveProd}`,
+              );
               continue;
             }
 
@@ -281,24 +372,35 @@ export default function CortesScreen() {
           // Tipo de pago: usar el importe real de la venta
           pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
         } else {
-          // Producto normal
+          // Producto normal (o kit inventariable tratado como producto)
           const nombre: string = v.nombreProducto || "Sin nombre";
           const precio: number = v.precio || 0;
+
+          // DEBUG: Log de acumulación
+          if (productoInfo?.esKit) {
+            console.log(`[CortesScreen] ➕ Acumulando kit inventariable: "${nombre}" +${cantVenta} (total: ${(ventasPorProducto[nombre] || 0) + cantVenta})`);
+          }
 
           ventasPorProducto[nombre] = (ventasPorProducto[nombre] || 0) + cantVenta;
           importesPorProd[nombre] = (importesPorProd[nombre] || 0) + cantVenta * precio;
           pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
         }
+
+        // DEBUG: Verificar si el acumulador de AX cambió después de esta venta
+        const axDespuesLoop = ventasPorProducto["AX"] || 0;
+        if (axDespuesLoop > axAntesLoop && claveProd !== 68) {
+          console.log(`[CortesScreen] 🚨 ALERTA: Venta claveProd=${claveProd} nombre="${v.nombreProducto}" sumó a AX! axAntes=${axAntesLoop} axDespues=${axDespuesLoop}`);
+        }
       }
 
-      setInventarioVendido(
-        Object.entries(ventasPorProducto)
-          .filter(([, cant]) => cant > 0)
-          .map(([nombre, cant]) => ({
-            nombreProducto: nombre,
-            cantTotal: cant,
-          })),
-      );
+      const inventarioResult = Object.entries(ventasPorProducto)
+        .filter(([, cant]) => cant > 0)
+        .map(([nombre, cant]) => ({
+          nombreProducto: nombre,
+          cantTotal: cant,
+        }));
+      console.log("[CortesScreen] 📊 INVENTARIO VENDIDO FINAL:", inventarioResult);
+      setInventarioVendido(inventarioResult);
 
       setImportesPorProducto(
         Object.entries(importesPorProd)
@@ -335,9 +437,28 @@ export default function CortesScreen() {
       );
 
       const envasesData = FullSyncService.getEnvasesHistorialForDate(startOfDay, endOfDay);
-      setEnvases(envasesData);
+
+      // Convertir envases vendidos calculados a formato de vendidosPorProducto
+      const envasesVendidosCalculados = Object.entries(envasesVendidosPorInsumo).map(([idInsumo, data]) => ({
+        descripcion: `Env Vacio ${data.descripcion}`,
+        claveProd: parseInt(idInsumo, 10),
+        cantidad: data.cantidad,
+      })).filter(item => item.cantidad > 0);
+
+      console.log("[CortesScreen] ♻️ Envases vendidos calculados:", envasesVendidosCalculados);
+
+      // Combinar con los vendidosPorProducto existentes
+      const envasesCombinados = {
+        ...envasesData,
+        vendidosPorProducto: [
+          ...(envasesData.vendidosPorProducto || []),
+          ...envasesVendidosCalculados,
+        ],
+      };
+
+      setEnvases(envasesCombinados);
       console.log("=== ENVASES DATA ===");
-      console.log(envasesData);
+      console.log(envasesCombinados);
 
       // Ver todo el historial completo
       const todosLosRegistros = FullSyncService.getTodosEnvasesHistorial(startOfDay, endOfDay);
@@ -499,14 +620,39 @@ export default function CortesScreen() {
             <Text style={[styles.td, styles.tdFlex]}>Env Vendido Eco</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envVendidoEco || "—"}</Text>
           </View>
-          <View style={styles.tr}>
+
+          {/* Vendidos por producto (insumos de kits con recuperaEnvase/controlPresamo) */}
+          {/* {envases.vendidosPorProducto?.map((item, idx) => (
+            <View key={`vendido-${idx}`} style={styles.tr}>
+              <Text style={[styles.td, styles.tdFlex]}>Vendido {item.descripcion}</Text>
+              <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
+            </View>
+          ))} */}
+
+          {/* Intercambios por producto (recuperaEnvaseOtro) */}
+          {envases.intercambioPorProducto?.length > 0 && (
+            <View style={[styles.table, { marginTop: 6 }]}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, styles.thFlex]}>CAMBIADO</Text>
+                <Text style={[styles.th, styles.thRight]}>CANT</Text>
+              </View>
+              {envases.intercambioPorProducto.map((item, idx) => (
+                <View key={idx} style={styles.tr}>
+                  <Text style={[styles.td, styles.tdFlex]}>{item.descripcion}</Text>
+                  <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Cambiado Xal</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envCambiado || "—"}</Text>
           </View>
           <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Cambiado Eco</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envCambiadoEco || "—"}</Text>
-          </View>
+          </View> */}
           {envases.cambiadosPorProducto.length > 0 && (
             <View style={[styles.table, { marginTop: 6 }]}>
               <View style={styles.tableHeader}>
@@ -521,14 +667,47 @@ export default function CortesScreen() {
               ))}
             </View>
           )}
-          <View style={styles.tr}>
+
+          {/* Prestamos por producto (controlPresamo) */}
+          {envases.prestamoPorProducto?.length > 0 && (
+            <View style={[styles.table, { marginTop: 6 }]}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, styles.thFlex]}>PRESTAMO</Text>
+                <Text style={[styles.th, styles.thRight]}>CANT</Text>
+              </View>
+              {envases.prestamoPorProducto.map((item, idx) => (
+                <View key={idx} style={styles.tr}>
+                  <Text style={[styles.td, styles.tdFlex]}>{item.descripcion}</Text>
+                  <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Recuperados por producto (recuperaEnvase) */}
+          {envases.recuperadosPorProducto?.length > 0 && (
+            <View style={[styles.table, { marginTop: 6 }]}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, styles.thFlex]}>ENV RECUPERADOS</Text>
+                <Text style={[styles.th, styles.thRight]}>CANT</Text>
+              </View>
+              {envases.recuperadosPorProducto.map((item, idx) => (
+                <View key={idx} style={styles.tr}>
+                  <Text style={[styles.td, styles.tdFlex]}>{item.descripcion}</Text>
+                  <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Prestado</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envPrestado || "—"}</Text>
           </View>
           <View style={styles.tr}>
             <Text style={[styles.td, styles.tdFlex]}>Env Prestado Eco</Text>
             <Text style={[styles.td, styles.tdRight]}>{envases.envPrestadoEco || "—"}</Text>
-          </View>
+          </View> */}
         </View>
       </View>
 

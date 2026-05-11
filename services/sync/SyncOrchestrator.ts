@@ -9,6 +9,7 @@ import { InventarioSyncTask } from "./tasks/InventarioSyncTask";
 import { CarteraSyncTask } from "./tasks/CarteraSyncTask";
 import { VentasSyncTask } from "./tasks/VentasSyncTask";
 import { KitsSyncTask } from "./tasks/KitsSyncTask";
+import { KitIntercambioSyncTask } from "./tasks/KitIntercambioSyncTask";
 import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
 import { DetalleVisitasSyncTask } from "./tasks/DetalleVisitasSyncTask";
 import { TipoVisitaSyncTask } from "./tasks/TipoVisitaSyncTask";
@@ -52,6 +53,7 @@ export class SyncOrchestrator {
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),
       new KitsSyncTask(this.realm, this.syncLogId),
+      new KitIntercambioSyncTask(this.realm, this.syncLogId),
       new PreciosPromoSyncTask(this.realm, this.syncLogId),
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId, this.sucursal),

@@ -15,6 +15,7 @@ type IntercambioEnvaseModalProps = {
   costoAutomatico: number;
   envaseEntregadoClave?: number;
   envaseEntregadoDesc?: string;
+  productoId?: number; // ID del producto seleccionado (para buscar en KitIntercambio)
   onAccept: (data: {
     envaseEntregadoClave: number;
     envaseEntregadoDesc: string;
@@ -35,6 +36,7 @@ export default function IntercambioEnvaseModal({
   costoAutomatico,
   envaseEntregadoClave: propEntregadoClave,
   envaseEntregadoDesc: propEntregadoDesc,
+  productoId,
   onAccept,
   onCancel,
 }: IntercambioEnvaseModalProps) {
@@ -46,17 +48,37 @@ export default function IntercambioEnvaseModal({
   const [mostrarLista, setMostrarLista] = useState(false);
 
   useEffect(() => {
-    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoIntercambio:", costoAutomatico);
+    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoIntercambio:", costoAutomatico, "productoId:", productoId);
     console.log(
       `[IntercambioModal] DEBUG propEntregadoClave=${propEntregadoClave}, propEntregadoDesc=${propEntregadoDesc}`,
     );
     console.log(`[IntercambioModal] DEBUG claveEntregado=${claveEntregado}, descEntregado=${descEntregado}`);
     if (visible) {
-      console.log("[IntercambioModal] ✅ Modal visible, cargando productos envase...");
-      const productos = FullSyncService.getProductosEnvaseRecibe(50);
-      console.log("[IntercambioModal] Productos envase encontrados:", productos.length);
+      console.log("[IntercambioModal] ✅ Modal visible, cargando envases desde KitIntercambio...");
 
-      const formateados: EnvaseProducto[] = productos
+      let envasesProductos: any[] = [];
+
+      // Obtener IDs de envases desde KitIntercambio si hay productoId
+      if (productoId) {
+        const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(productoId);
+        console.log(`[IntercambioModal] IDs de envases (idEnvaseOtro) desde KitIntercambio:`, idsEnvasesOtro);
+
+        if (idsEnvasesOtro.length > 0) {
+          // Obtener productos directamente por sus IDs (idEnvaseOtro son IDs de productos)
+          envasesProductos = FullSyncService.getProductosPorIds(idsEnvasesOtro);
+          console.log(`[IntercambioModal] Productos obtenidos por IDs: ${envasesProductos.length}`);
+        }
+      }
+
+      // Si no hay envases configurados en KitIntercambio o no hay productoId,
+      // usar todos los productos envaseRecibe como fallback
+      if (envasesProductos.length === 0) {
+        console.log("[IntercambioModal] No hay envases en KitIntercambio, usando fallback de envaseRecibe");
+        envasesProductos = FullSyncService.getProductosEnvaseRecibe(50);
+      }
+
+      // Formatear y filtrar el envase entregado
+      let formateados: EnvaseProducto[] = envasesProductos
         .filter((p: any) => {
           const clave = parseInt(p.claveProd || "0", 10);
           return clave !== claveEntregado;
@@ -76,7 +98,7 @@ export default function IntercambioEnvaseModal({
       });
 
       const sinDuplicados = Array.from(descripcionesMap.values());
-      console.log(`[IntercambioModal] Productos sin duplicados: ${sinDuplicados.length}`);
+      console.log(`[IntercambioModal] Envases disponibles: ${sinDuplicados.length}`);
 
       setEnvasesDisponibles(sinDuplicados);
       setEnvaseRecibido(null);
@@ -84,7 +106,7 @@ export default function IntercambioEnvaseModal({
       setMostrarLista(false);
       console.log("[IntercambioModal] ✅ Estado reseteado");
     }
-  }, [visible, costoAutomatico, claveEntregado, descEntregado]);
+  }, [visible, costoAutomatico, claveEntregado, descEntregado, productoId]);
 
   const handleAccept = () => {
     if (!envaseRecibido) return;
