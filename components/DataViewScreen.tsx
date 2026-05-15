@@ -41,7 +41,8 @@ type EntityType =
   | "inventarioEnvasesHistorial"
   | "reubicaciones"
   | "visitasRealizadas"
-  | "formasPago";
+  | "formasPago"
+  | "kitsIntercambio";
 
 interface EntityTab {
   key: EntityType;
@@ -59,6 +60,7 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "inventario", title: "Inventario", icon: "bar-chart" },
   { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
   { key: "formasPago", title: "Formas de Pago", icon: "payment" },
+  { key: "kitsIntercambio", title: "Kits Intercambio", icon: "swap-horiz" },
   { key: "usuarios", title: "Usuarios", icon: "person" },
   { key: "syncStatus", title: "Sync Status", icon: "sync" },
   { key: "syncLog", title: "Sync Log", icon: "list-alt" },
@@ -141,6 +143,9 @@ export default function DataViewScreen() {
           break;
         case "formasPago":
           setData(FullSyncService.getFormasPagoPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "kitsIntercambio":
+          setData(FullSyncService.getKitIntercambioPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "clientes":
           setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));
@@ -641,6 +646,10 @@ export default function DataViewScreen() {
         return renderBitacoraSync({ item });
       case "cumplimiento":
         return renderCumplimiento({ item });
+      case "formasPago":
+        return null;
+      case "kitsIntercambio":
+        return renderKit({ item });
       default:
         return null;
     }
@@ -692,8 +701,10 @@ export default function DataViewScreen() {
         return stats.inventarioEnvasesHistorial || 0;
       case "reubicaciones":
         return stats.reubicaciones || 0;
-      case "visitasRealizadas":
-        return stats.visitasRealizadas || 0;
+      case "formasPago":
+        return stats.formasPago || 0;
+      case "kitsIntercambio":
+        return stats.kitIntercambio || 0;
       default:
         return 0;
     }

@@ -40,6 +40,7 @@ type EnvasesData = {
   prestamoPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
   vendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
   recuperadosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+  envasesVendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
 };
 
 export default function CortesScreen() {
@@ -83,6 +84,7 @@ export default function CortesScreen() {
     prestamoPorProducto: [],
     vendidosPorProducto: [],
     recuperadosPorProducto: [],
+    envasesVendidosPorProducto: [],
   });
 
   const formatFechaHoraMexico = (): string => {
@@ -115,7 +117,7 @@ export default function CortesScreen() {
       if (user) {
         const nombre = user.nombre || "";
         const clave = user.claveEmpleado || "";
-        console.log(user);
+        // console.log(user);
         setUserName(clave ? `${clave} - ${nombre}` : nombre);
         setNombreRuta(user.sucursalNombre || "");
       }
@@ -151,7 +153,7 @@ export default function CortesScreen() {
       // Obtener ID de ruta desde las visitas (para referencia, aunque ya tenemos el nombre)
       const rutaId = FullSyncService.getRutaForDate(startOfDay, endOfDay);
       setRuta(user?.dSucursal);
-      console.log(user);
+      // console.log(user);
 
       const allVentas = FullSyncService.getVentasForDate(startOfDay, endOfDay, sucursal);
 
@@ -171,11 +173,11 @@ export default function CortesScreen() {
             );
             // Si existe versión sincronizada, excluir esta (pre-sync)
             if (tieneVersionSincronizada) {
-              console.log("[CortesScreen] 🔄 EXCLUIR DUPLICADO (pre-sync):", {
-                id: v.id,
-                noVenta: v.noVenta,
-                nombreProducto: v.nombreProducto,
-              });
+              // console.log("[CortesScreen] 🔄 EXCLUIR DUPLICADO (pre-sync):", {
+              //   id: v.id,
+              //   noVenta: v.noVenta,
+              //   nombreProducto: v.nombreProducto,
+              // });
               return false;
             }
           }
@@ -186,13 +188,13 @@ export default function CortesScreen() {
         return false;
       });
 
-      console.log(
-        "[CortesScreen] Total ventas:",
-        allVentas.length,
-        "Ventas filtradas (sin duplicados):",
-        ventas.length,
-      );
-      console.log({ ventas });
+      // console.log(
+      //   "[CortesScreen] Total ventas:",
+      //   allVentas.length,
+      //   "Ventas filtradas (sin duplicados):",
+      //   ventas.length,
+      // );
+      // console.log({ ventas });
       // Cargar kits y productos para expandir ventas de kits
       const allKits = FullSyncService.getKits(10000);
       const kitsByProducto: Record<number, any[]> = {};
@@ -220,7 +222,7 @@ export default function CortesScreen() {
           productoPorClaveMap[claveProdNum] = p;
         }
       }
-      console.log(allProductos);
+      // console.log(allProductos);
       const ventasPorProducto: Record<string, number> = {};
       const importesPorProd: Record<string, number> = {};
       const pagosPorTipo: Record<number, number> = {};
@@ -231,51 +233,18 @@ export default function CortesScreen() {
       const ventasClave26 = ventas.filter((v: any) => v.claveProd === 26);
       // DEBUG: Verificar si el kit 68 tiene insumos asignados
       const kit68Insumos = kitsByProducto[68];
-      console.log("[CortesScreen] 🔍 Kit 68 (AX) tiene insumos?:", kit68Insumos?.length || 0);
-      if (kit68Insumos?.length > 0) {
-        console.log("[CortesScreen] 📋 Insumos del kit 68:", kit68Insumos.map((k: any) => ({ idInsumo: k.idInsumo, cantidad: k.cantidad })));
-      }
-
-      console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 26:", ventasClave26.length);
-      if (ventasClave26.length > 0) {
-        console.log(
-          "[CortesScreen] 📋 Detalles de ventas clave 26:",
-          ventasClave26.map((v: any) => ({
-            id: v.id,
-            nombreProducto: v.nombreProducto,
-            cantProducto: v.cantProducto,
-            precio: v.precio,
-            importe: v.importe,
-            fecha: v.fecha,
-            noVenta: v.noVenta,
-            idMovil: v.idMovil,
-          })),
-        );
-      }
+      // DEBUG logs comentados - descomentar para debug de kit 68
+      // console.log("[CortesScreen] 🔍 Kit 68 (AX) tiene insumos?:", kit68Insumos?.length || 0);
+      // if (kit68Insumos?.length > 0) {
+      //   console.log(
+      //     "[CortesScreen] 📋 Insumos del kit 68:",
+      //     kit68Insumos.map((k: any) => ({ idInsumo: k.idInsumo, cantidad: k.cantidad })),
+      //   );
+      // }
 
       // DEBUG: Ver todas las ventas del kit 68 (AX)
       const ventasAX = ventas.filter((v: any) => v.claveProd === 68);
-      console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 68 (AX):", ventasAX.length);
-      console.log("[CortesScreen] 📋 Detalles de ventas AX:",
-        ventasAX.map((v: any) => ({
-          id: v.id,
-          idMovil: v.idMovil,
-          noVenta: v.noVenta,
-          cantProducto: v.cantProducto,
-          importe: v.importe,
-          tipoMovto: v.tipoMovto,
-          fecha: v.fecha,
-        }))
-      );
-
-      // DEBUG: Ver si hay ventas locales duplicadas (noVenta=0) del kit 68
-      const ventasAXLocal = allVentas.filter((v: any) => v.claveProd === 68 && v.noVenta === 0);
-      console.log("[CortesScreen] 📊 VENTAS LOCALES noVenta=0 de AX:", ventasAXLocal.length);
-      if (ventasAXLocal.length > 0) {
-        console.log("[CortesScreen] 📋 Detalles ventas AX locales:",
-          ventasAXLocal.map((v: any) => ({ id: v.id, idMovil: v.idMovil, noVenta: v.noVenta }))
-        );
-      }
+      // console.log("[CortesScreen] 📊 TOTAL VENTAS CON CLAVE 68 (AX):", ventasAX.length);
 
       // DEBUG: Rastrear acumulación de AX
       let axAcumuladoAntes = 0;
@@ -287,12 +256,8 @@ export default function CortesScreen() {
         const importeVenta: number = v.importe || 0;
         const tipoMovto: number = v.tipoMovto || 0;
 
-        // DEBUG: Ver acumulación de AX en cada iteración
-        if (claveProd === 68) {
-          console.log(`[CortesScreen] 🔄 Procesando venta AX: id=${v.id}, noVenta=${v.noVenta}, cant=${cantVenta}, axAntes=${ventasPorProducto["AX"] || 0}`);
-        }
-        // DEBUG: Alertar si cualquier venta modifica el acumulador de "AX"
-        const axAntesLoop = ventasPorProducto["AX"] || 0;
+        // DEBUG logs comentados
+        // const axAntesLoop = ventasPorProducto["AX"] || 0;
 
         // // Excluir producto con claveProd === 26 porque lo excluia?
         // if (claveProd === 26) {
@@ -308,28 +273,19 @@ export default function CortesScreen() {
 
         // Excluir ventas con tipoMovto === 1200 (préstamo de envases)
         if (tipoMovto === 1200) {
-          console.log("[CortesScreen] ⚠️ Excluyendo venta tipoMovto=1200 (préstamo):", {
-            nombreProducto: v.nombreProducto,
-            claveProd: claveProd,
-            cantProducto: cantVenta,
-            tipoMovto: tipoMovto,
-          });
+          // console.log("[CortesScreen] ⚠️ Excluyendo venta tipoMovto=1200 (préstamo):", {
+          //   nombreProducto: v.nombreProducto,
+          //   claveProd: claveProd,
+          //   cantProducto: cantVenta,
+          //   tipoMovto: tipoMovto,
+          // });
           continue;
         }
 
         const kitInsumos = kitsByProducto[claveProd];
         const productoInfo = productoPorClaveMap[claveProd];
+        // const esKitInventariable = productoInfo?.esKit && productoInfo?.inventariable;
         const esKitInventariable = productoInfo?.esKit && productoInfo?.inventariable;
-
-        // DEBUG: Log de productos inventariables
-        if (productoInfo?.esKit && productoInfo?.inventariable) {
-          console.log(`[CortesScreen] 📦 Kit inventariable detectado: claveProd=${claveProd}, nombre="${v.nombreProducto}", cant=${cantVenta}, idMovil=${v.idMovil}, noVenta=${v.noVenta}`);
-        }
-
-        // DEBUG: Verificar kit 69
-        if (claveProd === 69) {
-          console.log(`[CortesScreen] 🔍 DEBUG Kit 69: productoInfo=`, productoInfo, `esKitInventariable=${esKitInventariable}, kitInsumos.length=${kitInsumos?.length || 0}`);
-        }
 
         // Es un kit con insumos Y NO es inventariable: expandir en sus insumos
         // Si es kit pero inventariable, tratarlo como producto normal
@@ -340,12 +296,13 @@ export default function CortesScreen() {
 
             // Si el kit es idProducto=56 (Préstamo de Envases), NO agregar el insumo 18
             if ((claveProd === 56 && idInsumo === 18) || (claveProd === 66 && idInsumo === 16)) {
-              console.log(`[CortesScreen] ⚠️ Excluyendo insumo ${idInsumo} del kit ${claveProd} (Préstamo de Envases)`);
+              // console.log(`[CortesScreen] ⚠️ Excluyendo insumo ${idInsumo} del kit ${claveProd} (Préstamo de Envases)`);
               continue;
             }
 
             // Si el kit tiene recuperaEnvaseOtro o controlPresamo, acumular en envases vendidos
-            if (insumo.recuperaEnvaseOtro === true || insumo.controlPresamo === true) {
+            if (insumo.recuperaEnvaseOtro === true || insumo.controlPresamo === true || insumo.envaseVendido === true) {
+              // if (1 == 1) {
               const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
               const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
 
@@ -355,10 +312,10 @@ export default function CortesScreen() {
               }
               envasesVendidosPorInsumo[idInsumo].cantidad += cantInsumo;
 
-              console.log(
-                `[CortesScreen] ♻️ Envase vendido acumulado: ${nombreInsumo} (idInsumo=${idInsumo}) +${cantInsumo} del kit ${claveProd}`,
-              );
-              continue;
+              // console.log(
+              //   `[CortesScreen] ♻️ Envase vendido acumulado: ${nombreInsumo} (idInsumo=${idInsumo}) +${cantInsumo} del kit ${claveProd}`,
+              // );
+              // NOTA: No hacemos continue aquí para que también se agregue al inventario vendido
             }
 
             const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
@@ -376,21 +333,27 @@ export default function CortesScreen() {
           const nombre: string = v.nombreProducto || "Sin nombre";
           const precio: number = v.precio || 0;
 
-          // DEBUG: Log de acumulación
-          if (productoInfo?.esKit) {
-            console.log(`[CortesScreen] ➕ Acumulando kit inventariable: "${nombre}" +${cantVenta} (total: ${(ventasPorProducto[nombre] || 0) + cantVenta})`);
-          }
+          // DEBUG comentado
+          // if (productoInfo?.esKit) {
+          //   console.log(
+          //     `[CortesScreen] ➕ Acumulando kit inventariable: "${nombre}" +${cantVenta} (total: ${
+          //       (ventasPorProducto[nombre] || 0) + cantVenta
+          //     })`,
+          //   );
+          // }
 
           ventasPorProducto[nombre] = (ventasPorProducto[nombre] || 0) + cantVenta;
           importesPorProd[nombre] = (importesPorProd[nombre] || 0) + cantVenta * precio;
           pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
         }
 
-        // DEBUG: Verificar si el acumulador de AX cambió después de esta venta
-        const axDespuesLoop = ventasPorProducto["AX"] || 0;
-        if (axDespuesLoop > axAntesLoop && claveProd !== 68) {
-          console.log(`[CortesScreen] 🚨 ALERTA: Venta claveProd=${claveProd} nombre="${v.nombreProducto}" sumó a AX! axAntes=${axAntesLoop} axDespues=${axDespuesLoop}`);
-        }
+        // DEBUG comentado
+        // const axDespuesLoop = ventasPorProducto["AX"] || 0;
+        // if (axDespuesLoop > axAntesLoop && claveProd !== 68) {
+        //   console.log(
+        //     `[CortesScreen] 🚨 ALERTA: Venta claveProd=${claveProd} nombre="${v.nombreProducto}" sumó a AX! axAntes=${axAntesLoop} axDespues=${axDespuesLoop}`,
+        //   );
+        // }
       }
 
       const inventarioResult = Object.entries(ventasPorProducto)
@@ -399,7 +362,7 @@ export default function CortesScreen() {
           nombreProducto: nombre,
           cantTotal: cant,
         }));
-      console.log("[CortesScreen] 📊 INVENTARIO VENDIDO FINAL:", inventarioResult);
+      // console.log("[CortesScreen] 📊 INVENTARIO VENDIDO FINAL:", inventarioResult);
       setInventarioVendido(inventarioResult);
 
       setImportesPorProducto(
@@ -439,32 +402,26 @@ export default function CortesScreen() {
       const envasesData = FullSyncService.getEnvasesHistorialForDate(startOfDay, endOfDay);
 
       // Convertir envases vendidos calculados a formato de vendidosPorProducto
-      const envasesVendidosCalculados = Object.entries(envasesVendidosPorInsumo).map(([idInsumo, data]) => ({
-        descripcion: `Env Vacio ${data.descripcion}`,
-        claveProd: parseInt(idInsumo, 10),
-        cantidad: data.cantidad,
-      })).filter(item => item.cantidad > 0);
+      const envasesVendidosCalculados = Object.entries(envasesVendidosPorInsumo)
+        .map(([idInsumo, data]) => ({
+          descripcion: `Env Vacio ${data.descripcion}`,
+          claveProd: parseInt(idInsumo, 10),
+          cantidad: data.cantidad,
+        }))
+        .filter((item) => item.cantidad > 0);
 
-      console.log("[CortesScreen] ♻️ Envases vendidos calculados:", envasesVendidosCalculados);
+      // console.log("[CortesScreen] ♻️ Envases vendidos calculados:", envasesVendidosCalculados);
 
       // Combinar con los vendidosPorProducto existentes
       const envasesCombinados = {
         ...envasesData,
-        vendidosPorProducto: [
-          ...(envasesData.vendidosPorProducto || []),
-          ...envasesVendidosCalculados,
-        ],
+        vendidosPorProducto: [...(envasesData.vendidosPorProducto || []), ...envasesVendidosCalculados],
+        envasesVendidosPorProducto: envasesData.envasesVendidosPorProducto || [],
       };
 
       setEnvases(envasesCombinados);
-      console.log("=== ENVASES DATA ===");
-      console.log(envasesCombinados);
-
-      // Ver todo el historial completo
-      const todosLosRegistros = FullSyncService.getTodosEnvasesHistorial(startOfDay, endOfDay);
-      console.log("=== TODOS LOS REGISTROS HISTORIAL ===");
-      console.log(`Total registros: ${todosLosRegistros.length}`);
-      console.log({ todosLosRegistros });
+      // console.log("=== ENVASES DATA ===");
+      // console.log(envasesCombinados);
     } catch (error) {
       console.error("Error cargando datos de corte:", error);
       Alert.alert("Error", "No se pudieron cargar los datos del corte");
@@ -612,22 +569,22 @@ export default function CortesScreen() {
             <Text style={[styles.th, styles.thFlex]}>CONCEPTO</Text>
             <Text style={[styles.th, styles.thRight]}>CANT</Text>
           </View>
-          <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>Env Vendido Xal</Text>
-            <Text style={[styles.td, styles.tdRight]}>{envases.envVendido || "—"}</Text>
-          </View>
-          <View style={styles.tr}>
-            <Text style={[styles.td, styles.tdFlex]}>Env Vendido Eco</Text>
-            <Text style={[styles.td, styles.tdRight]}>{envases.envVendidoEco || "—"}</Text>
-          </View>
+          {/* Envases Vendidos por producto (envaseVendido) */}
+          {envases.envasesVendidosPorProducto?.length > 0 ? (
+            envases.envasesVendidosPorProducto.map((item, idx) => (
+              <View key={`envvendido-${idx}`} style={styles.tr}>
+                <Text style={[styles.td, styles.tdFlex]}>Env Vendido {item.descripcion}</Text>
+                <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.tr}>
+              <Text style={[styles.td, styles.tdFlex]}>Env Vendido</Text>
+              <Text style={[styles.td, styles.tdRight]}>—</Text>
+            </View>
+          )}
 
           {/* Vendidos por producto (insumos de kits con recuperaEnvase/controlPresamo) */}
-          {/* {envases.vendidosPorProducto?.map((item, idx) => (
-            <View key={`vendido-${idx}`} style={styles.tr}>
-              <Text style={[styles.td, styles.tdFlex]}>Vendido {item.descripcion}</Text>
-              <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
-            </View>
-          ))} */}
 
           {/* Intercambios por producto (recuperaEnvaseOtro) */}
           {envases.intercambioPorProducto?.length > 0 && (
@@ -693,7 +650,7 @@ export default function CortesScreen() {
               </View>
               {envases.recuperadosPorProducto.map((item, idx) => (
                 <View key={idx} style={styles.tr}>
-                  <Text style={[styles.td, styles.tdFlex]}>{item.descripcion}</Text>
+                  <Text style={[styles.td, styles.tdFlex]}>{"Envase de " + " " + item.descripcion}</Text>
                   <Text style={[styles.td, styles.tdRight]}>{item.cantidad}</Text>
                 </View>
               ))}

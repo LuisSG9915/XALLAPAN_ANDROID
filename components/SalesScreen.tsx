@@ -220,9 +220,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         ),
       );
       kitsConControlPresamo.forEach((k: any) =>
-        console.log(
-          `[Sales] DEBUG kit controlPresamo: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`,
-        ),
+        console.log(`[Sales] DEBUG kit controlPresamo: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`),
       );
       // Mapa de precios promocionales (PRIMERA JERARQUÍA)
       const preciosPromoMap = new Map<number, number>();
@@ -711,7 +709,18 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log(preciosData);
       setProductos(productosFormateados);
       // Por defecto mostrar solo productos normales (sin kits ni promociones)
-      setFilteredProductos(productosFormateados.filter((p) => !p.esKit && !p.esPromocion));
+      // PERO incluir kits que tengan recuperaEnvase=true
+      // Ordenar: productos con recuperaEnvase primero
+      const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+      const baseProducts = productosFormateados.filter(
+        (p) => (!p.esKit && !p.esPromocion) || productosConRecuperaEnvase.has(p.id),
+      );
+      const sortedProducts = [...baseProducts].sort((a, b) => {
+        const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+        const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+        return bHasRecupera - aHasRecupera;
+      });
+      setFilteredProductos(sortedProducts);
 
       return clientesFormateados;
     } catch (error) {
@@ -1169,15 +1178,24 @@ export default function SalesScreen({ route }: { route?: any }) {
     (query: string) => {
       setSearchProductoQuery(query);
 
+      const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+
       let baseProducts = productos;
       if (showOnlyPromotions) {
         baseProducts = productos.filter((p) => p.esKit || p.esPromocion);
       } else {
-        baseProducts = productos.filter((p) => !p.esKit && !p.esPromocion);
+        // Incluir kits que tengan recuperaEnvase=true (incluso si son promocion)
+        baseProducts = productos.filter((p) => (!p.esKit && !p.esPromocion) || productosConRecuperaEnvase.has(p.id));
       }
 
       if (!query.trim()) {
-        setFilteredProductos(baseProducts);
+        // Ordenar: productos con recuperaEnvase primero
+        const sorted = [...baseProducts].sort((a, b) => {
+          const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+          const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+          return bHasRecupera - aHasRecupera; // Mayor primero (1 antes que 0)
+        });
+        setFilteredProductos(sorted);
         return;
       }
 
@@ -1189,7 +1207,14 @@ export default function SalesScreen({ route }: { route?: any }) {
         return matchDesc || matchClave || matchId;
       });
 
-      setFilteredProductos(filtered);
+      // Ordenar: productos con recuperaEnvase primero
+      const sorted = filtered.sort((a, b) => {
+        const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+        const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+        return bHasRecupera - aHasRecupera; // Mayor primero (1 antes que 0)
+      });
+
+      setFilteredProductos(sorted);
     },
     [productos, showOnlyPromotions],
   );
@@ -1198,18 +1223,31 @@ export default function SalesScreen({ route }: { route?: any }) {
     const newValue = !showOnlyPromotions;
     setShowOnlyPromotions(newValue);
 
+    const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+
     let baseProducts = productos;
     if (newValue) {
       baseProducts = productos.filter((p) => p.esKit || p.esPromocion);
     } else {
-      baseProducts = productos.filter((p) => !p.esKit && !p.esPromocion);
+      // Incluir kits que tengan recuperaEnvase=true (incluso si son promocion)
+      baseProducts = productos.filter((p) => (!p.esKit && !p.esPromocion) || productosConRecuperaEnvase.has(p.id));
+    }
+
+    // Ordenar: productos con recuperaEnvase primero (solo cuando no es kit/promocion)
+    let finalProducts = baseProducts;
+    if (!newValue) {
+      finalProducts = [...baseProducts].sort((a, b) => {
+        const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+        const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+        return bHasRecupera - aHasRecupera;
+      });
     }
 
     if (!searchProductoQuery.trim()) {
-      setFilteredProductos(baseProducts);
+      setFilteredProductos(finalProducts);
     } else {
       const lowerQuery = searchProductoQuery.toLowerCase();
-      const filtered = baseProducts.filter((p) => {
+      const filtered = finalProducts.filter((p) => {
         const matchDesc = p.descripcion.toLowerCase().includes(lowerQuery);
         const matchClave = p.claveProd?.toString().toLowerCase().includes(lowerQuery);
         const matchId = p.id.toString().includes(searchProductoQuery);
@@ -1508,11 +1546,23 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log("preciosDefault", preciosDefault);
       setProductos(productosFormateados);
 
+      const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+
       // Aplicar filtro de kits según el estado del botón
-      const productosFiltrados = showOnlyPromotions
+      const baseProducts = showOnlyPromotions
         ? productosFormateados.filter((p) => p.esKit || p.esPromocion)
-        : productosFormateados.filter((p) => !p.esKit && !p.esPromocion);
-      setFilteredProductos(productosFiltrados);
+        : productosFormateados.filter((p) => (!p.esKit && !p.esPromocion) || productosConRecuperaEnvase.has(p.id));
+
+      // Ordenar: productos con recuperaEnvase primero (solo cuando no es kit/promocion)
+      let finalProducts = baseProducts;
+      if (!showOnlyPromotions) {
+        finalProducts = [...baseProducts].sort((a, b) => {
+          const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+          const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+          return bHasRecupera - aHasRecupera;
+        });
+      }
+      setFilteredProductos(finalProducts);
     }
   }, [selectedClient, buildProductosFormateados, productosBase, kits, showOnlyPromotions]);
 
@@ -2843,10 +2893,20 @@ export default function SalesScreen({ route }: { route?: any }) {
                       addToCart(item);
                       setSearchProductoQuery("");
                       // Aplicar el filtro correcto según showOnlyPromotions
-                      const productosFiltrados = showOnlyPromotions
+                      const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+                      const baseProducts = showOnlyPromotions
                         ? productos.filter((p) => p.esKit || p.esPromocion)
-                        : productos.filter((p) => !p.esKit && !p.esPromocion);
-                      setFilteredProductos(productosFiltrados);
+                        : productos.filter((p) => (!p.esKit && !p.esPromocion) || productosConRecuperaEnvase.has(p.id));
+                      // Ordenar: productos con recuperaEnvase primero (solo cuando no es kit/promocion)
+                      let finalProducts = baseProducts;
+                      if (!showOnlyPromotions) {
+                        finalProducts = [...baseProducts].sort((a, b) => {
+                          const aHasRecupera = productosConRecuperaEnvase.has(a.id) ? 1 : 0;
+                          const bHasRecupera = productosConRecuperaEnvase.has(b.id) ? 1 : 0;
+                          return bHasRecupera - aHasRecupera;
+                        });
+                      }
+                      setFilteredProductos(finalProducts);
                     }}
                   >
                     <View style={{ flex: 1 }}>
@@ -3006,7 +3066,9 @@ export default function SalesScreen({ route }: { route?: any }) {
             setIntercambioData(dataObj);
             // Agregar el producto al carrito si no estaba, luego actualizar su precio
             setCart((prev) => {
-              const alreadyIn = prev.some((ci) => pendingIntercambioProducto && ci.id === pendingIntercambioProducto.id);
+              const alreadyIn = prev.some(
+                (ci) => pendingIntercambioProducto && ci.id === pendingIntercambioProducto.id,
+              );
               const base = alreadyIn
                 ? prev
                 : pendingIntercambioProducto

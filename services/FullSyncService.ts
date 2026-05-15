@@ -23,8 +23,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 34,
+        schemaVersion: 35,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v35: Agregar campo envaseVendido a Kit
+          if (oldRealm.schemaVersion < 35) {
+            console.log("[Migration v35] Agregando campo envaseVendido a Kit");
+          }
+
           // Migración v34: Agregar campo inventariable a Producto
           if (oldRealm.schemaVersion < 34) {
             console.log("[Migration v34] Agregando campo inventariable a Producto");
@@ -125,7 +130,9 @@ class FullSyncService {
 
           // Migración v32: Agregar recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit
           if (oldRealm.schemaVersion < 32) {
-            console.log("[Migration v32] Agregando campos recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit");
+            console.log(
+              "[Migration v32] Agregando campos recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit",
+            );
           }
         },
       });
@@ -2711,6 +2718,15 @@ class FullSyncService {
   }
 
   /**
+   * Obtiene los IDs de productos que tienen recuperaEnvase=true en algún kit
+   */
+  getProductosConRecuperaEnvase(): Set<number> {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return new Set();
+    const kitsConRecuperaEnvase = Array.from(this.realm.objects("Kit").filtered("recuperaEnvase == true")) as any[];
+    return new Set<number>(kitsConRecuperaEnvase.map((k) => k.idProducto).filter((id: number | null) => id != null));
+  }
+
+  /**
    * Obtiene kits con paginación
    */
   getKitsPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -2916,6 +2932,7 @@ class FullSyncService {
     prestamoPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
     vendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
     recuperadosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+    envasesVendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
   } {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       return {
@@ -2930,6 +2947,7 @@ class FullSyncService {
         prestamoPorProducto: [],
         vendidosPorProducto: [],
         recuperadosPorProducto: [],
+        envasesVendidosPorProducto: [],
       };
     }
 
@@ -2997,60 +3015,80 @@ class FullSyncService {
     let envPrestadoEco = 0;
     const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
 
-    // Obtener productos con intercambio (recuperaEnvaseOtro) y préstamo (controlPresamo) desde Kits
+    // Obtener productos con intercambio (recuperaEnvaseOtro), préstamo (controlPresamo), recuperaEnvase y envaseVendido desde Kits
     const kitsConIntercambio = Array.from(this.realm.objects("Kit").filtered("recuperaEnvaseOtro == true")) as any[];
     const kitsConPrestamo = Array.from(this.realm.objects("Kit").filtered("controlPresamo == true")) as any[];
     const kitsConRecuperaEnvase = Array.from(this.realm.objects("Kit").filtered("recuperaEnvase == true")) as any[];
+    const kitsConEnvaseVendido = Array.from(this.realm.objects("Kit").filtered("envaseVendido == true")) as any[];
 
     // Extraer los idProducto (claves de producto) únicos
-    const clavesIntercambio = new Set<number>(kitsConIntercambio.map((k) => k.idProducto).filter((id: number | null) => id != null));
-    const clavesPrestamo = new Set<number>(kitsConPrestamo.map((k) => k.idProducto).filter((id: number | null) => id != null));
-    const clavesRecuperaEnvase = new Set<number>(kitsConRecuperaEnvase.map((k) => k.idProducto).filter((id: number | null) => id != null));
+    const clavesIntercambio = new Set<number>(
+      kitsConIntercambio.map((k) => k.idProducto).filter((id: number | null) => id != null),
+    );
+    const clavesPrestamo = new Set<number>(
+      kitsConPrestamo.map((k) => k.idProducto).filter((id: number | null) => id != null),
+    );
+    const clavesRecuperaEnvase = new Set<number>(
+      kitsConRecuperaEnvase.map((k) => k.idProducto).filter((id: number | null) => id != null),
+    );
+    const clavesEnvaseVendido = new Set<number>(
+      kitsConEnvaseVendido.map((k) => k.idProducto).filter((id: number | null) => id != null),
+    );
 
-    // Extraer los idInsumo (envases) de kits con recuperaEnvaseOtro o controlPresamo
+    // Extraer los idInsumo (envases) de kits con recuperaEnvaseOtro, controlPresamo, o envaseVendido
     // Estos NO deben sumarse al total genérico de envases vendidos
     const insumosExcluirVenta = new Set<number>([
       ...kitsConIntercambio.map((k) => k.idInsumo).filter((id: number | null) => id != null),
       ...kitsConPrestamo.map((k) => k.idInsumo).filter((id: number | null) => id != null),
       ...kitsConRecuperaEnvase.map((k) => k.idInsumo).filter((id: number | null) => id != null),
+      ...kitsConEnvaseVendido.map((k) => k.idInsumo).filter((id: number | null) => id != null),
     ]);
 
     console.log("[getEnvasesHistorialForDate] Productos con intercambio:", Array.from(clavesIntercambio));
     console.log("[getEnvasesHistorialForDate] Productos con préstamo:", Array.from(clavesPrestamo));
+    console.log("[getEnvasesHistorialForDate] Productos con envaseVendido:", Array.from(clavesEnvaseVendido));
     console.log("[getEnvasesHistorialForDate] Insumos a excluir de totales de venta:", Array.from(insumosExcluirVenta));
 
-    // Obtener descripciones de productos
-    const productosConIntercambio: Record<number, string> = {};
-    const productosConPrestamo: Record<number, string> = {};
+    // Obtener descripciones de áreas de productos (acumulables por área)
+    const getAreaDescripcion = (prod: any): string => {
+      return prod?.descripcionArea || prod?.descripcion || "Sin área";
+    };
+
+    // Mapeo de clave de producto a descripcionArea
+    const areaPorProducto: Record<number, string> = {};
 
     for (const clave of clavesIntercambio) {
       const prod = this.realm.objectForPrimaryKey("Producto", clave) as any;
-      productosConIntercambio[clave] = prod?.descripcion || `Producto ${clave}`;
+      areaPorProducto[clave] = getAreaDescripcion(prod);
     }
 
     for (const clave of clavesPrestamo) {
       const prod = this.realm.objectForPrimaryKey("Producto", clave) as any;
-      productosConPrestamo[clave] = prod?.descripcion || `Producto ${clave}`;
+      areaPorProducto[clave] = getAreaDescripcion(prod);
     }
 
-    // Obtener descripciones de productos con recuperaEnvase
-    const productosConRecuperaEnvase: Record<number, string> = {};
     for (const clave of clavesRecuperaEnvase) {
       const prod = this.realm.objectForPrimaryKey("Producto", clave) as any;
-      productosConRecuperaEnvase[clave] = prod?.descripcion || `Producto ${clave}`;
+      areaPorProducto[clave] = getAreaDescripcion(prod);
+    }
+
+    for (const clave of clavesEnvaseVendido) {
+      const prod = this.realm.objectForPrimaryKey("Producto", clave) as any;
+      areaPorProducto[clave] = getAreaDescripcion(prod);
     }
 
     // Obtener descripciones de insumos (envases) para la tabla de vendidos por producto
-    const descripcionInsumos: Record<number, string> = {};
+    const areaPorInsumo: Record<number, string> = {};
     for (const insumoId of insumosExcluirVenta) {
       const prod = this.realm.objectForPrimaryKey("Producto", insumoId) as any;
-      descripcionInsumos[insumoId] = prod?.descripcion || `Envase ${insumoId}`;
+      areaPorInsumo[insumoId] = getAreaDescripcion(prod);
     }
 
-    // Buscar ventas de estos productos en el rango de fechas
-    const intercambioPorProd: Record<number, { descripcion: string; cantidad: number }> = {};
-    const prestamoPorProd: Record<number, { descripcion: string; cantidad: number }> = {};
-    const recuperadosPorProd: Record<number, { descripcion: string; cantidad: number }> = {};
+    // Buscar ventas de estos productos en el rango de fechas - acumulados por AREA
+    const intercambioPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
+    const prestamoPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
+    const recuperadosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
+    const envasesVendidosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
 
     try {
       const ventas = Array.from(
@@ -3061,37 +3099,47 @@ class FullSyncService {
       for (const v of ventas) {
         const claveProd = v.claveProd;
         const cantidad = v.cantProducto ?? 0;
+        const area = areaPorProducto[claveProd];
 
-        if (claveProd && clavesIntercambio.has(claveProd) && cantidad > 0) {
-          if (!intercambioPorProd[claveProd]) {
-            intercambioPorProd[claveProd] = { descripcion: productosConIntercambio[claveProd], cantidad: 0 };
+        if (claveProd && clavesIntercambio.has(claveProd) && cantidad > 0 && area) {
+          if (!intercambioPorArea[area]) {
+            intercambioPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          intercambioPorProd[claveProd].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Intercambio producto ${claveProd} += ${cantidad}`);
+          intercambioPorArea[area].cantidad += cantidad;
+          console.log(`[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidad}`);
         }
 
-        if (claveProd && clavesPrestamo.has(claveProd) && cantidad > 0) {
-          if (!prestamoPorProd[claveProd]) {
-            prestamoPorProd[claveProd] = { descripcion: productosConPrestamo[claveProd], cantidad: 0 };
+        if (claveProd && clavesPrestamo.has(claveProd) && cantidad > 0 && area) {
+          if (!prestamoPorArea[area]) {
+            prestamoPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          prestamoPorProd[claveProd].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Préstamo producto ${claveProd} += ${cantidad}`);
+          prestamoPorArea[area].cantidad += cantidad;
+          console.log(`[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidad}`);
         }
 
-        if (claveProd && clavesRecuperaEnvase.has(claveProd) && cantidad > 0) {
-          if (!recuperadosPorProd[claveProd]) {
-            recuperadosPorProd[claveProd] = { descripcion: productosConRecuperaEnvase[claveProd], cantidad: 0 };
+        if (claveProd && clavesRecuperaEnvase.has(claveProd) && cantidad > 0 && area) {
+          if (!recuperadosPorArea[area]) {
+            recuperadosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          recuperadosPorProd[claveProd].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Recuperado envase producto ${claveProd} += ${cantidad}`);
+          recuperadosPorArea[area].cantidad += cantidad;
+          console.log(`[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidad}`);
+        }
+
+        // Procesar ventas de productos con envaseVendido
+        if (claveProd && clavesEnvaseVendido.has(claveProd) && cantidad > 0 && area) {
+          if (!envasesVendidosPorArea[area]) {
+            envasesVendidosPorArea[area] = { descripcion: area, cantidad: 0 };
+          }
+          envasesVendidosPorArea[area].cantidad += cantidad;
+          console.log(`[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidad}`);
         }
       }
     } catch (err) {
       console.log("[getEnvasesHistorialForDate] Error obteniendo ventas:", err);
     }
 
-    // Track vendidos por insumo para mostrar individualmente
-    const vendidosPorProd: Record<number, { descripcion: string; cantidad: number }> = {};
+    // Track vendidos por insumo para mostrar individualmente - acumulados por AREA
+    const vendidosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
 
     for (const r of registros) {
       const tipo: number = r.tipoMovto ?? 0;
@@ -3101,14 +3149,15 @@ class FullSyncService {
 
       // VENTAS (tipo=2): Si es envase 18 o 16
       if (tipo === 2 && (clave === 18 || clave === 16)) {
+        const area = areaPorInsumo[clave];
         // Si este insumo está en kits con recuperaEnvase/controlPresamo, NO sumar al total genérico
-        // pero SÍ agregar a la lista individual
-        if (insumosExcluirVenta.has(clave)) {
-          console.log(`[getEnvasesHistorialForDate] ⏩ Envase ${clave} excluido de totales (kit con recuperaEnvase)`);
-          if (!vendidosPorProd[clave]) {
-            vendidosPorProd[clave] = { descripcion: descripcionInsumos[clave] || `Envase ${clave}`, cantidad: 0 };
+        // pero SÍ agregar a la lista individual por AREA
+        if (insumosExcluirVenta.has(clave) && area) {
+          console.log(`[getEnvasesHistorialForDate] ⏩ Envase ${clave} excluido de totales, acumulado en area ${area}`);
+          if (!vendidosPorArea[area]) {
+            vendidosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          vendidosPorProd[clave].cantidad += salida;
+          vendidosPorArea[area].cantidad += salida;
         } else {
           // Sumar al total genérico
           if (clave === 18) {
@@ -3150,37 +3199,44 @@ class FullSyncService {
       envPrestado,
       envPrestadoEco,
       cambiadosPorProductoCount: Object.keys(cambiadosPorProd).length,
-      intercambioPorProductoCount: Object.keys(intercambioPorProd).length,
-      prestamoPorProductoCount: Object.keys(prestamoPorProd).length,
-      vendidosPorProductoCount: Object.keys(vendidosPorProd).length,
+      intercambioPorAreaCount: Object.keys(intercambioPorArea).length,
+      prestamoPorAreaCount: Object.keys(prestamoPorArea).length,
+      vendidosPorAreaCount: Object.keys(vendidosPorArea).length,
     });
 
-    const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]) => ({
+    const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]: [string, any]) => ({
       claveProd: parseInt(clave, 10),
       descripcionCorta: val.descripcionCorta,
       cantidadEntrada: val.cantidadEntrada,
     }));
 
-    const intercambioPorProducto = Object.entries(intercambioPorProd).map(([clave, val]) => ({
-      claveProd: parseInt(clave, 10),
+    // Mapear resultados por área - usando descripcionArea como identificador
+    const intercambioPorProducto = Object.entries(intercambioPorArea).map(([area, val]: [string, any]) => ({
+      claveProd: 0, // No aplica clave de producto cuando es por área
       descripcion: val.descripcion,
       cantidad: val.cantidad,
     }));
 
-    const prestamoPorProducto = Object.entries(prestamoPorProd).map(([clave, val]) => ({
-      claveProd: parseInt(clave, 10),
+    const prestamoPorProducto = Object.entries(prestamoPorArea).map(([area, val]: [string, any]) => ({
+      claveProd: 0,
       descripcion: val.descripcion,
       cantidad: val.cantidad,
     }));
 
-    const recuperadosPorProducto = Object.entries(recuperadosPorProd).map(([clave, val]) => ({
-      claveProd: parseInt(clave, 10),
+    const recuperadosPorProducto = Object.entries(recuperadosPorArea).map(([area, val]: [string, any]) => ({
+      claveProd: 0,
       descripcion: val.descripcion,
       cantidad: val.cantidad,
     }));
 
-    const vendidosPorProducto = Object.entries(vendidosPorProd).map(([clave, val]) => ({
-      claveProd: parseInt(clave, 10),
+    const vendidosPorProducto = Object.entries(vendidosPorArea).map(([area, val]: [string, any]) => ({
+      claveProd: 0,
+      descripcion: val.descripcion,
+      cantidad: val.cantidad,
+    }));
+
+    const envasesVendidosPorProducto = Object.entries(envasesVendidosPorArea).map(([area, val]: [string, any]) => ({
+      claveProd: 0,
       descripcion: val.descripcion,
       cantidad: val.cantidad,
     }));
@@ -3197,6 +3253,7 @@ class FullSyncService {
       prestamoPorProducto,
       vendidosPorProducto,
       recuperadosPorProducto,
+      envasesVendidosPorProducto,
     };
   }
 
@@ -3795,10 +3852,22 @@ class FullSyncService {
   getEnvasesIntercambioPorProducto(productoId: number): number[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     const intercambios = this.realm.objects("KitIntercambio").filtered(`idProducto == ${productoId}`);
+    const todosIntercambios = this.realm.objects("KitIntercambio");
+    const intercambiosArray = Array.from(todosIntercambios).map((k: any) => ({
+      id: k.id,
+      idProducto: k.idProducto,
+      idEnvaseOtro: k.idEnvaseOtro,
+    }));
+    console.log("=== TABLA KitIntercambio ===");
+    console.table(intercambiosArray);
+    console.log(`Total registros: ${intercambiosArray.length}`);
     const idsEnvases = Array.from(intercambios)
       .map((k: any) => k.idEnvaseOtro)
       .filter((id): id is number => id != null);
-    console.log(`[FullSync] KitIntercambio para producto ${productoId}: encontrados ${idsEnvases.length} envases alternativos:`, idsEnvases);
+    console.log(
+      `[FullSync] KitIntercambio para producto ${productoId}: encontrados ${idsEnvases.length} envases alternativos:`,
+      idsEnvases,
+    );
     return idsEnvases;
   }
 
@@ -3846,6 +3915,7 @@ class FullSyncService {
         inventarioEnvasesHistorial: 0,
         reubicaciones: 0,
         visitasRealizadas: 0,
+        kitIntercambio: 0,
       };
     }
 
@@ -3872,7 +3942,16 @@ class FullSyncService {
       reubicaciones: this.realm.objects("Reubicacion").length,
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
       formasPago: this.realm.objects("FormaPago").length,
+      kitIntercambio: this.realm.objects("KitIntercambio").length,
     };
+  }
+
+  /**
+   * Obtiene kits intercambio con paginación
+   */
+  getKitIntercambioPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("KitIntercambio").slice(offset, offset + limit));
   }
 
   getFormasPagoPaginated(offset: number = 0, limit: number = 50): any[] {

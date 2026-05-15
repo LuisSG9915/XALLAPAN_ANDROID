@@ -48,7 +48,14 @@ export default function IntercambioEnvaseModal({
   const [mostrarLista, setMostrarLista] = useState(false);
 
   useEffect(() => {
-    console.log("[IntercambioModal] 🔔 useEffect - visible:", visible, "costoIntercambio:", costoAutomatico, "productoId:", productoId);
+    console.log(
+      "[IntercambioModal] 🔔 useEffect - visible:",
+      visible,
+      "costoIntercambio:",
+      costoAutomatico,
+      "productoId:",
+      productoId,
+    );
     console.log(
       `[IntercambioModal] DEBUG propEntregadoClave=${propEntregadoClave}, propEntregadoDesc=${propEntregadoDesc}`,
     );
@@ -60,7 +67,12 @@ export default function IntercambioEnvaseModal({
 
       // Obtener IDs de envases desde KitIntercambio si hay productoId
       if (productoId) {
-        const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(productoId);
+        const getKits = FullSyncService.getKits();
+        const getKitByIdProducto = getKits.find((kit) => kit.idProducto === productoId);
+        console.log({ getKitByIdProducto });
+        const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(
+          getKitByIdProducto?.idInsumo || productoId,
+        );
         console.log(`[IntercambioModal] IDs de envases (idEnvaseOtro) desde KitIntercambio:`, idsEnvasesOtro);
 
         if (idsEnvasesOtro.length > 0) {
