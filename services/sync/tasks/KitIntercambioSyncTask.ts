@@ -58,6 +58,7 @@ export class KitIntercambioSyncTask extends SyncTask {
             id: kit.id,
             idProducto: kit.idProducto ?? null,
             idEnvaseOtro: kit.idEnvaseOtro ?? null,
+            precioEnvase: kit.precioEnvase ?? null,
             syncedAt: new Date(),
           };
 
@@ -75,7 +76,9 @@ export class KitIntercambioSyncTask extends SyncTask {
         const aEliminar = todosLocales.filter((k: any) => !idsServidor.has(k.id));
         registrosEliminados = aEliminar.length;
         if (registrosEliminados > 0) {
-          console.log(`[KitIntercambioSyncTask] Eliminando ${registrosEliminados} kits intercambio que ya no existen en el servidor`);
+          console.log(
+            `[KitIntercambioSyncTask] Eliminando ${registrosEliminados} kits intercambio que ya no existen en el servidor`,
+          );
           aEliminar.forEach((k: any) => this.realm.delete(k));
         }
       });

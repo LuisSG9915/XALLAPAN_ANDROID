@@ -23,8 +23,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 35,
+        schemaVersion: 36,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v36: Agregar campo precioEnvase a KitIntercambio y omitirMovil a Producto
+          if (oldRealm.schemaVersion < 36) {
+            console.log("[Migration v36] Agregando precioEnvase a KitIntercambio y omitirMovil a Producto");
+          }
+
           // Migración v35: Agregar campo envaseVendido a Kit
           if (oldRealm.schemaVersion < 35) {
             console.log("[Migration v35] Agregando campo envaseVendido a Kit");
@@ -3869,6 +3874,20 @@ class FullSyncService {
       idsEnvases,
     );
     return idsEnvases;
+  }
+
+  /**
+   * Obtiene el precioEnvase de KitIntercambio para una combinación de idProducto e idEnvaseOtro.
+   * Retorna null si no se encuentra.
+   */
+  getPrecioEnvaseIntercambio(idProducto: number, idEnvaseOtro: number): number | null {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    const kits = this.realm
+      .objects("KitIntercambio")
+      .filtered(`idProducto == ${idProducto} AND idEnvaseOtro == ${idEnvaseOtro}`);
+    if (kits.length === 0) return null;
+    const kit: any = kits[0];
+    return kit.precioEnvase != null ? kit.precioEnvase : null;
   }
 
   /**

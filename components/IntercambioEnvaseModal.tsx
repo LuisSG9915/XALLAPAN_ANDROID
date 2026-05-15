@@ -7,6 +7,7 @@ type EnvaseProducto = {
   id: number;
   claveProd: string;
   descripcion: string;
+  precioEnvase?: number | null;
 };
 
 type IntercambioEnvaseModalProps = {
@@ -21,6 +22,9 @@ type IntercambioEnvaseModalProps = {
     envaseEntregadoDesc: string;
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
+    envaseRecibidoId: number;
+    kitIntercambioProductoId: number | null;
+    precioEnvase: number | null;
     observacion: string;
     costo: number;
   }) => void;
@@ -44,6 +48,7 @@ export default function IntercambioEnvaseModal({
   const descEntregado = propEntregadoDesc ?? DESC_ENVASE_XALLAPAN;
   const [envasesDisponibles, setEnvasesDisponibles] = useState<EnvaseProducto[]>([]);
   const [envaseRecibido, setEnvaseRecibido] = useState<EnvaseProducto | null>(null);
+  const [kitIntercambioProductoId, setKitIntercambioProductoId] = useState<number | null>(null);
   const [observacion, setObservacion] = useState("");
   const [mostrarLista, setMostrarLista] = useState(false);
 
@@ -64,23 +69,29 @@ export default function IntercambioEnvaseModal({
       console.log("[IntercambioModal] ✅ Modal visible, cargando envases desde KitIntercambio...");
 
       let envasesProductos: any[] = [];
+      let resolvedKitIntercambioProductoId: number | null = null;
 
       // Obtener IDs de envases desde KitIntercambio si hay productoId
       if (productoId) {
         const getKits = FullSyncService.getKits();
         const getKitByIdProducto = getKits.find((kit) => kit.idProducto === productoId);
         console.log({ getKitByIdProducto });
-        const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(
-          getKitByIdProducto?.idInsumo || productoId,
-        );
+        resolvedKitIntercambioProductoId = getKitByIdProducto?.idInsumo ?? productoId;
+        const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(resolvedKitIntercambioProductoId!);
         console.log(`[IntercambioModal] IDs de envases (idEnvaseOtro) desde KitIntercambio:`, idsEnvasesOtro);
 
         if (idsEnvasesOtro.length > 0) {
-          // Obtener productos directamente por sus IDs (idEnvaseOtro son IDs de productos)
-          envasesProductos = FullSyncService.getProductosPorIds(idsEnvasesOtro);
+          // Obtener productos directamente por sus IDs e incluir precioEnvase de KitIntercambio
+          const productosRaw = FullSyncService.getProductosPorIds(idsEnvasesOtro);
+          const kitProdId = resolvedKitIntercambioProductoId!;
+          envasesProductos = productosRaw.map((p: any) => ({
+            ...p,
+            precioEnvase: FullSyncService.getPrecioEnvaseIntercambio(kitProdId, p.id),
+          }));
           console.log(`[IntercambioModal] Productos obtenidos por IDs: ${envasesProductos.length}`);
         }
       }
+      setKitIntercambioProductoId(resolvedKitIntercambioProductoId);
 
       // Si no hay envases configurados en KitIntercambio o no hay productoId,
       // usar todos los productos envaseRecibe como fallback
@@ -99,6 +110,7 @@ export default function IntercambioEnvaseModal({
           id: p.id,
           claveProd: p.claveProd || String(p.id),
           descripcion: p.descripcion || "Sin descripción",
+          precioEnvase: p.precioEnvase ?? null,
         }));
 
       // Eliminar duplicados por descripción (quedarse con el primero)
@@ -128,6 +140,9 @@ export default function IntercambioEnvaseModal({
       envaseEntregadoDesc: descEntregado,
       envaseRecibidoClave: parseInt(envaseRecibido.claveProd || "0", 10),
       envaseRecibidoDesc: envaseRecibido.descripcion,
+      envaseRecibidoId: envaseRecibido.id,
+      kitIntercambioProductoId,
+      precioEnvase: envaseRecibido.precioEnvase ?? null,
       observacion: observacion.trim(),
       costo: costoAutomatico,
     });
@@ -186,6 +201,19 @@ export default function IntercambioEnvaseModal({
               </View>
             )}
           </View>
+
+          {/* Precio del envase recibido */}
+          {envaseRecibido && envaseRecibido.precioEnvase != null && envaseRecibido.precioEnvase > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>PRECIO DEL ENVASE RECIBIDO:</Text>
+              <View style={[styles.fixedValue, { borderLeftColor: COLORS.success ?? "#4CAF50" }]}>
+                <Text style={[styles.fixedValueText, { color: COLORS.success ?? "#4CAF50" }]}>
+                  ${envaseRecibido.precioEnvase.toFixed(2)}
+                </Text>
+                <Text style={styles.fixedValueSub}>Se agregará al carrito como cargo adicional</Text>
+              </View>
+            </View>
+          )}
 
           {/* Costo automático */}
           <View style={styles.section}>

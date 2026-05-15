@@ -49,6 +49,7 @@ type Producto = {
   inventariable?: boolean;
   usandoPrecioDefault?: boolean;
   esPromocion?: boolean;
+  omitirMovil?: number;
 };
 
 type CartItem = Producto & { cantidad: number };
@@ -111,6 +112,9 @@ export default function SalesScreen({ route }: { route?: any }) {
     envaseEntregadoDesc: string;
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
+    envaseRecibidoId: number;
+    kitIntercambioProductoId: number | null;
+    precioEnvase: number | null;
     observacion: string;
     costo: number;
   } | null>(null);
@@ -119,6 +123,9 @@ export default function SalesScreen({ route }: { route?: any }) {
     envaseEntregadoDesc: string;
     envaseRecibidoClave: number;
     envaseRecibidoDesc: string;
+    envaseRecibidoId: number;
+    kitIntercambioProductoId: number | null;
+    precioEnvase: number | null;
     observacion: string;
     costo: number;
   } | null>(null);
@@ -405,6 +412,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           inventariable,
           usandoPrecioDefault,
           esPromocion,
+          omitirMovil: productoBase?.omitirMovil ?? 0,
         };
 
         // Solo agregar si no existe ya un producto con este ID, o si el nuevo tiene mejor precio
@@ -703,7 +711,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         undefined,
         preciosPromoData,
       ).filter((p) => {
-        return p.existencia > 0;
+        return p.existencia > 0 && p.omitirMovil !== 1;
       });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
       console.log(preciosData);
@@ -1538,7 +1546,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosDefault,
         preciosPromo,
       ).filter((p) => {
-        return p.existencia > 0;
+        return p.existencia > 0 && p.omitirMovil !== 1;
       });
       console.log(productosData);
       console.log("2PRODUCTOSFORMATEADOS", productosFormateados);
@@ -3059,6 +3067,9 @@ export default function SalesScreen({ route }: { route?: any }) {
               envaseEntregadoDesc: data.envaseEntregadoDesc,
               envaseRecibidoClave: data.envaseRecibidoClave,
               envaseRecibidoDesc: data.envaseRecibidoDesc,
+              envaseRecibidoId: data.envaseRecibidoId,
+              kitIntercambioProductoId: data.kitIntercambioProductoId,
+              precioEnvase: data.precioEnvase,
               observacion: data.observacion,
               costo: data.costo,
             };
@@ -3074,7 +3085,37 @@ export default function SalesScreen({ route }: { route?: any }) {
                 : pendingIntercambioProducto
                 ? [...prev, { ...pendingIntercambioProducto, cantidad: 1 }]
                 : prev;
-              return base.map((ci) => (esProductoIntercambio(ci.id) ? { ...ci, precio: data.costo } : ci));
+              let updatedCart = base.map((ci) => (esProductoIntercambio(ci.id) ? { ...ci, precio: data.costo } : ci));
+
+              // Agregar producto 76 al carrito con precioEnvase si viene del modal
+              const precioEnvase = data.precioEnvase;
+              console.log(`[Sales] precioEnvase recibido del modal: ${precioEnvase}`);
+              if (precioEnvase != null && precioEnvase > 0) {
+                const prod76 = productosBase.find((p: any) => p.id === 76);
+                const desc76 = prod76?.descripcion || "ENVASE";
+                const clave76 = prod76?.claveProd || "76";
+                const idxEnvase = updatedCart.findIndex((ci) => ci.id === 76);
+                if (idxEnvase >= 0) {
+                  updatedCart = updatedCart.map((ci) =>
+                    ci.id === 76 ? { ...ci, cantidad: ci.cantidad + 1, precio: precioEnvase } : ci,
+                  );
+                } else {
+                  updatedCart = [
+                    ...updatedCart,
+                    {
+                      id: 76,
+                      claveProd: String(clave76),
+                      descripcion: desc76,
+                      precio: precioEnvase,
+                      existencia: 9999,
+                      cantidad: 1,
+                    },
+                  ];
+                }
+                console.log(`[Sales] Producto 76 (${desc76}) agregado al carrito con precio $${precioEnvase}`);
+              }
+
+              return updatedCart;
             });
             setPendingIntercambioProducto(null);
             setIntercambioModalOpen(false);
