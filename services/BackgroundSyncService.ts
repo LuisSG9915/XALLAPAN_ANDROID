@@ -14,6 +14,7 @@
  * - Retry logic con exponential backoff
  */
 
+import { ToastAndroid, Platform } from "react-native";
 import FullSyncService from "./FullSyncService";
 import { SyncProgress } from "./sync/SyncTask";
 import AuthService from "./AuthService";
@@ -51,6 +52,8 @@ class BackgroundSyncService {
   // Estado interno
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isBackgroundFetchConfigured = false;
+  // Bandera para cancelar la sincronización en curso entre tareas
+  private cancelRequested = false;
   private state: BackgroundSyncState = {
     status: "idle",
     lastSyncTime: null,
@@ -158,7 +161,7 @@ class BackgroundSyncService {
           // Callback de timeout - la tarea tomó demasiado tiempo
           console.warn("[BackgroundFetch] Timeout de tarea:", taskId);
           BackgroundFetch.finish(taskId);
-        }
+        },
       );
 
       // Verificar estado de BackgroundFetch
@@ -243,6 +246,69 @@ class BackgroundSyncService {
   }
 
   /**
+   * Dispara una sincronización parcial bajo demanda (ej. al finalizar una venta).
+   *
+   * Reglas:
+   * - Si ya hay una sincronización corriendo, se solicita su cancelación y se
+   *   espera a que termine (corta entre tareas), antes de iniciar una nueva.
+   * - Reinicia el temporizador de 3 minutos para evitar que la siguiente
+   *   sincronización automática se ejecute encima.
+   * - Muestra avisos Toast al inicio y al final (Android).
+   *
+   * NOTA: No se permite ejecutar dos sincronizaciones parciales en paralelo;
+   * el método actúa como un "mutex" lógico vía el estado `status === "syncing"`.
+   */
+  async triggerPartialSync(reason: string = "manual"): Promise<void> {
+    console.log(`[BackgroundSync] 🔔 triggerPartialSync (motivo: ${reason})`);
+
+    // Si ya hay una sincronización en curso, pedir cancelación y esperar
+    if (this.state.status === "syncing") {
+      console.log("[BackgroundSync] ⏸️ Sync en curso, solicitando cancelación para reiniciar...");
+      if (Platform.OS === "android") {
+        ToastAndroid.show("Reiniciando sincronización...", ToastAndroid.SHORT);
+      }
+      this.cancelRequested = true;
+
+      // Esperar a que la sincronización en curso libere el estado (máx 30s)
+      const maxWaitMs = 30000;
+      const pollMs = 200;
+      const start = Date.now();
+      while (this.state.status === "syncing" && Date.now() - start < maxWaitMs) {
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), pollMs));
+      }
+
+      if (this.state.status === "syncing") {
+        console.warn("[BackgroundSync] ⚠️ La sync anterior no liberó el estado en 30s, abortando trigger");
+        return;
+      }
+      console.log("[BackgroundSync] ✅ Sync anterior cancelada, iniciando nueva");
+    } else {
+      if (Platform.OS === "android") {
+        ToastAndroid.show("Sincronizando...", ToastAndroid.SHORT);
+      }
+    }
+
+    // Reiniciar el intervalo automático para evitar solapes con la sync de 3 minutos
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = setInterval(() => {
+        this.performSync();
+      }, this.SYNC_INTERVAL_MS);
+      const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
+      this.updateState({ nextSyncTime: nextSync });
+    }
+
+    try {
+      await this.performSync();
+      if (Platform.OS === "android" && this.state.status === "success") {
+        ToastAndroid.show("Sincronización completa", ToastAndroid.SHORT);
+      }
+    } catch (error) {
+      console.error("[BackgroundSync] Error en triggerPartialSync:", error);
+    }
+  }
+
+  /**
    * Actualiza el estado y notifica a los listeners
    */
   private updateState(updates: Partial<BackgroundSyncState>): void {
@@ -296,6 +362,9 @@ class BackgroundSyncService {
 
     console.log("[BackgroundSync] Iniciando sincronización...");
 
+    // Resetear bandera de cancelación al inicio de cada sync
+    this.cancelRequested = false;
+
     this.updateState({
       status: "syncing",
       currentProgress: null,
@@ -329,7 +398,8 @@ class BackgroundSyncService {
             currentProgress: progress,
           });
         },
-        idUsuario
+        idUsuario,
+        () => this.cancelRequested,
       );
 
       // Actualizar estado según resultado
@@ -341,7 +411,7 @@ class BackgroundSyncService {
 
       const syncDuration = Date.now() - syncStartTime;
       console.log(
-        `[BackgroundSync] Sincronización finalizada en ${syncDuration}ms - Sucursal: ${sucursal}, Usuario: ${idUsuario}`
+        `[BackgroundSync] Sincronización finalizada en ${syncDuration}ms - Sucursal: ${sucursal}, Usuario: ${idUsuario}`,
       );
 
       if (result.success) {
@@ -356,9 +426,9 @@ class BackgroundSyncService {
           idUsuario,
         });
         console.log(
-          `[BackgroundSync] ✅ Sincronización completada exitosamente (Sucursal: ${sucursal}, Usuario: ${idUsuario})`
+          `[BackgroundSync] ✅ Sincronización completada exitosamente (Sucursal: ${sucursal}, Usuario: ${idUsuario})`,
         );
-        
+
         // Enviar bitácoras pendientes al final de sincronización exitosa
         try {
           console.log("[BackgroundSync] Enviando bitácoras pendientes al finalizar...");
@@ -378,7 +448,7 @@ class BackgroundSyncService {
         });
         console.log(
           `[BackgroundSync] ❌ Sincronización completada con errores (Sucursal: ${sucursal}, Usuario: ${idUsuario}):`,
-          result.error
+          result.error,
         );
       }
     } catch (error: any) {

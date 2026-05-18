@@ -223,8 +223,9 @@ export default function CortesScreen() {
         }
       }
       // console.log(allProductos);
-      const ventasPorProducto: Record<string, number> = {};
-      const importesPorProd: Record<string, number> = {};
+      // Agrupamiento por claveProd (número) para evitar duplicados por renombre de producto
+      const ventasPorClave: Record<number, { nombre: string; cant: number }> = {};
+      const importesPorClave: Record<number, { nombre: string; importe: number }> = {};
       const pagosPorTipo: Record<number, number> = {};
       // Acumulador para envases vendidos de kits con recuperaEnvase
       const envasesVendidosPorInsumo: Record<number, { descripcion: string; cantidad: number }> = {};
@@ -322,28 +323,24 @@ export default function CortesScreen() {
             const precioInsumo: number = Math.round((insumo.precio || 0) * 100) / 100;
             const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
 
-            ventasPorProducto[nombreInsumo] = (ventasPorProducto[nombreInsumo] || 0) + cantInsumo;
-            importesPorProd[nombreInsumo] = (importesPorProd[nombreInsumo] || 0) + cantInsumo * precioInsumo;
+            if (!ventasPorClave[idInsumo]) ventasPorClave[idInsumo] = { nombre: nombreInsumo, cant: 0 };
+            ventasPorClave[idInsumo].cant += cantInsumo;
+            if (!importesPorClave[idInsumo]) importesPorClave[idInsumo] = { nombre: nombreInsumo, importe: 0 };
+            importesPorClave[idInsumo].importe += cantInsumo * precioInsumo;
             importeKitTotal += cantInsumo * precioInsumo;
           }
           // Tipo de pago: usar el importe real de la venta
           pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
         } else {
           // Producto normal (o kit inventariable tratado como producto)
-          const nombre: string = v.nombreProducto || "Sin nombre";
+          // Usar nombre del catálogo actual para evitar duplicados por renombre
+          const nombreActual: string = productoNombreMap[claveProd] || v.nombreProducto || "Sin nombre";
           const precio: number = v.precio || 0;
 
-          // DEBUG comentado
-          // if (productoInfo?.esKit) {
-          //   console.log(
-          //     `[CortesScreen] ➕ Acumulando kit inventariable: "${nombre}" +${cantVenta} (total: ${
-          //       (ventasPorProducto[nombre] || 0) + cantVenta
-          //     })`,
-          //   );
-          // }
-
-          ventasPorProducto[nombre] = (ventasPorProducto[nombre] || 0) + cantVenta;
-          importesPorProd[nombre] = (importesPorProd[nombre] || 0) + cantVenta * precio;
+          if (!ventasPorClave[claveProd]) ventasPorClave[claveProd] = { nombre: nombreActual, cant: 0 };
+          ventasPorClave[claveProd].cant += cantVenta;
+          if (!importesPorClave[claveProd]) importesPorClave[claveProd] = { nombre: nombreActual, importe: 0 };
+          importesPorClave[claveProd].importe += cantVenta * precio;
           pagosPorTipo[tipoPago] = (pagosPorTipo[tipoPago] || 0) + importeVenta;
         }
 
@@ -356,21 +353,21 @@ export default function CortesScreen() {
         // }
       }
 
-      const inventarioResult = Object.entries(ventasPorProducto)
-        .filter(([, cant]) => cant > 0)
-        .map(([nombre, cant]) => ({
-          nombreProducto: nombre,
-          cantTotal: cant,
+      const inventarioResult = Object.values(ventasPorClave)
+        .filter((v) => v.cant > 0)
+        .map((v) => ({
+          nombreProducto: v.nombre,
+          cantTotal: v.cant,
         }));
       // console.log("[CortesScreen] 📊 INVENTARIO VENDIDO FINAL:", inventarioResult);
       setInventarioVendido(inventarioResult);
 
       setImportesPorProducto(
-        Object.entries(importesPorProd)
-          .filter(([, imp]) => imp > 0)
-          .map(([nombre, imp]) => ({
-            nombreProducto: nombre,
-            importe: imp,
+        Object.values(importesPorClave)
+          .filter((v) => v.importe > 0)
+          .map((v) => ({
+            nombreProducto: v.nombre,
+            importe: v.importe,
           })),
       );
 
@@ -776,6 +773,24 @@ export default function CortesScreen() {
           const rutaId = FullSyncService.getRutaForDate(startOfDay, endOfDay);
           console.log("Ruta ID:", rutaId);
           console.log("Nombre ruta:", nombreRuta);
+
+          console.log("--- INVENTARIO VENDIDO (state) ---");
+          console.log("Total productos:", inventarioVendido.length);
+          inventarioVendido.forEach((item, i) => console.log(`  [${i}] ${item.nombreProducto}: ${item.cantTotal}`));
+
+          console.log("--- IMPORTES POR PRODUCTO (state) ---");
+          console.log("Total productos:", importesPorProducto.length);
+          importesPorProducto.forEach((item, i) =>
+            console.log(`  [${i}] ${item.nombreProducto}: $${item.importe.toFixed(2)}`),
+          );
+
+          console.log("--- TIPOS DE PAGO (state) ---");
+          console.log("Total tipos:", tiposPago.length);
+          tiposPago.forEach((item, i) => console.log(`  [${i}] ${item.descripcion}: $${item.total.toFixed(2)}`));
+
+          const totalImportes = importesPorProducto.reduce((acc, i) => acc + i.importe, 0);
+          const totalPagos = tiposPago.reduce((acc, t) => acc + t.total, 0);
+          console.log(`TOTAL importes: $${totalImportes.toFixed(2)} | TOTAL pagos: $${totalPagos.toFixed(2)}`);
 
           console.log("===================");
         }}

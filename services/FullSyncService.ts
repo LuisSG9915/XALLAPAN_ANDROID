@@ -362,7 +362,8 @@ class FullSyncService {
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
     idUsuario?: number,
-  ): Promise<{ success: boolean; error?: string }> {
+    isCancelled?: () => boolean,
+  ): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -1708,7 +1709,16 @@ class FullSyncService {
     const totalTasks = tasks.length;
     let currentTask = 0;
 
+    let wasCancelled = false;
+
     for (const task of tasks) {
+      // Verificar cancelación antes de iniciar la siguiente tarea
+      if (isCancelled?.()) {
+        console.log(`[FullSyncService] ⛔ Sincronización incremental cancelada antes de ${task.name}`);
+        wasCancelled = true;
+        break;
+      }
+
       currentTask++;
       const fechaInicioTask = new Date();
       notify(task.name, currentTask, totalTasks, "syncing", `Sincronizando ${task.name}...`);
@@ -1761,14 +1771,15 @@ class FullSyncService {
       }
     });
 
-    const success = errors.length === 0;
+    const success = errors.length === 0 && !wasCancelled;
     // console.log(
     //   `[FullSyncService] Sincronización incremental completada. Éxito: ${success}, Errores: ${errors.length}`,
     // );
 
     return {
       success,
-      error: success ? undefined : errors.join("; "),
+      cancelled: wasCancelled || undefined,
+      error: success ? undefined : wasCancelled ? "Cancelada por nueva sincronización" : errors.join("; "),
     };
   }
 

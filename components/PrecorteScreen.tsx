@@ -108,6 +108,7 @@ export default function PrecorteScreen() {
         let minimo = Infinity;
 
         for (const comp of componentes) {
+          if (comp.noRecuperaEnvase) continue;
           const cantidadInsumo = comp.cantidad ? Number(comp.cantidad) : 0;
           if (cantidadInsumo <= 0) {
             minimo = 0;

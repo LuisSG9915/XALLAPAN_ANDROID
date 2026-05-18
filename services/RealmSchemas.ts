@@ -90,6 +90,7 @@ export const KitSchema = {
     recuperaEnvaseOtro: "bool?",
     controlPresamo: "bool?",
     envaseVendido: "bool?",
+    noRecuperaEnvase: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",

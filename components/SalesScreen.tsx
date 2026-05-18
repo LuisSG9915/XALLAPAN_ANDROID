@@ -16,6 +16,7 @@ import { Icon } from "react-native-elements";
 import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
+import BackgroundSyncService from "../services/BackgroundSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
 import LocationService, { LocationCoordinates } from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
@@ -271,6 +272,15 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Inventario por claveProd de la sucursal actual
       const inventarioPorClave = new Map<number, number>();
+      console.log(`[SalesScreen] currentSucursal=${currentSucursal} total inventarioData=${inventarioData.length}`);
+      console.log(
+        `[SalesScreen] Inventario claveProd 12 o 16 (todos):`,
+        inventarioData
+          .filter((i: any) => i.claveProd === 12 || i.claveProd === 16)
+          .map((i: any) => ({ id: i.id, claveProd: i.claveProd, saldo: i.saldo, sucursal: i.sucursal })),
+      );
+      const inventarioExcluido = inventarioData.filter((i: any) => i.sucursal == currentSucursal && i.id >= 10000);
+      console.log(`[SalesScreen] Inventario excluido por id>=10000: ${inventarioExcluido.length}`);
       inventarioData
         .filter((i: any) => i.sucursal == currentSucursal && i.id < 10000)
         .forEach((i: any) => {
@@ -279,6 +289,11 @@ export default function SalesScreen({ route }: { route?: any }) {
           const saldoActual = inventarioPorClave.get(clave) || 0;
           inventarioPorClave.set(clave, saldoActual + (i.saldo || 0));
         });
+      console.log(
+        `[SalesScreen] inventarioPorClave claveProd=12: ${inventarioPorClave.get(
+          12,
+        )}, claveProd=16: ${inventarioPorClave.get(16)}`,
+      );
 
       // Kits por idProducto
       const kitsPorProducto = new Map<number, any[]>();
@@ -303,7 +318,20 @@ export default function SalesScreen({ route }: { route?: any }) {
           if (!componentes.length) return 0;
           let minimo = Infinity;
 
+          console.log(
+            `[calcularExistencia] Kit productoId=${productoId} componentes:`,
+            componentes.map((c: any) => ({
+              idInsumo: c.idInsumo,
+              cantidad: c.cantidad,
+              noRecuperaEnvase: c.noRecuperaEnvase,
+            })),
+          );
+
           for (const comp of componentes) {
+            if (comp.noRecuperaEnvase) {
+              console.log(`[calcularExistencia] Saltando idInsumo=${comp.idInsumo} (noRecuperaEnvase=true)`);
+              continue;
+            }
             const cantidadInsumo = comp.cantidad ? Number(comp.cantidad) : 0;
             if (cantidadInsumo <= 0) {
               minimo = 0;
@@ -319,9 +347,11 @@ export default function SalesScreen({ route }: { route?: any }) {
 
             const saldo = inventarioPorClave.get(claveInsumo) || 0;
             const posible = Math.floor(saldo / cantidadInsumo);
+            console.log(`[calcularExistencia] idInsumo=${claveInsumo} saldo=${saldo} posible=${posible}`);
             minimo = Math.min(minimo, posible);
           }
 
+          console.log(`[calcularExistencia] Kit productoId=${productoId} minimo=${minimo === Infinity ? 0 : minimo}`);
           return minimo === Infinity ? 0 : minimo;
         }
 
@@ -2194,6 +2224,13 @@ export default function SalesScreen({ route }: { route?: any }) {
         ventasCreadas,
         inventarioActualizado,
         ticketImpreso,
+      });
+
+      // Disparar sincronización parcial (incremental) tras venta exitosa.
+      // Si ya hay una sync corriendo, BackgroundSyncService la cancela y reinicia.
+      // No usar await para no bloquear la UI.
+      BackgroundSyncService.triggerPartialSync("venta-finalizada").catch((err) => {
+        console.warn("[Sales] No se pudo iniciar sincronización post-venta:", err);
       });
     } catch (error) {
       console.error("[Sales] ❌ Error crítico en processSale:", error);
