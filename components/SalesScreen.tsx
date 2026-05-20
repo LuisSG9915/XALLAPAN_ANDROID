@@ -118,6 +118,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     precioEnvase: number | null;
     observacion: string;
     costo: number;
+    cantRecEnvOtro: number;
   } | null>(null);
   const intercambioDataRef = useRef<{
     envaseEntregadoClave: number;
@@ -129,6 +130,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     precioEnvase: number | null;
     observacion: string;
     costo: number;
+    cantRecEnvOtro: number;
   } | null>(null);
   const [pendingIntercambioProducto, setPendingIntercambioProducto] = useState<Producto | null>(null);
   const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
@@ -2042,7 +2044,11 @@ export default function SalesScreen({ route }: { route?: any }) {
         // Ya no se registra la salida del ENVASE XALLAPAN
         const currentIntercambioData = intercambioData || intercambioDataRef.current;
         if (currentIntercambioData) {
-          const cantIntercambio = validCart.find((ci) => esProductoIntercambio(ci.id))?.cantidad || 1;
+          const cantProductoIntercambio = validCart.find((ci) => esProductoIntercambio(ci.id))?.cantidad || 1;
+          // Usar cantRecEnvOtro para calcular cuántos envases se reciben (cantidad * cantRecEnvOtro)
+          const cantRecEnvOtro = currentIntercambioData.cantRecEnvOtro || 1;
+          const cantIntercambio = cantProductoIntercambio * cantRecEnvOtro;
+          console.log(`[Sales] Intercambio: cantProducto=${cantProductoIntercambio} * cantRecEnvOtro=${cantRecEnvOtro} = ${cantIntercambio} envases a registrar`);
 
           // COMENTADO: Ya no se registra la salida del envase XALLAPAN entregado
           // envaseItems.push({
@@ -3109,6 +3115,7 @@ export default function SalesScreen({ route }: { route?: any }) {
               precioEnvase: data.precioEnvase,
               observacion: data.observacion,
               costo: data.costo,
+              cantRecEnvOtro: data.cantRecEnvOtro,
             };
             intercambioDataRef.current = dataObj;
             setIntercambioData(dataObj);
@@ -3125,8 +3132,10 @@ export default function SalesScreen({ route }: { route?: any }) {
               let updatedCart = base.map((ci) => (esProductoIntercambio(ci.id) ? { ...ci, precio: data.costo } : ci));
 
               // Agregar producto 76 al carrito con precioEnvase si viene del modal
+              // Usar cantRecEnvOtro para calcular la cantidad de envases (cantidad * cantRecEnvOtro)
               const precioEnvase = data.precioEnvase;
-              console.log(`[Sales] precioEnvase recibido del modal: ${precioEnvase}`);
+              const cantEnvases = data.cantRecEnvOtro > 0 ? data.cantRecEnvOtro : 1;
+              console.log(`[Sales] precioEnvase recibido del modal: ${precioEnvase}, cantRecEnvOtro: ${data.cantRecEnvOtro}, cantidad: ${cantEnvases}`);
               if (precioEnvase != null && precioEnvase > 0) {
                 const prod76 = productosBase.find((p: any) => p.id === 76);
                 const desc76 = prod76?.descripcion || "ENVASE";
@@ -3134,7 +3143,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 const idxEnvase = updatedCart.findIndex((ci) => ci.id === 76);
                 if (idxEnvase >= 0) {
                   updatedCart = updatedCart.map((ci) =>
-                    ci.id === 76 ? { ...ci, cantidad: ci.cantidad + 1, precio: precioEnvase } : ci,
+                    ci.id === 76 ? { ...ci, cantidad: ci.cantidad + cantEnvases, precio: precioEnvase } : ci,
                   );
                 } else {
                   updatedCart = [
@@ -3145,11 +3154,11 @@ export default function SalesScreen({ route }: { route?: any }) {
                       descripcion: desc76,
                       precio: precioEnvase,
                       existencia: 9999,
-                      cantidad: 1,
+                      cantidad: cantEnvases,
                     },
                   ];
                 }
-                console.log(`[Sales] Producto 76 (${desc76}) agregado al carrito con precio $${precioEnvase}`);
+                console.log(`[Sales] Producto 76 (${desc76}) agregado al carrito con precio $${precioEnvase} x ${cantEnvases} envases`);
               }
 
               return updatedCart;

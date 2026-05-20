@@ -524,6 +524,7 @@ export default function ReporteVentasScreen() {
         regimenFiscal?: string;
         telefono?: string;
         ticketFinal?: string;
+        permisoDomicilioTicket?: boolean;
       } = {};
       try {
         if (currentUser?.id) {
@@ -536,6 +537,7 @@ export default function ReporteVentasScreen() {
               regimenFiscal: realmUser.regimenFiscal,
               telefono: realmUser.telefono,
               ticketFinal: realmUser.ticketFinal,
+              permisoDomicilioTicket: realmUser.permisoDomicilioTicket,
             };
             console.log("[ReporteVentas] Datos de ticket obtenidos de Realm:", usuarioTicketData);
           }
@@ -544,8 +546,20 @@ export default function ReporteVentasScreen() {
         console.error("[ReporteVentas] Error al obtener datos de usuario de Realm:", e);
       }
 
+      // Obtener domicilio del cliente si el permiso está activo
+      let clientDomicilio: string | undefined;
+      const permisoValue = usuarioTicketData.permisoDomicilioTicket as any;
+      const tienePermiso = permisoValue === true || permisoValue === 1 || permisoValue === "1";
+      console.log("[ReporteVentas] Permiso domicilio ticket raw:", usuarioTicketData.permisoDomicilioTicket, "evaluado:", tienePermiso);
+      if (tienePermiso && groupedRow.cve_cliente) {
+        const clienteRealm = FullSyncService.getClienteFullById(groupedRow.cve_cliente);
+        clientDomicilio = clienteRealm?.domicilio || undefined;
+        console.log("[ReporteVentas] Domicilio del cliente para ticket:", clientDomicilio);
+      }
+
       const saleTicketData: SaleTicketData = {
         clientName,
+        clientDomicilio,
         date,
         paymentMethod,
         items,
@@ -630,6 +644,7 @@ export default function ReporteVentasScreen() {
       regimenFiscal?: string;
       telefono?: string;
       ticketFinal?: string;
+      permisoDomicilioTicket?: boolean;
     } = {};
     try {
       if (currentUser?.id) {
@@ -642,6 +657,7 @@ export default function ReporteVentasScreen() {
             regimenFiscal: realmUser.regimenFiscal,
             telefono: realmUser.telefono,
             ticketFinal: realmUser.ticketFinal,
+            permisoDomicilioTicket: realmUser.permisoDomicilioTicket,
           };
           console.log("[ReporteVentas] Datos de ticket obtenidos de Realm (ReporteItem):", usuarioTicketData);
         }
@@ -650,8 +666,20 @@ export default function ReporteVentasScreen() {
       console.error("[ReporteVentas] Error al obtener datos de usuario de Realm:", e);
     }
 
+    // Obtener domicilio del cliente si el permiso está activo
+    let clientDomicilio: string | undefined;
+    const permisoValue = usuarioTicketData.permisoDomicilioTicket as any;
+    const tienePermiso = permisoValue === true || permisoValue === 1 || permisoValue === "1";
+    console.log("[ReporteVentas] Permiso domicilio ticket raw (ReporteItem):", usuarioTicketData.permisoDomicilioTicket, "evaluado:", tienePermiso);
+    if (tienePermiso && row.cve_cliente) {
+      const clienteRealm = FullSyncService.getClienteFullById(row.cve_cliente);
+      clientDomicilio = clienteRealm?.domicilio || undefined;
+      console.log("[ReporteVentas] Domicilio del cliente para ticket (ReporteItem):", clientDomicilio);
+    }
+
     const saleTicketData: SaleTicketData = {
       clientName,
+      clientDomicilio,
       paymentMethod,
       items,
       total,
@@ -1097,88 +1125,108 @@ export default function ReporteVentasScreen() {
             data={groupedItems}
             keyExtractor={(i) => String(i.idMovil || i.no_venta)}
             scrollEnabled={false}
-            renderItem={({ item }) => (
-              <View style={styles.rowItem}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.invTitle}>
-                    #{item.idMovil || item.no_venta} • {item.nombre}
-                  </Text>
-                  <Text style={styles.muted}>
-                    {new Date(item.fecha).toLocaleString("es-MX")} • {item.tipoPago}
-                  </Text>
-                  <Text style={styles.muted}>{item.productos.length} producto(s)</Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.money}>${item.totalImporte.toFixed(2)}</Text>
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
-                      <Icon name="print" type="material" color={COLORS.primary} size={20} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
-                      <Icon name="visibility" type="material" color={COLORS.info} size={20} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => facturarVenta(item)}
-                      disabled={!item.folioFactura && !item.facturacionMovil}
-                      style={styles.iconBtn}
-                    >
-                      <Icon
-                        name="receipt"
-                        type="material"
-                        color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
-                        size={20}
-                      />
-                    </TouchableOpacity>
-                    {!isLocalView && (
-                      <>
-                        <TouchableOpacity
-                          onPress={() => abrirModificarVenta(item)}
-                          disabled={
-                            !item.no_venta ||
-                            item.no_venta === 0 ||
-                            item.totalImporte === 0 ||
-                            item.productos.length === 0 ||
-                            !esVentaDeHoy(item)
-                          }
-                          style={styles.iconBtn}
-                        >
-                          <Icon
-                            name="edit"
-                            type="material"
-                            color={
+            renderItem={({ item }) => {
+              // Obtener usuario actual y verificar permiso de domicilio
+              const currentUser = AuthService.currentUser;
+              const userRealm = currentUser?.id ? FullSyncService.getUsuarioById(currentUser.id) : null;
+              const permisoRaw = userRealm?.permisoDomicilioTicket as any;
+              const tienePermisoDomicilio = permisoRaw === true || permisoRaw === 1 || permisoRaw === "1";
+
+              // Obtener cliente y su domicilio si tiene permiso
+              let domicilioCliente = null;
+              if (tienePermisoDomicilio && item.cve_cliente) {
+                const clienteRealm = FullSyncService.getClienteFullById(item.cve_cliente);
+                domicilioCliente = clienteRealm?.domicilio;
+              }
+
+              return (
+                <View style={styles.rowItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.invTitle}>
+                      #{item.idMovil || item.no_venta} • {item.nombre}
+                    </Text>
+                    {domicilioCliente && (
+                      <Text style={[styles.muted, { fontSize: 11, fontStyle: 'italic' }]}>
+                        {domicilioCliente}
+                      </Text>
+                    )}
+                    <Text style={styles.muted}>
+                      {new Date(item.fecha).toLocaleString("es-MX")} • {item.tipoPago}
+                    </Text>
+                    <Text style={styles.muted}>{item.productos.length} producto(s)</Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.money}>${item.totalImporte.toFixed(2)}</Text>
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity onPress={() => imprimirTicket(item)} style={styles.iconBtn}>
+                        <Icon name="print" type="material" color={COLORS.primary} size={20} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => visualizarTicket(item)} style={styles.iconBtn}>
+                        <Icon name="visibility" type="material" color={COLORS.info} size={20} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => facturarVenta(item)}
+                        disabled={!item.folioFactura && !item.facturacionMovil}
+                        style={styles.iconBtn}
+                      >
+                        <Icon
+                          name="receipt"
+                          type="material"
+                          color={!item.folioFactura && !item.facturacionMovil ? COLORS.muted : COLORS.success}
+                          size={20}
+                        />
+                      </TouchableOpacity>
+                      {!isLocalView && (
+                        <>
+                          <TouchableOpacity
+                            onPress={() => abrirModificarVenta(item)}
+                            disabled={
                               !item.no_venta ||
                               item.no_venta === 0 ||
                               item.totalImporte === 0 ||
                               item.productos.length === 0 ||
                               !esVentaDeHoy(item)
-                                ? COLORS.muted
-                                : COLORS.warning
                             }
-                            size={20}
-                          />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => cancelarVenta(item)}
-                          disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
-                          style={styles.iconBtn}
-                        >
-                          <Icon
-                            name="cancel"
-                            type="material"
-                            color={
-                              !item.no_venta || item.no_venta === 0 || item.totalImporte === 0
-                                ? COLORS.muted
-                                : COLORS.error
-                            }
-                            size={20}
-                          />
-                        </TouchableOpacity>
-                      </>
-                    )}
+                            style={styles.iconBtn}
+                          >
+                            <Icon
+                              name="edit"
+                              type="material"
+                              color={
+                                !item.no_venta ||
+                                item.no_venta === 0 ||
+                                item.totalImporte === 0 ||
+                                item.productos.length === 0 ||
+                                !esVentaDeHoy(item)
+                                  ? COLORS.muted
+                                  : COLORS.warning
+                              }
+                              size={20}
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => cancelarVenta(item)}
+                            disabled={!item.no_venta || item.no_venta === 0 || item.totalImporte === 0}
+                            style={styles.iconBtn}
+                          >
+                            <Icon
+                              name="cancel"
+                              type="material"
+                              color={
+                                !item.no_venta || item.no_venta === 0 || item.totalImporte === 0
+                                  ? COLORS.muted
+                                  : COLORS.error
+                              }
+                              size={20}
+                            />
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
                   </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
           />
         )}
 

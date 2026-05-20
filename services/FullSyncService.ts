@@ -23,8 +23,23 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 36,
+        schemaVersion: 39,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v39: Cambiar cantRecEnvOtro de bool a int en Kit
+          if (oldRealm.schemaVersion < 39) {
+            console.log("[Migration v39] Cambiando tipo de cantRecEnvOtro de bool a int en Kit");
+          }
+
+          // Migración v38: Agregar campo cantRecEnvOtro a Kit (obsoleto, reemplazado por v39)
+          if (oldRealm.schemaVersion < 38) {
+            console.log("[Migration v38] Agregando campo cantRecEnvOtro a Kit");
+          }
+
+          // Migración v37: Agregar campo domicilio a ClienteFull y permisoDomicilioTicket a Usuario
+          if (oldRealm.schemaVersion < 37) {
+            console.log("[Migration v37] Agregando domicilio a ClienteFull y permisoDomicilioTicket a Usuario");
+          }
+
           // Migración v36: Agregar campo precioEnvase a KitIntercambio y omitirMovil a Producto
           if (oldRealm.schemaVersion < 36) {
             console.log("[Migration v36] Agregando precioEnvase a KitIntercambio y omitirMovil a Producto");
@@ -777,6 +792,8 @@ class FullSyncService {
                   idGrupo: cliente.idGrupo,
                   credito: cliente.credito,
                   facturacionMovil: cliente.facturacionMovil,
+                  listaPrecio: cliente.listaPrecio,
+                  domicilio: cliente.domicilio || null,
                   fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
                   correoFactura: cliente.correo_factura || null,
                   syncedAt: new Date(),
@@ -896,8 +913,12 @@ class FullSyncService {
                       ? false
                       : null,
                   rfc: usuario.rfc ?? null,
+                  domicilio: usuario.domicilio ?? null,
+                  regimenFiscal: usuario.regimenFiscal ?? null,
+                  nombreCia: usuario.nombreCia ?? null,
                   telefono: usuario.telefono ?? null,
                   ticketFinal: usuario.ticketFinal ?? null,
+                  permisoDomicilioTicket: usuario.permisoDomicilioTicket ?? null,
                   syncedAt: nowMexico,
                 };
 

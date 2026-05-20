@@ -12,6 +12,7 @@ export interface TicketOptions {
 
 export interface SaleTicketData {
   clientName: string;
+  clientDomicilio?: string;
   paymentMethod: string;
   items: Array<{
     description: string;
@@ -178,6 +179,11 @@ class TicketPrinter {
     }
 
     lines.push(`Cliente: ${data.clientName}`);
+
+    if (data.clientDomicilio) {
+      const clientDomLines = this.wrapText(data.clientDomicilio, width);
+      clientDomLines.forEach((dl) => lines.push(dl));
+    }
 
     if (data.ticketNumber) {
       lines.push(`FOLIO: ${data.ticketNumber}`);

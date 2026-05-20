@@ -603,7 +603,14 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     navigation.navigate("Sales");
   }, [currentUser, navigation]);
 
-  const menuItems = [
+  // Orden de prioridad: Punto de Venta, Agenda, Cargas, Inventario, Corte, Impresora
+  const priorityOrder = [ "cumplimiento","sales", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
+
+  // Menús que solo se muestran al usuario ID 4
+  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion"];
+  const isAdmin = currentUser?.id === 4;
+
+  const allMenuItems = [
     {
       id: "sales",
       title: "Punto de Venta",
@@ -613,6 +620,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       screen: "Sales",
       description: "Registra ventas",
       customHandler: handleNavigateToSales,
+    },
+    {
+      id: "cumplimiento",
+      title: "Agenda",
+      icon: "event",
+      type: "material",
+      color: "#8E44AD",
+      screen: "Cumplimiento",
+      description: "Cumplimiento de visitas",
     },
     {
       id: "traspaso",
@@ -633,13 +649,13 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       description: "Revisa el inventario",
     },
     {
-      id: "reporte",
-      title: "Ventas",
-      icon: "trending-up",
+      id: "cortes",
+      title: "Cortes",
+      icon: "receipt-long",
       type: "material",
-      color: COLORS.cards.report,
-      screen: "ReporteVentas",
-      description: "Histórico ventas",
+      color: "#E65100",
+      screen: "Cortes",
+      description: "Corte de ruta",
     },
     {
       id: "printersettings",
@@ -651,6 +667,16 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       description: "Configurar",
     },
     {
+      id: "reporte",
+      title: "Ventas",
+      icon: "trending-up",
+      type: "material",
+      color: COLORS.cards.report,
+      screen: "ReporteVentas",
+      description: "Histórico ventas",
+    },
+    // Menús de administrador (solo ID 4)
+    {
       id: "dataview",
       title: "Datos",
       icon: "bar-chart",
@@ -659,7 +685,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       screen: "DataView",
       description: "Datos locales",
     },
-
     {
       id: "billing",
       title: "Cobranza",
@@ -670,15 +695,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       description: "Gestiona pagos",
     },
     {
-      id: "cumplimiento",
-      title: "Agenda",
-      icon: "event",
-      type: "material",
-      color: "#8E44AD",
-      screen: "Cumplimiento",
-      description: "Cumplimiento de visitas",
-    },
-    {
       id: "envaseoperacion",
       title: "Envases",
       icon: "swap-vert",
@@ -687,16 +703,29 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       screen: "EnvaseOperacion",
       description: "Intercambio / Préstamo",
     },
-    {
-      id: "cortes",
-      title: "Cortes",
-      icon: "receipt-long",
-      type: "material",
-      color: "#E65100",
-      screen: "Cortes",
-      description: "Corte de ruta",
-    },
   ];
+
+  // Filtrar menús de admin si el usuario no es ID 4
+  const filteredItems = allMenuItems.filter(
+    (item) => !adminOnlyMenus.includes(item.id) || isAdmin
+  );
+
+  // Ordenar: primero los de prioridad, luego el resto
+  const menuItems = filteredItems.sort((a, b) => {
+    const indexA = priorityOrder.indexOf(a.id);
+    const indexB = priorityOrder.indexOf(b.id);
+
+    // Si ambos están en prioridad, ordenar por índice
+    if (indexA !== -1 && indexB !== -1) {
+      return indexA - indexB;
+    }
+    // Si solo A está en prioridad, va primero
+    if (indexA !== -1) return -1;
+    // Si solo B está en prioridad, va primero
+    if (indexB !== -1) return 1;
+    // Si ninguno está en prioridad, mantener orden original
+    return 0;
+  });
 
   return (
     <View style={[styles.container, isDarkMode && styles.containerDark]}>

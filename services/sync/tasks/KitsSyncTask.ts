@@ -67,11 +67,11 @@ export class KitsSyncTask extends SyncTask {
         for (const kit of kits) {
           const existing = this.realm.objectForPrimaryKey("Kit", kit.id);
 
-          if (kit.envaseIntercambio) {
+          if (kit.envaseIntercambio || kit.cantRecEnvOtro > 0) {
             console.log(
               `[KitsSyncTask] DEBUG Kit id=${kit.id} idProducto=${kit.idProducto} idInsumo=${
                 kit.idInsumo
-              } envaseIntercambio=${kit.envaseIntercambio} (type=${typeof kit.envaseIntercambio})`,
+              } envaseIntercambio=${kit.envaseIntercambio} cantRecEnvOtro=${kit.cantRecEnvOtro}`,
             );
           }
           const kitData = {
@@ -88,6 +88,7 @@ export class KitsSyncTask extends SyncTask {
             recuperaEnvaseOtro: kit.recuperaEnvaseOtro ? true : false,
             controlPresamo: kit.controlPresamo ? true : false,
             envaseVendido: kit.envaseVendido ? true : false,
+            cantRecEnvOtro: kit.cantRecEnvOtro != null ? Number(kit.cantRecEnvOtro) : 0,  // Valor numérico: 0, 1, 2, 3...
             noRecuperaEnvase: kit.noRecuperaEnvase ? true : false,
             syncedAt: new Date(),
           };

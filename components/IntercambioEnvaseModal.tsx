@@ -27,6 +27,7 @@ type IntercambioEnvaseModalProps = {
     precioEnvase: number | null;
     observacion: string;
     costo: number;
+    cantRecEnvOtro: number; // Cantidad de envases a recibir (cantidad * CantRecEnvOtro)
   }) => void;
   onCancel: () => void;
 };
@@ -49,6 +50,7 @@ export default function IntercambioEnvaseModal({
   const [envasesDisponibles, setEnvasesDisponibles] = useState<EnvaseProducto[]>([]);
   const [envaseRecibido, setEnvaseRecibido] = useState<EnvaseProducto | null>(null);
   const [kitIntercambioProductoId, setKitIntercambioProductoId] = useState<number | null>(null);
+  const [cantRecEnvOtro, setCantRecEnvOtro] = useState<number>(1); // Default 1 si es 0
   const [observacion, setObservacion] = useState("");
   const [mostrarLista, setMostrarLista] = useState(false);
 
@@ -77,6 +79,12 @@ export default function IntercambioEnvaseModal({
         const getKitByIdProducto = getKits.find((kit) => kit.idProducto === productoId);
         console.log({ getKitByIdProducto });
         resolvedKitIntercambioProductoId = getKitByIdProducto?.idInsumo ?? productoId;
+        
+        // Calcular cantRecEnvOtro del kit (si es 0 o null, usar 1)
+        const kitCantRecEnvOtro = getKitByIdProducto?.cantRecEnvOtro ?? 0;
+        const calculatedCantRecEnvOtro = kitCantRecEnvOtro > 0 ? Number(kitCantRecEnvOtro) : 1;
+        setCantRecEnvOtro(calculatedCantRecEnvOtro);
+        console.log(`[IntercambioModal] cantRecEnvOtro del kit: ${getKitByIdProducto?.cantRecEnvOtro}, calculado: ${calculatedCantRecEnvOtro}`);
         const idsEnvasesOtro = FullSyncService.getEnvasesIntercambioPorProducto(resolvedKitIntercambioProductoId!);
         console.log(`[IntercambioModal] IDs de envases (idEnvaseOtro) desde KitIntercambio:`, idsEnvasesOtro);
 
@@ -145,6 +153,7 @@ export default function IntercambioEnvaseModal({
       precioEnvase: envaseRecibido.precioEnvase ?? null,
       observacion: observacion.trim(),
       costo: costoAutomatico,
+      cantRecEnvOtro: cantRecEnvOtro,
     });
   };
 
@@ -208,9 +217,11 @@ export default function IntercambioEnvaseModal({
               <Text style={styles.sectionLabel}>PRECIO DEL ENVASE RECIBIDO:</Text>
               <View style={[styles.fixedValue, { borderLeftColor: COLORS.success ?? "#4CAF50" }]}>
                 <Text style={[styles.fixedValueText, { color: COLORS.success ?? "#4CAF50" }]}>
-                  ${envaseRecibido.precioEnvase.toFixed(2)}
+                  ${(envaseRecibido.precioEnvase * cantidad * cantRecEnvOtro).toFixed(2)}
                 </Text>
-                <Text style={styles.fixedValueSub}>Se agregará al carrito como cargo adicional</Text>
+                <Text style={styles.fixedValueSub}>
+                  {cantidad} × {cantRecEnvOtro} = {cantidad * cantRecEnvOtro} envases × ${envaseRecibido.precioEnvase.toFixed(2)} c/u
+                </Text>
               </View>
             </View>
           )}

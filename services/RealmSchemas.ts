@@ -50,6 +50,7 @@ export const UsuarioSchema = {
     nombreCia: "string?",
     telefono: "string?",
     ticketFinal: "string?",
+    permisoDomicilioTicket: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",
@@ -90,6 +91,7 @@ export const KitSchema = {
     recuperaEnvaseOtro: "bool?",
     controlPresamo: "bool?",
     envaseVendido: "bool?",
+    cantRecEnvOtro: "int?",  // Número entero: cantidad de envases a recibir (0, 1, 2, 3...)
     noRecuperaEnvase: "bool?",
     syncedAt: "date",
   },
@@ -184,6 +186,7 @@ export const ClienteFullSchema = {
     credito: "bool?",
     facturacionMovil: "bool?",
     listaPrecio: "int?",
+    domicilio: "string?",
     fechaAct: "date?",
     syncedAt: "date",
     syncedAr: "date?",
