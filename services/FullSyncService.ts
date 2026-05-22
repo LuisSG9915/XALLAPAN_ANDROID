@@ -3052,11 +3052,11 @@ class FullSyncService {
     let envPrestadoEco = 0;
     const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
 
-    // Obtener productos con intercambio (recuperaEnvaseOtro), préstamo (controlPresamo), recuperaEnvase y envaseVendido desde Kits
+    // Obtener productos con intercambio (recuperaEnvaseOtro), préstamo (controlPresamo), recuperaEnvase y envases vendidos (noRecuperaEnvase) desde Kits
     const kitsConIntercambio = Array.from(this.realm.objects("Kit").filtered("recuperaEnvaseOtro == true")) as any[];
     const kitsConPrestamo = Array.from(this.realm.objects("Kit").filtered("controlPresamo == true")) as any[];
     const kitsConRecuperaEnvase = Array.from(this.realm.objects("Kit").filtered("recuperaEnvase == true")) as any[];
-    const kitsConEnvaseVendido = Array.from(this.realm.objects("Kit").filtered("envaseVendido == true")) as any[];
+    const kitsConEnvaseVendido = Array.from(this.realm.objects("Kit").filtered("noRecuperaEnvase == true")) as any[];
 
     // Extraer los idProducto (claves de producto) únicos
     const clavesIntercambio = new Set<number>(
@@ -3071,6 +3071,37 @@ class FullSyncService {
     const clavesEnvaseVendido = new Set<number>(
       kitsConEnvaseVendido.map((k) => k.idProducto).filter((id: number | null) => id != null),
     );
+
+    // Mapas de producto -> cantidad de insumo para cada tipo de kit
+    const cantidadInsumoPorProducto: Record<number, number> = {};
+    for (const kit of kitsConEnvaseVendido) {
+      if (kit.idProducto != null) {
+        cantidadInsumoPorProducto[kit.idProducto] = kit.cantidad || 1;
+      }
+    }
+
+    const cantidadInsumoIntercambio: Record<number, number> = {};
+    for (const kit of kitsConIntercambio) {
+      if (kit.idProducto != null) {
+        // Usar cantRecEnvOtro (cantidad de envases a recibir), si es 0 o null usar 1
+        const cantRecEnvOtro = kit.cantRecEnvOtro;
+        cantidadInsumoIntercambio[kit.idProducto] = (cantRecEnvOtro != null && cantRecEnvOtro > 0) ? cantRecEnvOtro : 1;
+      }
+    }
+
+    const cantidadInsumoPrestamo: Record<number, number> = {};
+    for (const kit of kitsConPrestamo) {
+      if (kit.idProducto != null) {
+        cantidadInsumoPrestamo[kit.idProducto] = kit.cantidad || 1;
+      }
+    }
+
+    const cantidadInsumoRecuperaEnvase: Record<number, number> = {};
+    for (const kit of kitsConRecuperaEnvase) {
+      if (kit.idProducto != null) {
+        cantidadInsumoRecuperaEnvase[kit.idProducto] = kit.cantidad || 1;
+      }
+    }
 
     // Extraer los idInsumo (envases) de kits con recuperaEnvaseOtro, controlPresamo, o envaseVendido
     // Estos NO deben sumarse al total genérico de envases vendidos
@@ -3142,24 +3173,30 @@ class FullSyncService {
           if (!intercambioPorArea[area]) {
             intercambioPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          intercambioPorArea[area].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidad}`);
+          const cantidadInsumo = cantidadInsumoIntercambio[claveProd] || 1;
+          const cantidadTotal = cantidad * cantidadInsumo;
+          intercambioPorArea[area].cantidad += cantidadTotal;
+          console.log(`[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
         }
 
         if (claveProd && clavesPrestamo.has(claveProd) && cantidad > 0 && area) {
           if (!prestamoPorArea[area]) {
             prestamoPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          prestamoPorArea[area].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidad}`);
+          const cantidadInsumo = cantidadInsumoPrestamo[claveProd] || 1;
+          const cantidadTotal = cantidad * cantidadInsumo;
+          prestamoPorArea[area].cantidad += cantidadTotal;
+          console.log(`[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
         }
 
         if (claveProd && clavesRecuperaEnvase.has(claveProd) && cantidad > 0 && area) {
           if (!recuperadosPorArea[area]) {
             recuperadosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          recuperadosPorArea[area].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidad}`);
+          const cantidadInsumo = cantidadInsumoRecuperaEnvase[claveProd] || 1;
+          const cantidadTotal = cantidad * cantidadInsumo;
+          recuperadosPorArea[area].cantidad += cantidadTotal;
+          console.log(`[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
         }
 
         // Procesar ventas de productos con envaseVendido
@@ -3167,8 +3204,10 @@ class FullSyncService {
           if (!envasesVendidosPorArea[area]) {
             envasesVendidosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
-          envasesVendidosPorArea[area].cantidad += cantidad;
-          console.log(`[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidad}`);
+          const cantidadInsumo = cantidadInsumoPorProducto[claveProd] || 1;
+          const cantidadEnvases = cantidad * cantidadInsumo;
+          envasesVendidosPorArea[area].cantidad += cantidadEnvases;
+          console.log(`[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidadEnvases} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
         }
       }
     } catch (err) {
