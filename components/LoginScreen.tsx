@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from "react-native";
 import { Icon } from "react-native-elements";
 import AuthService from "../services/AuthService";
@@ -100,7 +101,7 @@ export default function LoginScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerContainer}>
           <View style={styles.logoContainer}>
-            <Icon name="ac-unit" type="material" size={50} color={COLORS.primary} />
+            <Image source={require("../imgs/ImpulsoAPK.png")} style={styles.logoImage} resizeMode="cover" />
           </View>
           <Text style={styles.appName}>{APP_NAME}</Text>
           <Text style={styles.subtitle}>Bienvenido de nuevo</Text>
@@ -196,7 +197,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: SPACING.m,
+    overflow: "hidden",
     ...SHADOWS.medium,
+  },
+  logoImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
   appName: {
     ...TYPOGRAPHY.h1,

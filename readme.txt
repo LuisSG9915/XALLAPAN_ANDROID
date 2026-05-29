@@ -1,3 +1,12 @@
+--REINICIO--
+
+cd android
+.\gradlew clean
+cd ..
+
+
+---RUN----
+adb uninstall com.awesomeproject
 pnpm android
 
 

@@ -1922,6 +1922,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           regimenFiscal?: string;
           telefono?: string;
           ticketFinal?: string;
+          permisoDomicilioTicket?: boolean;
         } = {};
         try {
           if (currentUser?.id) {
@@ -1934,6 +1935,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 regimenFiscal: realmUser.regimenFiscal,
                 telefono: realmUser.telefono,
                 ticketFinal: realmUser.ticketFinal,
+                permisoDomicilioTicket: realmUser.permisoDomicilioTicket,
               };
               console.log("[Sales] Datos de ticket obtenidos de Realm:", usuarioTicketData);
             }
@@ -1942,8 +1944,25 @@ export default function SalesScreen({ route }: { route?: any }) {
           console.error("[Sales] Error al obtener datos de usuario de Realm:", e);
         }
 
+        // Obtener domicilio del cliente si el permiso está activo
+        let clientDomicilio: string | undefined;
+        const permisoValue = usuarioTicketData.permisoDomicilioTicket as any;
+        const tienePermiso = permisoValue === true || permisoValue === 1 || permisoValue === "1";
+        console.log(
+          "[Sales] Permiso domicilio ticket raw:",
+          usuarioTicketData.permisoDomicilioTicket,
+          "evaluado:",
+          tienePermiso,
+        );
+        if (tienePermiso && client.id) {
+          const clienteRealm = FullSyncService.getClienteFullById(client.id);
+          clientDomicilio = clienteRealm?.domicilio || undefined;
+          console.log("[Sales] Domicilio del cliente para ticket:", clientDomicilio);
+        }
+
         await TicketPrinter.printSaleTicket({
           clientName: client.nombre,
+          clientDomicilio,
           paymentMethod: descripcionMedioPago,
           items: validCart.map((item) => ({
             description: item.descripcion,
@@ -2048,7 +2067,9 @@ export default function SalesScreen({ route }: { route?: any }) {
           // Usar cantRecEnvOtro para calcular cuántos envases se reciben (cantidad * cantRecEnvOtro)
           const cantRecEnvOtro = currentIntercambioData.cantRecEnvOtro || 1;
           const cantIntercambio = cantProductoIntercambio * cantRecEnvOtro;
-          console.log(`[Sales] Intercambio: cantProducto=${cantProductoIntercambio} * cantRecEnvOtro=${cantRecEnvOtro} = ${cantIntercambio} envases a registrar`);
+          console.log(
+            `[Sales] Intercambio: cantProducto=${cantProductoIntercambio} * cantRecEnvOtro=${cantRecEnvOtro} = ${cantIntercambio} envases a registrar`,
+          );
 
           // COMENTADO: Ya no se registra la salida del envase XALLAPAN entregado
           // envaseItems.push({
@@ -3135,7 +3156,9 @@ export default function SalesScreen({ route }: { route?: any }) {
               // Usar cantRecEnvOtro para calcular la cantidad de envases (cantidad * cantRecEnvOtro)
               const precioEnvase = data.precioEnvase;
               const cantEnvases = data.cantRecEnvOtro > 0 ? data.cantRecEnvOtro : 1;
-              console.log(`[Sales] precioEnvase recibido del modal: ${precioEnvase}, cantRecEnvOtro: ${data.cantRecEnvOtro}, cantidad: ${cantEnvases}`);
+              console.log(
+                `[Sales] precioEnvase recibido del modal: ${precioEnvase}, cantRecEnvOtro: ${data.cantRecEnvOtro}, cantidad: ${cantEnvases}`,
+              );
               if (precioEnvase != null && precioEnvase > 0) {
                 const prod76 = productosBase.find((p: any) => p.id === 76);
                 const desc76 = prod76?.descripcion || "ENVASE";
@@ -3158,7 +3181,9 @@ export default function SalesScreen({ route }: { route?: any }) {
                     },
                   ];
                 }
-                console.log(`[Sales] Producto 76 (${desc76}) agregado al carrito con precio $${precioEnvase} x ${cantEnvases} envases`);
+                console.log(
+                  `[Sales] Producto 76 (${desc76}) agregado al carrito con precio $${precioEnvase} x ${cantEnvases} envases`,
+                );
               }
 
               return updatedCart;
