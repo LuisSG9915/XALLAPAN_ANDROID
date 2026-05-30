@@ -23,8 +23,18 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 39,
+        schemaVersion: 41,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v41: Agregar campo idEmpresa a ClienteFull
+          if (oldRealm.schemaVersion < 41) {
+            console.log("[Migration v41] Agregando campo idEmpresa a ClienteFull");
+          }
+
+          // Migración v40: Nueva tabla Cia para compañías
+          if (oldRealm.schemaVersion < 40) {
+            console.log("[Migration v40] Creando tabla Cia");
+          }
+
           // Migración v39: Cambiar cantRecEnvOtro de bool a int en Kit
           if (oldRealm.schemaVersion < 39) {
             console.log("[Migration v39] Cambiando tipo de cantRecEnvOtro de bool a int en Kit");
@@ -3085,7 +3095,7 @@ class FullSyncService {
       if (kit.idProducto != null) {
         // Usar cantRecEnvOtro (cantidad de envases a recibir), si es 0 o null usar 1
         const cantRecEnvOtro = kit.cantRecEnvOtro;
-        cantidadInsumoIntercambio[kit.idProducto] = (cantRecEnvOtro != null && cantRecEnvOtro > 0) ? cantRecEnvOtro : 1;
+        cantidadInsumoIntercambio[kit.idProducto] = cantRecEnvOtro != null && cantRecEnvOtro > 0 ? cantRecEnvOtro : 1;
       }
     }
 
@@ -3176,7 +3186,9 @@ class FullSyncService {
           const cantidadInsumo = cantidadInsumoIntercambio[claveProd] || 1;
           const cantidadTotal = cantidad * cantidadInsumo;
           intercambioPorArea[area].cantidad += cantidadTotal;
-          console.log(`[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
+          console.log(
+            `[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+          );
         }
 
         if (claveProd && clavesPrestamo.has(claveProd) && cantidad > 0 && area) {
@@ -3186,7 +3198,9 @@ class FullSyncService {
           const cantidadInsumo = cantidadInsumoPrestamo[claveProd] || 1;
           const cantidadTotal = cantidad * cantidadInsumo;
           prestamoPorArea[area].cantidad += cantidadTotal;
-          console.log(`[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
+          console.log(
+            `[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+          );
         }
 
         if (claveProd && clavesRecuperaEnvase.has(claveProd) && cantidad > 0 && area) {
@@ -3196,7 +3210,9 @@ class FullSyncService {
           const cantidadInsumo = cantidadInsumoRecuperaEnvase[claveProd] || 1;
           const cantidadTotal = cantidad * cantidadInsumo;
           recuperadosPorArea[area].cantidad += cantidadTotal;
-          console.log(`[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
+          console.log(
+            `[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+          );
         }
 
         // Procesar ventas de productos con envaseVendido
@@ -3207,7 +3223,9 @@ class FullSyncService {
           const cantidadInsumo = cantidadInsumoPorProducto[claveProd] || 1;
           const cantidadEnvases = cantidad * cantidadInsumo;
           envasesVendidosPorArea[area].cantidad += cantidadEnvases;
-          console.log(`[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidadEnvases} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`);
+          console.log(
+            `[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidadEnvases} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+          );
         }
       }
     } catch (err) {
@@ -4006,6 +4024,7 @@ class FullSyncService {
         reubicaciones: 0,
         visitasRealizadas: 0,
         kitIntercambio: 0,
+        cias: 0,
       };
     }
 
@@ -4033,6 +4052,7 @@ class FullSyncService {
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
       formasPago: this.realm.objects("FormaPago").length,
       kitIntercambio: this.realm.objects("KitIntercambio").length,
+      cias: this.realm.objects("Cia").length,
     };
   }
 
@@ -4057,6 +4077,21 @@ class FullSyncService {
   getFormasPago(): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("FormaPago").sorted("tipo"));
+  }
+
+  getCias(): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("Cia"));
+  }
+
+  getCiasPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(this.realm.objects("Cia").slice(offset, offset + limit));
+  }
+
+  getCiaById(id: number): any | null {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
+    return this.realm.objectForPrimaryKey("Cia", id);
   }
 
   close(): void {

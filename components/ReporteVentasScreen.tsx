@@ -517,12 +517,8 @@ export default function ReporteVentasScreen() {
       const currentUser = AuthService.currentUser;
 
       // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+      // ticketFinal y permisoDomicilioTicket vienen de Usuario
       let usuarioTicketData: {
-        nombreCia?: string;
-        rfc?: string;
-        domicilio?: string;
-        regimenFiscal?: string;
-        telefono?: string;
         ticketFinal?: string;
         permisoDomicilioTicket?: boolean;
       } = {};
@@ -531,26 +527,55 @@ export default function ReporteVentasScreen() {
           const realmUser = FullSyncService.getUsuarioById(currentUser.id);
           if (realmUser) {
             usuarioTicketData = {
-              nombreCia: realmUser.nombreCia,
-              rfc: realmUser.rfc,
-              domicilio: realmUser.domicilio,
-              regimenFiscal: realmUser.regimenFiscal,
-              telefono: realmUser.telefono,
               ticketFinal: realmUser.ticketFinal,
               permisoDomicilioTicket: realmUser.permisoDomicilioTicket,
             };
-            console.log("[ReporteVentas] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+            console.log("[ReporteVentas] Datos de usuario para ticket:", usuarioTicketData);
           }
         }
       } catch (e) {
         console.error("[ReporteVentas] Error al obtener datos de usuario de Realm:", e);
       }
 
+      // Obtener datos de la empresa desde la tabla Cia usando idEmpresa del cliente
+      let empresaTicketData: {
+        nombreCia?: string;
+        rfc?: string;
+        domicilio?: string;
+        regimenFiscal?: string;
+        telefono?: string;
+      } = {};
+      try {
+        if (groupedRow.cve_cliente) {
+          const clienteRealm = FullSyncService.getClienteFullById(groupedRow.cve_cliente);
+          if (clienteRealm?.idEmpresa) {
+            const ciaRealm = FullSyncService.getCiaById(clienteRealm.idEmpresa);
+            if (ciaRealm) {
+              empresaTicketData = {
+                nombreCia: ciaRealm.nombreCia,
+                rfc: ciaRealm.rfc,
+                domicilio: ciaRealm.domicilio,
+                regimenFiscal: ciaRealm.regimenFiscal,
+                telefono: ciaRealm.telefono,
+              };
+              console.log("[ReporteVentas] Datos de empresa obtenidos de Cia:", empresaTicketData);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[ReporteVentas] Error al obtener datos de empresa de Realm:", e);
+      }
+
       // Obtener domicilio del cliente si el permiso está activo
       let clientDomicilio: string | undefined;
       const permisoValue = usuarioTicketData.permisoDomicilioTicket as any;
       const tienePermiso = permisoValue === true || permisoValue === 1 || permisoValue === "1";
-      console.log("[ReporteVentas] Permiso domicilio ticket raw:", usuarioTicketData.permisoDomicilioTicket, "evaluado:", tienePermiso);
+      console.log(
+        "[ReporteVentas] Permiso domicilio ticket raw:",
+        usuarioTicketData.permisoDomicilioTicket,
+        "evaluado:",
+        tienePermiso,
+      );
       if (tienePermiso && groupedRow.cve_cliente) {
         const clienteRealm = FullSyncService.getClienteFullById(groupedRow.cve_cliente);
         clientDomicilio = clienteRealm?.domicilio || undefined;
@@ -567,11 +592,11 @@ export default function ReporteVentasScreen() {
         ticketNumber: String(groupedRow.idMovil || groupedRow.no_venta),
         sellerName: groupedRow.vendedor || currentUser?.claveEmpleado || undefined,
         branch: currentUser?.dSucursal || groupedRow.sucursal,
-        businessName: usuarioTicketData.nombreCia,
-        taxId: usuarioTicketData.rfc,
-        domicilio: usuarioTicketData.domicilio,
-        regimenFiscal: usuarioTicketData.regimenFiscal,
-        phone: usuarioTicketData.telefono,
+        businessName: empresaTicketData.nombreCia,
+        taxId: empresaTicketData.rfc,
+        domicilio: empresaTicketData.domicilio,
+        regimenFiscal: empresaTicketData.regimenFiscal,
+        phone: empresaTicketData.telefono,
         ticketFinal: usuarioTicketData.ticketFinal,
         pago0: esPago0,
       };
@@ -670,7 +695,12 @@ export default function ReporteVentasScreen() {
     let clientDomicilio: string | undefined;
     const permisoValue = usuarioTicketData.permisoDomicilioTicket as any;
     const tienePermiso = permisoValue === true || permisoValue === 1 || permisoValue === "1";
-    console.log("[ReporteVentas] Permiso domicilio ticket raw (ReporteItem):", usuarioTicketData.permisoDomicilioTicket, "evaluado:", tienePermiso);
+    console.log(
+      "[ReporteVentas] Permiso domicilio ticket raw (ReporteItem):",
+      usuarioTicketData.permisoDomicilioTicket,
+      "evaluado:",
+      tienePermiso,
+    );
     if (tienePermiso && row.cve_cliente) {
       const clienteRealm = FullSyncService.getClienteFullById(row.cve_cliente);
       clientDomicilio = clienteRealm?.domicilio || undefined;
@@ -1146,9 +1176,7 @@ export default function ReporteVentasScreen() {
                       #{item.idMovil || item.no_venta} • {item.nombre}
                     </Text>
                     {domicilioCliente && (
-                      <Text style={[styles.muted, { fontSize: 11, fontStyle: 'italic' }]}>
-                        {domicilioCliente}
-                      </Text>
+                      <Text style={[styles.muted, { fontSize: 11, fontStyle: "italic" }]}>{domicilioCliente}</Text>
                     )}
                     <Text style={styles.muted}>
                       {new Date(item.fecha).toLocaleString("es-MX")} • {item.tipoPago}

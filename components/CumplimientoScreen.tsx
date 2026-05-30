@@ -39,6 +39,14 @@ interface VisitaConCliente extends Visita {
   metros?: number; // Distancia máxima permitida en metros
 }
 
+interface ClienteLite {
+  id: number;
+  nombre: string;
+  latitud?: number;
+  longitud?: number;
+  metros?: number;
+}
+
 interface Estadisticas {
   totalProgramadas: number;
   totalRealizadas: number;
@@ -75,6 +83,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
         setCurrentSucursal(sucursal);
 
+        // Cargar lista completa de clientes (para tabs Cercanos / Todos)
+        cargarClientes();
+
         // Cargar datos locales inmediatamente (sin esperar red)
         cargarDatos(new Date(), sucursal);
 
@@ -105,6 +116,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [userMetros, setUserMetros] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
+
+  // Tabs: 'agendados' (visitas del día) | 'cercanos' (GPS) | 'todos' (todos los clientes)
+  const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "todos">("agendados");
+  const [clientes, setClientes] = useState<ClienteLite[]>([]);
+  const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [loadingCercanos, setLoadingCercanos] = useState(false);
 
   // Obtener tipos de visita desde la base de datos
   const getTipoVisitas = () => {
@@ -394,6 +412,61 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     });
   };
 
+  // Navegar a Punto de Venta para un cliente seleccionado (Cercanos / Todos)
+  const handleIrAVentasCliente = (cliente: ClienteLite) => {
+    navigation.navigate("Sales", {
+      clienteId: cliente.id,
+      nombreCliente: cliente.nombre,
+    });
+  };
+
+  // Cargar todos los clientes locales desde Realm
+  const cargarClientes = useCallback(() => {
+    try {
+      if (!FullSyncService.isServiceInitialized()) return;
+      const data = FullSyncService.getClientesFull(10000);
+      const formateados: ClienteLite[] = data.map((c: any) => ({
+        id: c.id,
+        nombre: c.nombre || "Sin nombre",
+        latitud: c.latitud != null ? Number(c.latitud) : undefined,
+        longitud: c.longitud != null ? Number(c.longitud) : undefined,
+        metros: c.metros != null ? Number(c.metros) : undefined,
+      }));
+      setClientes(formateados);
+    } catch (error) {
+      console.warn("[Cumplimiento] Error al cargar clientes:", error);
+    }
+  }, []);
+
+  // Obtener ubicación del vendedor y recalcular los 5 clientes más cercanos
+  const actualizarCoordenadas = async () => {
+    setLoadingCercanos(true);
+    try {
+      const ubicacion = await LocationService.getBestLocation();
+      if (ubicacion) {
+        setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude });
+        const clientesConCoords = clientes.filter(
+          (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
+        );
+        const clientesConDistancia = clientesConCoords
+          .map((c) => ({
+            ...c,
+            distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, c.latitud!, c.longitud!),
+          }))
+          .sort((a, b) => a.distanciaMetros - b.distanciaMetros)
+          .slice(0, 5);
+        setNearestClientes(clientesConDistancia);
+      } else {
+        Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+      }
+    } catch (error) {
+      console.error("[Cumplimiento] Error al obtener ubicación:", error);
+      Alert.alert("Error de ubicación", "No se pudo obtener tu ubicación.");
+    } finally {
+      setLoadingCercanos(false);
+    }
+  };
+
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
     <View style={styles.visitaContainer}>
       <View style={styles.visitaCard}>
@@ -484,6 +557,51 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     return coincideBusqueda && coincideEstado;
   });
 
+  // Filtrar todos los clientes por búsqueda (tab Todos)
+  const clientesFiltrados = clientes.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    return (c.nombre || "").toLowerCase().includes(searchQuery.toLowerCase()) || String(c.id).includes(searchQuery);
+  });
+
+  // Render de un cliente para los tabs Cercanos / Todos (botón -> Ventas)
+  const renderClienteVenta = (cliente: ClienteLite & { distanciaMetros?: number }) => (
+    <View style={styles.visitaContainer}>
+      <View style={styles.visitaCard}>
+        <View style={styles.visitaHeader}>
+          <View style={styles.visitaInfo}>
+            <View style={styles.clienteRow}>
+              <View style={styles.clienteIcon}>
+                <Icon name="store" type="material" size={20} color="#007AFF" />
+              </View>
+              <View style={styles.clienteDetails}>
+                <Text style={styles.clienteId}>#{cliente.id}</Text>
+                <Text style={styles.clienteNombre}>{cliente.nombre}</Text>
+                {cliente.distanciaMetros != null && (
+                  <View style={styles.horaRow}>
+                    <Icon name="place" type="material" size={14} color="#8E8E93" />
+                    <Text style={styles.horaTexto}>
+                      {cliente.distanciaMetros < 1000
+                        ? `${Math.round(cliente.distanciaMetros)} m`
+                        : `${(cliente.distanciaMetros / 1000).toFixed(1)} km`}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.botonVentas}
+            onPress={() => handleIrAVentasCliente(cliente)}
+            activeOpacity={0.8}
+          >
+            <Icon name="shopping-cart" type="material" size={16} color="white" />
+            <Text style={styles.botonVentasTexto}>Ventas</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -536,41 +654,122 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </TouchableOpacity>
           )}
         </View>
+        {clienteTab === "agendados" && (
+          <TouchableOpacity
+            style={[styles.toggleVisitadasBtn, mostrarVisitadas && styles.toggleVisitadasBtnActive]}
+            onPress={() => setMostrarVisitadas((v) => !v)}
+          >
+            <Icon
+              name={mostrarVisitadas ? "visibility" : "visibility-off"}
+              type="material"
+              size={16}
+              color={mostrarVisitadas ? "#007AFF" : "#8E8E93"}
+            />
+            <Text style={[styles.toggleVisitadasText, mostrarVisitadas && styles.toggleVisitadasTextActive]}>
+              {mostrarVisitadas ? "Todas" : "Pendientes"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Tabs: Agendados | Cercanos | Todos */}
+      <View style={styles.tabBar}>
         <TouchableOpacity
-          style={[styles.toggleVisitadasBtn, mostrarVisitadas && styles.toggleVisitadasBtnActive]}
-          onPress={() => setMostrarVisitadas((v) => !v)}
+          style={[styles.tabItem, clienteTab === "agendados" && styles.tabItemActive]}
+          onPress={() => setClienteTab("agendados")}
         >
-          <Icon
-            name={mostrarVisitadas ? "visibility" : "visibility-off"}
-            type="material"
-            size={16}
-            color={mostrarVisitadas ? "#007AFF" : "#8E8E93"}
-          />
-          <Text style={[styles.toggleVisitadasText, mostrarVisitadas && styles.toggleVisitadasTextActive]}>
-            {mostrarVisitadas ? "Todas" : "Pendientes"}
-          </Text>
+          <Text style={[styles.tabItemText, clienteTab === "agendados" && styles.tabItemTextActive]}>Agendados</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabItem, clienteTab === "cercanos" && styles.tabItemActive]}
+          onPress={() => {
+            setClienteTab("cercanos");
+            if (nearestClientes.length === 0) actualizarCoordenadas();
+          }}
+        >
+          <Text style={[styles.tabItemText, clienteTab === "cercanos" && styles.tabItemTextActive]}>Cercanos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabItem, clienteTab === "todos" && styles.tabItemActive]}
+          onPress={() => setClienteTab("todos")}
+        >
+          <Text style={[styles.tabItemText, clienteTab === "todos" && styles.tabItemTextActive]}>Todos</Text>
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={visitasFiltradas}
-        renderItem={renderVisita}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.lista}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Icon name="event" type="material" size={64} color="#C7C7CC" />
-            <Text style={styles.emptyTexto}>
-              {searchQuery
-                ? 'Sin resultados para "' + searchQuery + '"'
-                : mostrarVisitadas
-                ? "No hay visitas programadas"
-                : "No hay visitas pendientes"}
+      {/* Botón actualizar coordenadas (solo Cercanos) */}
+      {clienteTab === "cercanos" && (
+        <View style={styles.refreshCoordsWrap}>
+          <TouchableOpacity style={styles.refreshCoordsBtn} onPress={actualizarCoordenadas} disabled={loadingCercanos}>
+            {loadingCercanos ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Icon name="my-location" type="material" size={16} color="#fff" />
+            )}
+            <Text style={styles.refreshCoordsBtnText}>
+              {loadingCercanos ? "Obteniendo ubicación..." : "Actualizar mis coordenadas"}
             </Text>
-          </View>
-        }
-      />
+          </TouchableOpacity>
+          {userCoords && (
+            <Text style={styles.coordsInfo}>
+              Lat: {userCoords.latitude.toFixed(5)}, Lon: {userCoords.longitude.toFixed(5)}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {clienteTab === "agendados" ? (
+        <FlatList
+          data={visitasFiltradas}
+          renderItem={renderVisita}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.lista}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="event" type="material" size={64} color="#C7C7CC" />
+              <Text style={styles.emptyTexto}>
+                {searchQuery
+                  ? 'Sin resultados para "' + searchQuery + '"'
+                  : mostrarVisitadas
+                  ? "No hay visitas programadas"
+                  : "No hay visitas pendientes"}
+              </Text>
+            </View>
+          }
+        />
+      ) : clienteTab === "cercanos" ? (
+        <FlatList
+          data={nearestClientes}
+          renderItem={({ item }) => renderClienteVenta(item)}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={styles.lista}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="near-me" type="material" size={64} color="#C7C7CC" />
+              <Text style={styles.emptyTexto}>
+                {loadingCercanos ? "Buscando clientes cercanos..." : "Pulsa actualizar para ver clientes cercanos"}
+              </Text>
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={clientesFiltrados}
+          renderItem={({ item }) => renderClienteVenta(item)}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={styles.lista}
+          initialNumToRender={15}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="people" type="material" size={64} color="#C7C7CC" />
+              <Text style={styles.emptyTexto}>
+                {searchQuery ? 'Sin resultados para "' + searchQuery + '"' : "No hay clientes"}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       {/* Modal de selección de tipo de visita */}
       <Modal visible={modalVisible} animationType="fade" transparent>
@@ -1075,5 +1274,57 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#1C1C1E",
     paddingVertical: 0,
+  },
+  tabBar: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "#E5E5EA",
+  },
+  tabItem: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabItemActive: {
+    backgroundColor: "#007AFF",
+  },
+  tabItemText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#8E8E93",
+  },
+  tabItemTextActive: {
+    color: "#FFFFFF",
+  },
+  refreshCoordsWrap: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  refreshCoordsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#007AFF",
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  refreshCoordsBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  coordsInfo: {
+    fontSize: 12,
+    color: "#8E8E93",
+    textAlign: "center",
+    marginTop: 4,
   },
 });

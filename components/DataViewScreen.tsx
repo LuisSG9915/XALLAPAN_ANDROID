@@ -42,7 +42,8 @@ type EntityType =
   | "reubicaciones"
   | "visitasRealizadas"
   | "formasPago"
-  | "kitsIntercambio";
+  | "kitsIntercambio"
+  | "cias";
 
 interface EntityTab {
   key: EntityType;
@@ -61,6 +62,7 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "cartera", title: "Cartera", icon: "account-balance-wallet" },
   { key: "formasPago", title: "Formas de Pago", icon: "payment" },
   { key: "kitsIntercambio", title: "Kits Intercambio", icon: "swap-horiz" },
+  { key: "cias", title: "Compañías", icon: "business" },
   { key: "usuarios", title: "Usuarios", icon: "person" },
   { key: "syncStatus", title: "Sync Status", icon: "sync" },
   { key: "syncLog", title: "Sync Log", icon: "list-alt" },
@@ -193,6 +195,9 @@ export default function DataViewScreen() {
           break;
         case "visitasRealizadas":
           setData(FullSyncService.getVisitasRealizadasPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "cias":
+          setData(FullSyncService.getCiasPaginated(offset, ITEMS_PER_PAGE));
           break;
       }
     } catch (error) {
@@ -565,6 +570,23 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const renderCia = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.nombreCia || "Sin nombre"}</Text>
+          <Text style={styles.cardSubtitle}>ID: {item.id}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>RFC: {item.rfc || "N/A"}</Text>
+          <Text style={styles.cardText}>Teléfono: {item.telefono || "N/A"}</Text>
+          <Text style={styles.cardText}>Domicilio: {item.domicilio || "N/A"}</Text>
+          <Text style={styles.cardText}>Régimen Fiscal: {item.regimenFiscal || "N/A"}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderBitacoraSync = ({ item }: { item: any }) => (
     <TouchableOpacity onPress={() => console.log(item)}>
       <View style={styles.card}>
@@ -650,6 +672,8 @@ export default function DataViewScreen() {
         return null;
       case "kitsIntercambio":
         return renderKit({ item });
+      case "cias":
+        return renderCia({ item });
       default:
         return null;
     }
@@ -705,6 +729,8 @@ export default function DataViewScreen() {
         return stats.formasPago || 0;
       case "kitsIntercambio":
         return stats.kitIntercambio || 0;
+      case "cias":
+        return stats.cias || 0;
       default:
         return 0;
     }

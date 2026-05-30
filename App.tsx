@@ -604,7 +604,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   }, [currentUser, navigation]);
 
   // Orden de prioridad: Punto de Venta, Agenda, Cargas, Inventario, Corte, Impresora
-  const priorityOrder = [ "cumplimiento","sales", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
+  const priorityOrder = ["cumplimiento", "sales", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion"];
@@ -705,9 +705,12 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     },
   ];
 
-  // Filtrar menús de admin si el usuario no es ID 4
+  // Menús ocultos del panel principal (siguen registrados/navegables desde otras pantallas)
+  const hiddenMenus = ["sales"];
+
+  // Filtrar menús de admin si el usuario no es ID 4 y menús ocultos del panel
   const filteredItems = allMenuItems.filter(
-    (item) => !adminOnlyMenus.includes(item.id) || isAdmin
+    (item) => (!adminOnlyMenus.includes(item.id) || isAdmin) && !hiddenMenus.includes(item.id),
   );
 
   // Ordenar: primero los de prioridad, luego el resto

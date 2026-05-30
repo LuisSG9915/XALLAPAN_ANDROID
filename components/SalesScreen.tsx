@@ -1915,12 +1915,8 @@ export default function SalesScreen({ route }: { route?: any }) {
       let ticketImpreso = false;
       try {
         // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
+        // ticketFinal y permisoDomicilioTicket vienen de Usuario
         let usuarioTicketData: {
-          nombreCia?: string;
-          rfc?: string;
-          domicilio?: string;
-          regimenFiscal?: string;
-          telefono?: string;
           ticketFinal?: string;
           permisoDomicilioTicket?: boolean;
         } = {};
@@ -1929,19 +1925,43 @@ export default function SalesScreen({ route }: { route?: any }) {
             const realmUser = FullSyncService.getUsuarioById(currentUser.id);
             if (realmUser) {
               usuarioTicketData = {
-                nombreCia: realmUser.nombreCia,
-                rfc: realmUser.rfc,
-                domicilio: realmUser.domicilio,
-                regimenFiscal: realmUser.regimenFiscal,
-                telefono: realmUser.telefono,
                 ticketFinal: realmUser.ticketFinal,
                 permisoDomicilioTicket: realmUser.permisoDomicilioTicket,
               };
-              console.log("[Sales] Datos de ticket obtenidos de Realm:", usuarioTicketData);
+              console.log("[Sales] Datos de usuario para ticket:", usuarioTicketData);
             }
           }
         } catch (e) {
           console.error("[Sales] Error al obtener datos de usuario de Realm:", e);
+        }
+
+        // Obtener datos de la empresa desde la tabla Cia usando idEmpresa del cliente
+        let empresaTicketData: {
+          nombreCia?: string;
+          rfc?: string;
+          domicilio?: string;
+          regimenFiscal?: string;
+          telefono?: string;
+        } = {};
+        try {
+          if (client.id) {
+            const clienteRealm = FullSyncService.getClienteFullById(client.id);
+            if (clienteRealm?.idEmpresa) {
+              const ciaRealm = FullSyncService.getCiaById(clienteRealm.idEmpresa);
+              if (ciaRealm) {
+                empresaTicketData = {
+                  nombreCia: ciaRealm.nombreCia,
+                  rfc: ciaRealm.rfc,
+                  domicilio: ciaRealm.domicilio,
+                  regimenFiscal: ciaRealm.regimenFiscal,
+                  telefono: ciaRealm.telefono,
+                };
+                console.log("[Sales] Datos de empresa obtenidos de Cia:", empresaTicketData);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[Sales] Error al obtener datos de empresa de Realm:", e);
         }
 
         // Obtener domicilio del cliente si el permiso está activo
@@ -1971,15 +1991,15 @@ export default function SalesScreen({ route }: { route?: any }) {
             total: item.precio * item.cantidad,
           })),
           total: esPago0 ? 0 : updatedTotal,
-          businessName: usuarioTicketData.nombreCia || APP_NAME,
+          businessName: empresaTicketData.nombreCia || APP_NAME,
           date: now,
           ticketNumber: String(saleIdMovil),
           sellerName: vendedor,
           branch: currentUser?.dSucursal || sucursal,
-          taxId: usuarioTicketData.rfc,
-          domicilio: usuarioTicketData.domicilio,
-          regimenFiscal: usuarioTicketData.regimenFiscal,
-          phone: usuarioTicketData.telefono,
+          taxId: empresaTicketData.rfc,
+          domicilio: empresaTicketData.domicilio,
+          regimenFiscal: empresaTicketData.regimenFiscal,
+          phone: empresaTicketData.telefono,
           ticketFinal: usuarioTicketData.ticketFinal,
         });
         ticketImpreso = true;

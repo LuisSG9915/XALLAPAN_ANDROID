@@ -18,6 +18,7 @@ import { InventarioEnvaseSyncTask } from "./tasks/InventarioEnvaseSyncTask";
 import { ReubicacionSyncTask } from "./tasks/ReubicacionSyncTask";
 import { InventarioEnvasesHistorialSyncTask } from "./tasks/InventarioEnvasesHistorialSyncTask";
 import { FormaPagoSyncTask } from "./tasks/FormaPagoSyncTask";
+import { CiasSyncTask } from "./tasks/CiasSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -49,6 +50,7 @@ export class SyncOrchestrator {
    */
   private createAllTasks(): SyncTask[] {
     const tasks = [
+      new CiasSyncTask(this.realm, this.syncLogId), // Compañías - alta prioridad
       new FormaPagoSyncTask(this.realm, this.syncLogId, this.sucursal),
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),

@@ -91,7 +91,7 @@ export const KitSchema = {
     recuperaEnvaseOtro: "bool?",
     controlPresamo: "bool?",
     envaseVendido: "bool?",
-    cantRecEnvOtro: "int?",  // Número entero: cantidad de envases a recibir (0, 1, 2, 3...)
+    cantRecEnvOtro: "int?", // Número entero: cantidad de envases a recibir (0, 1, 2, 3...)
     noRecuperaEnvase: "bool?",
     syncedAt: "date",
   },
@@ -187,6 +187,7 @@ export const ClienteFullSchema = {
     facturacionMovil: "bool?",
     listaPrecio: "int?",
     domicilio: "string?",
+    idEmpresa: "int?",
     fechaAct: "date?",
     syncedAt: "date",
     syncedAr: "date?",
@@ -468,6 +469,20 @@ export const FormaPagoSchema = {
   primaryKey: "tipo",
 };
 
+export const CiaSchema = {
+  name: "Cia",
+  properties: {
+    id: "int",
+    telefono: "string?",
+    rfc: "string?",
+    domicilio: "string?",
+    regimenFiscal: "string?",
+    nombreCia: "string?",
+    syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
 export const VentaCancelacionSchema = {
   name: "VentaCancelacion",
   properties: {
@@ -514,6 +529,7 @@ export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
   ProductoSchema,
+  CiaSchema,
   KitSchema,
   KitIntercambioSchema,
   PrecioSchema,

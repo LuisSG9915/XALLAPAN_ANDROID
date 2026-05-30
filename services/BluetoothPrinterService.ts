@@ -17,6 +17,7 @@ const STORAGE_KEY = "@awesomeapp/selected_printer";
 class BluetoothPrinterService {
   private currentPrinter: PrinterDevice | null = null;
   private isConnected: boolean = false;
+  private readonly PRINT_OPTS = { encoding: "CP850", codepage: 2 };
 
   /**
    * Solicita permisos de Bluetooth en Android
@@ -254,7 +255,7 @@ class BluetoothPrinterService {
 
     try {
       await BluetoothEscposPrinter.printerInit();
-      await BluetoothEscposPrinter.printText(text + "\n\n\n", {});
+      await BluetoothEscposPrinter.printText(text + "\n\n\n", this.PRINT_OPTS);
       return true;
     } catch (error) {
       console.error("Error printing:", error);
@@ -285,7 +286,7 @@ class BluetoothPrinterService {
         // Detectar líneas especiales y aplicar formato
         if (line.includes("===") || line.includes("---")) {
           // Separadores
-          await BluetoothEscposPrinter.printText(line + "\n", {});
+          await BluetoothEscposPrinter.printText(line + "\n", this.PRINT_OPTS);
         } else if (
           line.toUpperCase().includes("CORTE DE RUTA") ||
           line.toUpperCase().includes("TICKET") ||
@@ -294,16 +295,17 @@ class BluetoothPrinterService {
         ) {
           // Título centrado
           await BluetoothEscposPrinter.printText(line + "\n", {
+            ...this.PRINT_OPTS,
             align: "center",
           });
         } else {
           // Texto normal (las negritas ESC/POS se manejarán con comandos si es necesario)
-          await BluetoothEscposPrinter.printText(line + "\n", {});
+          await BluetoothEscposPrinter.printText(line + "\n", this.PRINT_OPTS);
         }
       }
 
       // Alimentación adicional
-      await BluetoothEscposPrinter.printText("\n\n\n", {});
+      await BluetoothEscposPrinter.printText("\n\n\n", this.PRINT_OPTS);
 
       return true;
     } catch (error) {
@@ -326,29 +328,32 @@ class BluetoothPrinterService {
       await BluetoothEscposPrinter.printerInit();
 
       // Encabezado
-      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
       await BluetoothEscposPrinter.printText(businessName + "\n", {
+        ...this.PRINT_OPTS,
         align: "center",
         widthtimes: 1,
       });
-      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
       await BluetoothEscposPrinter.printText(title + "\n", {
+        ...this.PRINT_OPTS,
         align: "center",
       });
-      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
 
       // Contenido
       for (const line of lines) {
-        await BluetoothEscposPrinter.printText(line + "\n", {});
+        await BluetoothEscposPrinter.printText(line + "\n", this.PRINT_OPTS);
       }
 
       // Pie
-      await BluetoothEscposPrinter.printText("================================\n", {});
+      await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
       await BluetoothEscposPrinter.printText("¡GRACIAS POR SU COMPRA!\n", {
+        ...this.PRINT_OPTS,
         align: "center",
       });
-      await BluetoothEscposPrinter.printText("================================\n", {});
-      await BluetoothEscposPrinter.printText("\n\n\n", {});
+      await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
+      await BluetoothEscposPrinter.printText("\n\n\n", this.PRINT_OPTS);
 
       return true;
     } catch (error) {
