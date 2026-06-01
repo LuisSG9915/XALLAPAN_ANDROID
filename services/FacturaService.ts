@@ -18,7 +18,7 @@ class FacturaService {
   private static instance: FacturaService | null = null;
 
   private apiBaseUrl = 'https://cbinfo.no-ip.info:9004';
-  private cppApiBaseUrl = 'https://cbinfo.no-ip.info:9031';
+  private cppApiBaseUrl = 'https://api.cbinformatica.net:9031';
 
   static getInstance(): FacturaService {
     if (!FacturaService.instance) {

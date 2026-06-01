@@ -12,7 +12,7 @@ export type SyncProgressCallback = (progress: SyncProgress) => void;
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
-  private apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+  private apiBaseUrl = "https://api.cbinformatica.net:9031";
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -23,8 +23,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 41,
+        schemaVersion: 42,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v42: Agregar campo precioCatalogo a Producto y noPrecioCatalogo a Kit
+          if (oldRealm.schemaVersion < 42) {
+            console.log("[Migration v42] Agregando campo precioCatalogo a Producto y noPrecioCatalogo a Kit");
+          }
+
           // Migración v41: Agregar campo idEmpresa a ClienteFull
           if (oldRealm.schemaVersion < 41) {
             console.log("[Migration v41] Agregando campo idEmpresa a ClienteFull");

@@ -40,7 +40,7 @@ class VisitaSyncService {
     const sucursal = user?.sucursal || user?.sucursal_origen || 1;
 
     const fechaStr = fecha.toISOString().split("T")[0];
-    const endpoint = "https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full";
+    const endpoint = "https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full";
 
     // Registrar inicio de sincronización de visitas
     const idBitacoraVisitas = await BitacoraService.registrarInicioSync(
@@ -61,6 +61,8 @@ class VisitaSyncService {
       }
       const visitasData = await response.json();
       console.log(visitasData);
+      //console de un dato del arreglo
+      console.log(visitasData[0]);
       if (!Array.isArray(visitasData)) {
         throw new Error("La respuesta no es un array de visitas");
       }
@@ -273,7 +275,22 @@ class VisitaSyncService {
   async getVisitas(): Promise<any[]> {
     try {
       const realm = this.getRealm();
-      let visitas = realm.objects("Visita").sorted("fecha", true).slice(0, 10);
+
+      // Calcular rango: ayer, hoy y mañana
+      const hoy = new Date();
+      const ayer = new Date(hoy);
+      ayer.setDate(hoy.getDate() - 1);
+      ayer.setHours(0, 0, 0, 0);
+
+      const mañana = new Date(hoy);
+      mañana.setDate(hoy.getDate() + 1);
+      mañana.setHours(23, 59, 59, 999);
+
+      let visitas = realm
+        .objects("Visita")
+        .filtered(`fecha >= $0 AND fecha <= $1`, ayer, mañana)
+        .sorted("fecha");
+
       return visitas.map((v: any) => ({
         id: v.idOriginal, // Retornar idOriginal como "id" para compatibilidad con UI
         idCompuesto: v.id, // ID compuesto real de Realm
@@ -347,7 +364,7 @@ class VisitaSyncService {
     const user = await AuthService.restoreSession();
     const idUsuario = user?.id || user?.idUsuario || 0;
 
-    const endpoint = `https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full/${sucursal}`;
+    const endpoint = `https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full/${sucursal}`;
 
     const idBitacora = await BitacoraService.registrarInicioSync(
       "VisitasRealizadas",

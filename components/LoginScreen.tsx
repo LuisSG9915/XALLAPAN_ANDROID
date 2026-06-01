@@ -88,8 +88,9 @@ export default function LoginScreen({ navigation }: any) {
 
       navigation.reset({ index: 0, routes: [{ name: "Home" }] });
     } catch (err: any) {
-      const msg = err?.message || "Ocurrió un error al iniciar sesión";
-      Alert.alert("No autorizado, debe pasar la primera sincronización", msg);
+      console.error("[Login] Error completo:", err);
+      const msg = err?.message || String(err) || "Ocurrió un error al iniciar sesión";
+      Alert.alert("Error de inicio de sesión", msg);
       setSyncing(false);
     } finally {
       setLoading(false);

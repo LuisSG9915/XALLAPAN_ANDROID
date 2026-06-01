@@ -155,7 +155,7 @@ class TicketPrinter {
 
     if (data.domicilio) {
       const domicilioLines = this.wrapText(data.domicilio, width);
-      domicilioLines.forEach((dl) => lines.push(this.center(`Domicilio: ${dl}`, width)));
+      domicilioLines.forEach((dl) => lines.push(this.center(` ${dl}`, width)));
     }
 
     if (data.regimenFiscal) {

@@ -7,7 +7,7 @@ import { SyncTask, SyncTaskResult } from "../SyncTask";
  * Endpoint: GET /api/MovilesVentas/inventario-envases/full/{sucursal}
  */
 export class InventarioEnvasesHistorialSyncTask extends SyncTask {
-  protected apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+  protected apiBaseUrl = "https://api.cbinformatica.net:9031";
 
   constructor(realm: Realm, syncLogId: string, sucursal: number) {
     super(realm, syncLogId);

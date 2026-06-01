@@ -8,7 +8,7 @@ import BitacoraService from "../../BitacoraService";
  */
 export class VentasArrastreSyncTask extends SyncTask {
   protected idUsuario: number;
-  protected apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+  protected apiBaseUrl = "https://api.cbinformatica.net:9031";
 
   constructor(realm: Realm, syncLogId: string, sucursal: number, idUsuario: number) {
     super(realm, syncLogId);

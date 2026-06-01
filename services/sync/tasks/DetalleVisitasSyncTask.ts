@@ -16,10 +16,10 @@ export class DetalleVisitasSyncTask extends SyncTask {
   getTableName(): string {
     return "DetalleVisitas";
   }
-  // 'https://cbinfo.no-ip.info:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=0' \
+  // 'https://api.cbinformatica.net:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=0' \
 
   getEndpoint(): string {
-    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${this.idUsuario}`;
+    return `https://api.cbinformatica.net:9031/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${this.idUsuario}`;
   }
 
   /**

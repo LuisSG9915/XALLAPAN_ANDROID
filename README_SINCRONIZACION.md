@@ -97,7 +97,7 @@ Pantalla de visualización con:
 ## 📡 Endpoints Utilizados
 
 ```
-Base URL: https://cbinfo.no-ip.info:9031
+Base URL: https://api.cbinformatica.net:9031
 
 GET /api/MovilesVentas/ventas/full/{sucursal}
 GET /api/MovilesVentas/usuarios/full

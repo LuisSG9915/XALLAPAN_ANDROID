@@ -12,7 +12,7 @@ export class KitIntercambioSyncTask extends SyncTask {
 
   getEndpoint(): string {
     // Usa el endpoint específico para kits intercambio
-    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/kits/intercambios";
+    return "https://api.cbinformatica.net:9031/api/MovilesVentas/kits/intercambios";
   }
 
   getPriority(): number {

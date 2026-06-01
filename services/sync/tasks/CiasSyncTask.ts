@@ -10,7 +10,7 @@ export class CiasSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/cias/full";
+    return "https://api.cbinformatica.net:9031/api/MovilesVentas/cias/full";
   }
 
   getPriority(): number {

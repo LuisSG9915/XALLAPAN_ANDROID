@@ -86,14 +86,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         // Cargar lista completa de clientes (para tabs Cercanos / Todos)
         cargarClientes();
 
-        // Cargar datos locales inmediatamente (sin esperar red)
+        // Cargar datos locales inmediatamente (sin sincronización)
         cargarDatos(new Date(), sucursal);
-
-        // Sincronizar en background sin bloquear UI
-        VisitaSyncService.getInstance()
-          .syncByDate(new Date())
-          .then(() => cargarDatos(new Date(), sucursal, false))
-          .catch((err) => console.warn("[Cumplimiento] Sync background fallido:", err));
       }
     };
 
@@ -185,12 +179,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   useFocusEffect(
     useCallback(() => {
       if (currentSucursal > 0) {
-        // Cargar local primero (inmediato), sync en background
+        // Cargar datos locales (sin sincronización)
         cargarDatos(fechaSeleccionada, currentSucursal);
-        VisitaSyncService.getInstance()
-          .syncByDate(fechaSeleccionada)
-          .then(() => cargarDatos(fechaSeleccionada, currentSucursal, false))
-          .catch((err) => console.warn("[Cumplimiento] Sync foco fallido:", err));
       }
     }, [fechaSeleccionada, currentSucursal, cargarDatos]),
   );

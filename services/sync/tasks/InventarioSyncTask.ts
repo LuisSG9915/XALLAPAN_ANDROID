@@ -18,7 +18,7 @@ export class InventarioSyncTask extends SyncTask {
     const nowMexico = this.getMexicoNow();
     const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
 
-    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+    return `https://api.cbinformatica.net:9031/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
       String(this.sucursal)
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
   }

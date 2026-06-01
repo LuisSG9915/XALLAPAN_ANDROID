@@ -11,7 +11,7 @@ export class ClientesSyncTask extends SyncTask {
   }
 
   getEndpoint(sucursal: number = 0): string {
-    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
+    return `https://api.cbinformatica.net:9031/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
   }
 
   getPriority(): number {

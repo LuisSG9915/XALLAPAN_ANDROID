@@ -393,4 +393,4 @@ TECNOLOGÍAS CLAVE:
 - Background Fetch (Sincronización en background)
 - AsyncStorage (Persistencia de sesión)
 
-API BASE: https://cbinfo.no-ip.info:9031
+API BASE: https://api.cbinformatica.net:9031

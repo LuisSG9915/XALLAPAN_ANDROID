@@ -18,7 +18,7 @@ import AuthService, { Usuario } from "../services/AuthService";
 import CierreRutaService from "../services/CierreRutaService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
-const API_BASE_URL = "https://cbinfo.no-ip.info:9031";
+const API_BASE_URL = "https://api.cbinformatica.net:9031";
 
 type Sucursal = { id_sucursal: number; nombre: string };
 

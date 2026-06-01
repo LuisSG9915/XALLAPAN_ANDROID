@@ -320,7 +320,16 @@ export default function CortesScreen() {
             }
 
             const cantInsumo: number = (insumo.cantidad || 0) * cantVenta;
-            const precioInsumo: number = Math.round((insumo.precio || 0) * 100) / 100;
+            // Si el insumo tiene precioCatalogo=true y noPrecioCatalogo=false, usar el precio real
+            // de la venta (importe registrado) en lugar del precio fijo del catálogo de kits
+            const insumoProductoInfo = productoPorClaveMap[idInsumo];
+            const usarPrecioVenta = insumoProductoInfo?.precioCatalogo === true && insumo.noPrecioCatalogo !== true;
+            let precioInsumo: number;
+            if (usarPrecioVenta && cantVenta > 0 && (insumo.cantidad || 0) > 0) {
+              precioInsumo = Math.round((importeVenta / cantVenta / (insumo.cantidad || 1)) * 100) / 100;
+            } else {
+              precioInsumo = Math.round((insumo.precio || 0) * 100) / 100;
+            }
             const nombreInsumo: string = productoNombreMap[idInsumo] || `Insumo ${idInsumo}`;
 
             if (!ventasPorClave[idInsumo]) ventasPorClave[idInsumo] = { nombre: nombreInsumo, cant: 0 };

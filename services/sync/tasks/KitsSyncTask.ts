@@ -12,7 +12,7 @@ export class KitsSyncTask extends SyncTask {
 
   getEndpoint(): string {
     // Nota: Usa puerto 9031 específico para kits según el endpoint proporcionado
-    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/kits/full";
+    return "https://api.cbinformatica.net:9031/api/MovilesVentas/kits/full";
   }
 
   getPriority(): number {
@@ -90,6 +90,7 @@ export class KitsSyncTask extends SyncTask {
             envaseVendido: kit.envaseVendido ? true : false,
             cantRecEnvOtro: kit.cantRecEnvOtro != null ? Number(kit.cantRecEnvOtro) : 0,  // Valor numérico: 0, 1, 2, 3...
             noRecuperaEnvase: kit.noRecuperaEnvase ? true : false,
+            noPrecioCatalogo: kit.noPrecioCatalogo ? true : false,
             syncedAt: new Date(),
           };
 

@@ -19,7 +19,7 @@ export interface SyncResult {
 
 class BitacoraService {
   private realm: Realm | null = null;
-  private apiBaseUrl = "https://cbinfo.no-ip.info:9031";
+  private apiBaseUrl = "https://api.cbinformatica.net:9031";
 
   /**
    * Inyecta la instancia de Realm desde FullSyncService

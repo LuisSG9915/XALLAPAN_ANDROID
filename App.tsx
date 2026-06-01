@@ -409,7 +409,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         const dd = String(today.getDate()).padStart(2, "0");
         const fechaHoy = `${yyyy}-${mm}-${dd}`;
 
-        const url = `https://cbinfo.no-ip.info:9031/api/DetalleTraspasos/sp_traspasoBusquedaRecepcion?sucursal=${sucursal}&vendedor=${vendedorId}&fecha1=${encodeURIComponent(
+        const url = `https://api.cbinformatica.net:9031/api/DetalleTraspasos/sp_traspasoBusquedaRecepcion?sucursal=${sucursal}&vendedor=${vendedorId}&fecha1=${encodeURIComponent(
           fechaHoy,
         )}&fecha2=${encodeURIComponent(fechaHoy)}`;
 

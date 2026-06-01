@@ -1,7 +1,7 @@
 --REINICIO--
 
 cd android
-.\gradlew clean
+./gradlew clean
 cd ..
 
 

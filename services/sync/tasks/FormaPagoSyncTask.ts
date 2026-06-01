@@ -15,7 +15,7 @@ export class FormaPagoSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return `https://cbinfo.no-ip.info:9031/api/MovilesVentas/formas-pagos?sucursal=${this.sucursal || 0}`;
+    return `https://api.cbinformatica.net:9031/api/MovilesVentas/formas-pagos?sucursal=${this.sucursal || 0}`;
   }
 
   getPriority(): number {

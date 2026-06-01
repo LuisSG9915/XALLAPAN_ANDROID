@@ -196,7 +196,7 @@ class SyncService {
   constructor() {
     this.realm = null;
     this.isInitialized = false;
-    this.apiBaseUrl = 'https://cbinfo.no-ip.info:9031'; // Para Android emulator (10.0.2.2 = host machine)
+    this.apiBaseUrl = 'https://api.cbinformatica.net:9031'; // Para Android emulator (10.0.2.2 = host machine)
     this.events = new SimpleEventEmitter();
   }
 

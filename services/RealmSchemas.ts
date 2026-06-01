@@ -70,6 +70,7 @@ export const ProductoSchema = {
     inventariable: "bool?",
     fechaAct: "date?",
     omitirMovil: "int?",
+    precioCatalogo: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",
@@ -93,6 +94,7 @@ export const KitSchema = {
     envaseVendido: "bool?",
     cantRecEnvOtro: "int?", // Número entero: cantidad de envases a recibir (0, 1, 2, 3...)
     noRecuperaEnvase: "bool?",
+    noPrecioCatalogo: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",

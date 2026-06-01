@@ -15,7 +15,7 @@ export class VisitaSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
-    return "https://cbinfo.no-ip.info:9031/api/MovilesVentas/visitas/full";
+    return "https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full";
   }
 
   getPriority(): number {

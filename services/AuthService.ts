@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'https://cbinfo.no-ip.info:9031';
+const API_BASE_URL = 'https://api.cbinformatica.net:9031';
 
 const SESSION_STORAGE_KEY = '@awesomeapp/current_user';
 
@@ -26,34 +26,44 @@ class AuthService {
       usuario,
     )}/${encodeURIComponent(password)}`;
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Error de conexión (${res.status})`);
-    }
-    const data = await res.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      throw new Error('Usuario o contraseña incorrectos');
-    }
-
-    const user: Usuario = data[0];
-
-    if (!user.sucursal_origen && user.sucursal) {
-      user.sucursal_origen = user.sucursal;
-    }
-
-    this._currentUser = user;
-
     try {
-      await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-    } catch (storageError) {
-      console.error(
-        'No fue posible guardar la sesión localmente:',
-        storageError,
-      );
-    }
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Error de conexión (${res.status}: ${res.statusText})`);
+      }
+      const data = await res.json();
 
-    return user;
+      // Verificar si la respuesta contiene un error del servidor
+      if (data && typeof data === 'object' && 'error' in data) {
+        throw new Error(data.error || 'Error en el servidor');
+      }
+
+      if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('Usuario o contraseña incorrectos');
+      }
+
+      const user: Usuario = data[0];
+
+      if (!user.sucursal_origen && user.sucursal) {
+        user.sucursal_origen = user.sucursal;
+      }
+
+      this._currentUser = user;
+
+      try {
+        await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+      } catch (storageError) {
+        console.error(
+          'No fue posible guardar la sesión localmente:',
+          storageError,
+        );
+      }
+
+      return user;
+    } catch (error) {
+      console.error('[AuthService] Error en login:', error);
+      throw error;
+    }
   }
 
   async restoreSession(): Promise<Usuario | null> {
