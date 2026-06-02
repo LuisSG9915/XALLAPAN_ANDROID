@@ -71,6 +71,22 @@ export class UsuariosSyncTask extends SyncTask {
             nombreCia: usuario.nombreCia ?? null,
             telefono: usuario.telefono ?? null,
             ticketFinal: usuario.ticketFinal ?? null,
+            permisoDomicilioTicket:
+              typeof usuario.permisoDomicilioTicket === "boolean"
+                ? usuario.permisoDomicilioTicket
+                : usuario.permisoDomicilioTicket === 1
+                ? true
+                : usuario.permisoDomicilioTicket === 0
+                ? false
+                : null,
+            dobleTicket:
+              typeof usuario.dobleTicket === "boolean"
+                ? usuario.dobleTicket
+                : usuario.dobleTicket === 1
+                ? true
+                : usuario.dobleTicket === 0
+                ? false
+                : null,
             syncedAt: new Date(),
           };
 

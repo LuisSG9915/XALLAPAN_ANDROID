@@ -292,7 +292,7 @@ export default function PrecorteScreen() {
             <Text style={styles.muted}>No hay datos para mostrar</Text>
           ) : (
             <FlatList
-              data={items}
+              data={items.filter((item) => item.ifValue > 0)}
               keyExtractor={(i) => String(i.id)}
               scrollEnabled={false}
               renderItem={({ item }) => (

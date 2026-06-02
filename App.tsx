@@ -465,6 +465,14 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         text: "Cerrar Sesión",
         style: "destructive",
         onPress: async () => {
+          // Limpiar todos los datos excepto usuarios
+          try {
+            if (FullSyncService.isServiceInitialized()) {
+              FullSyncService.clearAllDataExceptUsers();
+            }
+          } catch (error) {
+            console.error("[App] Error al limpiar datos:", error);
+          }
           await AuthService.logout();
           navigation.reset({ index: 0, routes: [{ name: "Login" }] });
         },

@@ -51,6 +51,7 @@ export const UsuarioSchema = {
     telefono: "string?",
     ticketFinal: "string?",
     permisoDomicilioTicket: "bool?",
+    dobleTicket: "bool?",
     syncedAt: "date",
   },
   primaryKey: "id",

@@ -21,9 +21,11 @@ import { ALL_SCHEMAS } from "../services/RealmSchemas";
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
 import LocationService, { LocationCoordinates } from "../services/LocationService";
+import ReubicacionService from "../services/ReubicacionService";
 
 interface Visita {
-  id: number;
+  id: string;
+  idOriginal: number;
   idCliente: number;
   ruta: string;
   fecha: Date;
@@ -76,6 +78,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             } else if (user.metros) {
               setUserMetros(user.metros);
             }
+            // Verificar permiso de reubicación
+            const tienePermiso = ReubicacionService.getInstance().usuarioTienePermisoReubicacion(user.id);
+            setUsuarioPermisoReubicacion(tienePermiso);
           }
         } catch (error) {
           if (user.metros) setUserMetros(user.metros);
@@ -117,6 +122,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
+  const [reubicandoCliente, setReubicandoCliente] = useState(false);
+  const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
 
   // Obtener tipos de visita desde la base de datos
   const getTipoVisitas = () => {
@@ -185,7 +192,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     }, [fechaSeleccionada, currentSucursal, cargarDatos]),
   );
 
-  const handleMarcarVisitado = async (idVisita: number) => {
+  const handleMarcarVisitado = async (idVisita: string) => {
     const visita = visitas.find((v) => v.id === idVisita);
 
     console.log("[Cumplimiento] 🔍 Datos de la visita a marcar:", {
@@ -282,7 +289,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     });
 
     const exito = await VisitaSyncService.getInstance().marcarVisitado(
-      visitaSeleccionada.id,
+      visitaSeleccionada.idOriginal,
       tipoVisitaSeleccionado,
       fechaSeleccionada,
     );
@@ -410,6 +417,165 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     });
   };
 
+  // Reubicar cliente
+  const handleReubicarCliente = async (cliente: ClienteLite) => {
+    const currentUser = await AuthService.restoreSession();
+    if (!currentUser) {
+      Alert.alert("Error", "No hay usuario autenticado");
+      return;
+    }
+
+    if (!usuarioPermisoReubicacion) {
+      Alert.alert(
+        "Sin permiso de reubicación",
+        "No tienes permiso para realizar una reubicación, o ya utilizaste tu permiso.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Reubicar Cliente",
+      `¿Deseas actualizar la ubicación del cliente ${cliente.nombre}?\n\nSe guardará tu ubicación GPS actual como la nueva ubicación del cliente.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Reubicar",
+          onPress: async () => {
+            setReubicandoCliente(true);
+            try {
+              console.log("[Cumplimiento] Obteniendo ubicación GPS para reubicación...");
+              const ubicacion = await LocationService.getBestLocation();
+
+              if (!ubicacion) {
+                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+                setReubicandoCliente(false);
+                return;
+              }
+
+              console.log("[Cumplimiento] Ubicación obtenida:", ubicacion);
+
+              const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
+                cliente.id,
+                ubicacion.latitude,
+                ubicacion.longitude,
+                currentUser.id,
+                currentSucursal,
+              );
+
+              if (reubicacionId) {
+                // Recargar clientes y visitas para reflejar las nuevas coordenadas
+                cargarClientes();
+                cargarDatos(fechaSeleccionada, currentSucursal);
+                Alert.alert("Éxito", "La ubicación del cliente ha sido actualizada.");
+              } else {
+                Alert.alert("Error", "No se pudo registrar la reubicación.");
+              }
+            } catch (error) {
+              console.error("[Cumplimiento] Error al reubicar cliente:", error);
+              Alert.alert("Error", "Ocurrió un error al reubicar el cliente.");
+            } finally {
+              setReubicandoCliente(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // Visitar cliente desde tabs Cercanos/Todos
+  const handleVisitarCliente = async (cliente: ClienteLite) => {
+    // Función auxiliar para comparar fechas (mismo día)
+    const isSameDay = (date1: Date, date2: Date): boolean => {
+      return (
+        date1.getFullYear() === date2.getFullYear() &&
+        date1.getMonth() === date2.getMonth() &&
+        date1.getDate() === date2.getDate()
+      );
+    };
+
+    // Buscar visita del cliente para el día actual
+    const visitaHoy = visitas.find((v) => v.idCliente === cliente.id && isSameDay(v.fecha, fechaSeleccionada));
+
+    if (!visitaHoy) {
+      // Si no hay visita programada, crear una nueva visita para hoy
+      Alert.alert(
+        "Crear visita",
+        `El cliente ${cliente.nombre} no tiene visita programada para hoy. ¿Deseas registrar la visita?`,
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Registrar",
+            onPress: async () => {
+              try {
+                // Crear nueva visita en Realm
+                const user = await AuthService.restoreSession();
+                const sucursal = user?.sucursal_origen || user?.sucursal || 0;
+                const fechaStr = fechaSeleccionada.toISOString().split("T")[0];
+                const idCompuesto = `0-${fechaStr}-${cliente.id}`; // ID único para visita manual
+
+                if (!FullSyncService.isServiceInitialized()) {
+                  await FullSyncService.initialize();
+                }
+                const realm = (FullSyncService as any).realm;
+
+                realm.write(() => {
+                  realm.create("Visita", {
+                    id: idCompuesto,
+                    idOriginal: 0,
+                    idCliente: cliente.id,
+                    ruta: "manual",
+                    fecha: fechaSeleccionada,
+                    orden: 999,
+                    tipo: 1,
+                    visitado: 0,
+                    syncedAr: null,
+                  });
+                });
+
+                console.log("[Cumplimiento] Visita creada manualmente para cliente", cliente.id);
+
+                // Abrir modal para seleccionar tipo de visita
+                const nuevaVisita: VisitaConCliente = {
+                  id: idCompuesto,
+                  idOriginal: 0,
+                  idCliente: cliente.id,
+                  ruta: "manual",
+                  fecha: fechaSeleccionada,
+                  orden: 999,
+                  tipo: 1,
+                  visitado: 0,
+                  nombreCliente: cliente.nombre,
+                  latitud: cliente.latitud,
+                  longitud: cliente.longitud,
+                  metros: cliente.metros,
+                };
+
+                // Agregar la visita manual al estado local
+                setVisitas((prevVisitas) => [...prevVisitas, nuevaVisita]);
+
+                setVisitaSeleccionada(nuevaVisita);
+                setTipoVisitaSeleccionado(null);
+                setModalVisible(true);
+              } catch (error) {
+                console.error("[Cumplimiento] Error al crear visita:", error);
+                Alert.alert("Error", "No se pudo crear la visita.");
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    if (visitaHoy.visitado === 1) {
+      Alert.alert("Información", "Esta visita ya fue marcada como realizada");
+      return;
+    }
+
+    // Usar la función existente handleMarcarVisitado
+    await handleMarcarVisitado(visitaHoy.id);
+  };
+
   // Cargar todos los clientes locales desde Realm
   const cargarClientes = useCallback(() => {
     try {
@@ -482,6 +648,20 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </View>
           </View>
           <View style={styles.botonesContainer}>
+            {usuarioPermisoReubicacion && (
+              <TouchableOpacity
+                style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
+                onPress={() => handleReubicarCliente({ id: item.idCliente, nombre: item.nombreCliente || "Cliente" })}
+                disabled={reubicandoCliente}
+              >
+                {reubicandoCliente ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="my-location" type="material" size={14} color="#fff" />
+                )}
+                <Text style={styles.reubicarBtnModalText}></Text>
+              </TouchableOpacity>
+            )}
             {item.visitado === 0 && (
               <TouchableOpacity style={styles.botonVentas} onPress={() => handleIrAVentas(item)} activeOpacity={0.8}>
                 <Icon name="shopping-cart" type="material" size={16} color="white" />
@@ -554,43 +734,106 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   });
 
   // Render de un cliente para los tabs Cercanos / Todos (botón -> Ventas)
-  const renderClienteVenta = (cliente: ClienteLite & { distanciaMetros?: number }) => (
-    <View style={styles.visitaContainer}>
-      <View style={styles.visitaCard}>
-        <View style={styles.visitaHeader}>
-          <View style={styles.visitaInfo}>
-            <View style={styles.clienteRow}>
-              <View style={styles.clienteIcon}>
-                <Icon name="store" type="material" size={20} color="#007AFF" />
-              </View>
-              <View style={styles.clienteDetails}>
-                <Text style={styles.clienteId}>#{cliente.id}</Text>
-                <Text style={styles.clienteNombre}>{cliente.nombre}</Text>
-                {cliente.distanciaMetros != null && (
-                  <View style={styles.horaRow}>
-                    <Icon name="place" type="material" size={14} color="#8E8E93" />
-                    <Text style={styles.horaTexto}>
-                      {cliente.distanciaMetros < 1000
-                        ? `${Math.round(cliente.distanciaMetros)} m`
-                        : `${(cliente.distanciaMetros / 1000).toFixed(1)} km`}
-                    </Text>
-                  </View>
-                )}
+  const renderClienteVenta = (cliente: ClienteLite & { distanciaMetros?: number }) => {
+    // Verificar si el cliente tiene visita visitada hoy
+    const isSameDay = (date1: Date, date2: Date): boolean => {
+      return (
+        date1.getFullYear() === date2.getFullYear() &&
+        date1.getMonth() === date2.getMonth() &&
+        date1.getDate() === date2.getDate()
+      );
+    };
+    const visitaHoy = visitas.find((v) => v.idCliente === cliente.id && isSameDay(v.fecha, fechaSeleccionada));
+    const fueVisitadoHoy = visitaHoy?.visitado === 1;
+
+    return (
+      <View style={styles.visitaContainer}>
+        <View style={styles.visitaCard}>
+          <View style={styles.visitaHeader}>
+            <View style={styles.visitaInfo}>
+              <View style={styles.clienteRow}>
+                <View style={styles.clienteIcon}>
+                  <Icon
+                    name={fueVisitadoHoy ? "check-circle" : "store"}
+                    type="material"
+                    size={20}
+                    color={fueVisitadoHoy ? "#34C759" : "#007AFF"}
+                  />
+                </View>
+                <View style={styles.clienteDetails}>
+                  <Text style={styles.clienteId}>#{cliente.id}</Text>
+                  <Text style={styles.clienteNombre}>{cliente.nombre}</Text>
+                  {cliente.distanciaMetros != null && (
+                    <View style={styles.horaRow}>
+                      <Icon name="place" type="material" size={14} color="#8E8E93" />
+                      <Text style={styles.horaTexto}>
+                        {cliente.distanciaMetros < 1000
+                          ? `${Math.round(cliente.distanciaMetros)} m`
+                          : `${(cliente.distanciaMetros / 1000).toFixed(1)} km`}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </View>
+            <View style={styles.botonesContainer}>
+              {usuarioPermisoReubicacion && (
+                <TouchableOpacity
+                  style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
+                  onPress={() => handleReubicarCliente(cliente)}
+                  disabled={reubicandoCliente}
+                >
+                  {reubicandoCliente ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Icon name="my-location" type="material" size={14} color="#fff" />
+                  )}
+                  <Text style={styles.reubicarBtnModalText}></Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.botonVentas}
+                onPress={() => handleIrAVentasCliente(cliente)}
+                activeOpacity={0.8}
+              >
+                <Icon name="shopping-cart" type="material" size={16} color="white" />
+                <Text style={styles.botonVentasTexto}>Ventas</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.botonVisitado,
+                  fueVisitadoHoy ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
+                  validandoUbicacion && styles.botonVisitadoDisabled,
+                ]}
+                onPress={() => handleVisitarCliente(cliente)}
+                disabled={fueVisitadoHoy || validandoUbicacion}
+                activeOpacity={0.8}
+              >
+                {validandoUbicacion ? (
+                  <>
+                    <ActivityIndicator size="small" color="white" />
+                    <Text style={styles.botonVisitadoTexto}>Validando...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name={fueVisitadoHoy ? "check" : "directions-walk"} type="material" size={16} color="white" />
+                    <Text
+                      style={[
+                        styles.botonVisitadoTexto,
+                        fueVisitadoHoy ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
+                      ]}
+                    >
+                      {fueVisitadoHoy ? "Completado" : "Visitar"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.botonVentas}
-            onPress={() => handleIrAVentasCliente(cliente)}
-            activeOpacity={0.8}
-          >
-            <Icon name="shopping-cart" type="material" size={16} color="white" />
-            <Text style={styles.botonVentasTexto}>Ventas</Text>
-          </TouchableOpacity>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -988,24 +1231,40 @@ const styles = StyleSheet.create({
   },
   botonesContainer: {
     flexDirection: "row",
-    gap: 8,
+    gap: 4,
     alignItems: "center",
   },
   botonVentas: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 16,
     backgroundColor: "#FF9500",
-    minWidth: 70,
+    minWidth: 60,
     justifyContent: "center",
   },
   botonVentasTexto: {
     color: "white",
     fontWeight: "600",
-    marginLeft: 4,
-    fontSize: 12,
+    marginLeft: 2,
+    fontSize: 11,
+  },
+  reubicarBtnModal: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FF9800",
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 2,
+  },
+  reubicarBtnModalDisabled: {
+    backgroundColor: "#BDBDBD",
+    opacity: 0.6,
+  },
+  reubicarBtnModalText: {
+    display: "none",
   },
   visitaInfo: {
     flex: 1,
@@ -1052,10 +1311,10 @@ const styles = StyleSheet.create({
   botonVisitado: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 80,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 65,
     justifyContent: "center",
   },
   botonVisitadoActivo: {
@@ -1071,8 +1330,8 @@ const styles = StyleSheet.create({
   botonVisitadoTexto: {
     color: "white",
     fontWeight: "600",
-    marginLeft: 4,
-    fontSize: 12,
+    marginLeft: 2,
+    fontSize: 11,
   },
   botonVisitadoTextoActivo: {
     color: "white",

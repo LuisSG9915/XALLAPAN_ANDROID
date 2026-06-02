@@ -23,8 +23,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 42,
+        schemaVersion: 43,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v43: Agregar campo dobleTicket a Usuario
+          if (oldRealm.schemaVersion < 43) {
+            console.log("[Migration v43] Agregando campo dobleTicket a Usuario");
+          }
+
           // Migración v42: Agregar campo precioCatalogo a Producto y noPrecioCatalogo a Kit
           if (oldRealm.schemaVersion < 42) {
             console.log("[Migration v42] Agregando campo precioCatalogo a Producto y noPrecioCatalogo a Kit");
@@ -2808,6 +2813,60 @@ class FullSyncService {
   getKitById(id: number): any | null {
     if (!this.isInitialized || !this.realm) return null;
     return this.realm.objectForPrimaryKey("Kit", id) || null;
+  }
+
+  /**
+   * Elimina todos los datos de Realm excepto la tabla Usuario
+   */
+  clearAllDataExceptUsers(): void {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      console.warn("[FullSyncService] Realm no inicializado o cerrado, no se pueden limpiar datos");
+      return;
+    }
+
+    try {
+      this.realm.write(() => {
+        // Tablas a eliminar (todas excepto Usuario)
+        const tablesToDelete = [
+          "Venta",
+          "Producto",
+          "Cia",
+          "Kit",
+          "KitIntercambio",
+          "Precio",
+          "PrecioPromo",
+          "Inventario",
+          "Cartera",
+          "ClienteFull",
+          "SyncStatus",
+          "SyncLog",
+          "SyncTableLog",
+          "CierreRuta",
+          "Visita",
+          "DetalleVisitas",
+          "TipoVisita",
+          "BitacoraSync",
+          "BitacoraGps",
+          "InventarioEnvase",
+          "InventarioEnvasesHistorial",
+          "Reubicacion",
+          "VisitaRealizada",
+          "VentaCancelacion",
+          "VentaModificacion",
+          "FormaPago",
+        ];
+
+        tablesToDelete.forEach((tableName) => {
+          const objects = this.realm!.objects(tableName);
+          this.realm!.delete(objects);
+          console.log(`[FullSyncService] Tabla ${tableName} limpiada: ${objects.length} registros eliminados`);
+        });
+
+        console.log("[FullSyncService] ✅ Todos los datos eliminados excepto Usuario");
+      });
+    } catch (error) {
+      console.error("[FullSyncService] Error al limpiar datos:", error);
+    }
   }
 
   getPrecios(limit: number = 100): any[] {
