@@ -16,10 +16,12 @@ export class InventarioSyncTask extends SyncTask {
 
   getEndpoint(): string {
     const nowMexico = this.getMexicoNow();
-    const fechaMovto = new Date(nowMexico.getTime() - nowMexico.getTimezoneOffset() * 60000).toISOString();
+    // Agregar 2 minutos de buffer para incluir registros guardados recientemente
+    const fechaConBuffer = new Date(nowMexico.getTime() + 2 * 60 * 1000);
+    const fechaMovto = new Date(fechaConBuffer.getTime() - fechaConBuffer.getTimezoneOffset() * 60000).toISOString();
 
     return `https://api.cbinformatica.net:9031/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
-      String(this.sucursal)
+      String(this.sucursal),
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
   }
   // fechaMovto
@@ -89,7 +91,7 @@ export class InventarioSyncTask extends SyncTask {
 
         registrosAEliminar.forEach((item) => {
           console.log(
-            `[InventarioSyncTask] Eliminando registro obsoleto: id=${item.id}, claveProd=${item.claveProd}, descripcion=${item.descripcion}`
+            `[InventarioSyncTask] Eliminando registro obsoleto: id=${item.id}, claveProd=${item.claveProd}, descripcion=${item.descripcion}`,
           );
           this.realm.delete(item);
           registrosEliminados++;
@@ -97,7 +99,7 @@ export class InventarioSyncTask extends SyncTask {
       });
 
       console.log(
-        `[InventarioSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}, Eliminados: ${registrosEliminados}`
+        `[InventarioSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}, Eliminados: ${registrosEliminados}`,
       );
 
       return {

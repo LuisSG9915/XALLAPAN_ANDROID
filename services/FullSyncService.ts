@@ -1533,7 +1533,9 @@ class FullSyncService {
         run: async () => {
           const tableName = "Inventario";
           const nowMexico = this.getMexicoNow();
-          const fechaMovto = this.formatMexicoDateForServer(nowMexico);
+          // Agregar 2 minutos de buffer para incluir registros guardados recientemente
+          const fechaConBuffer = new Date(nowMexico.getTime() + 2 * 60 * 1000);
+          const fechaMovto = this.formatMexicoDateForServer(fechaConBuffer);
           const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
             String(sucursal),
           )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
@@ -3869,7 +3871,9 @@ class FullSyncService {
 
     const tableName = "Inventario";
     const nowMexico = this.getMexicoNow();
-    const fechaMovto = this.formatMexicoDateForServer(nowMexico);
+    // Agregar 2 minutos de buffer para incluir registros guardados recientemente
+    const fechaConBuffer = new Date(nowMexico.getTime() + 2 * 60 * 1000);
+    const fechaMovto = this.formatMexicoDateForServer(fechaConBuffer);
     const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
       String(sucursal),
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
