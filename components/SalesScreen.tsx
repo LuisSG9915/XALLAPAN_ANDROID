@@ -233,81 +233,68 @@ export default function SalesScreen({ route }: { route?: any }) {
         return { usarPrecioKit: false };
       }
 
-      // Verificar si algún insumo tiene precioCatalogo=true
-      let tieneInsumoConPrecioCatalogo = false;
-      let todosLosKitsTienenNoPrecioCatalogo = true;
+      // Calcular precio del kit sumando TODOS los insumos
       let precioDelKit = 0;
 
       for (const kit of kitsDelProducto) {
         const insumoProducto = productosPorId.get(kit.idInsumo);
         console.log(
-          `[determinarPrecioKit]   -> Kit id=${kit.id}, idInsumo=${kit.idInsumo}, precioCatalogo del insumo=${insumoProducto?.precioCatalogo}, noPrecioCatalogo del kit=${kit.noPrecioCatalogo}`,
+          `[determinarPrecioKit]   -> Kit id=${kit.id}, idInsumo=${kit.idInsumo}, precioCatalogo del insumo=${insumoProducto?.precioCatalogo}, kit.precio=${kit.precio}`,
         );
 
+        // Si el insumo tiene precioCatalogo=true: buscar precio en listas del cliente (promo, cliente, default)
+        // Si el insumo NO tiene precioCatalogo: usar precio fijo del catálogo de kits (kit.precio)
         if (insumoProducto?.precioCatalogo === true) {
-          console.log(`[determinarPrecioKit]   -> ✓ Insumo tiene precioCatalogo=true`);
-          tieneInsumoConPrecioCatalogo = true;
-          if (kit.noPrecioCatalogo !== true) {
-            // noPrecioCatalogo=false: usar el precio del insumo desde la lista de precios del cliente
-            // Los mapas preciosMap/preciosDefaultMap/preciosPromoMap están indexados por Precio.claveProd
-            // que en la BD coincide con el id del producto (kit.idInsumo), no con Producto.claveProd
-            const claveInsumo = kit.idInsumo;
+          console.log(`[determinarPrecioKit]   -> ✓ Insumo tiene precioCatalogo=true, buscando en listas de precios`);
+          const claveInsumo = kit.idInsumo;
+          let precioInsumoLista: number | undefined;
+          if (preciosPromoMap && preciosPromoMap.has(claveInsumo)) {
+            precioInsumoLista = preciosPromoMap.get(claveInsumo);
+            console.log(`[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde PROMO: ${precioInsumoLista}`);
+          } else if (preciosMap && preciosMap.has(claveInsumo)) {
+            precioInsumoLista = preciosMap.get(claveInsumo);
             console.log(
-              `[determinarPrecioKit]   -> ✓ Kit noPrecioCatalogo=false, buscando insumo id=${claveInsumo} en listas de precios`,
+              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista cliente: ${precioInsumoLista}`,
             );
-            let precioInsumoLista: number | undefined;
-            if (preciosPromoMap && preciosPromoMap.has(claveInsumo)) {
-              precioInsumoLista = preciosPromoMap.get(claveInsumo);
-              console.log(`[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde PROMO: ${precioInsumoLista}`);
-            } else if (preciosMap && preciosMap.has(claveInsumo)) {
-              precioInsumoLista = preciosMap.get(claveInsumo);
-              console.log(
-                `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista cliente: ${precioInsumoLista}`,
-              );
-            } else if (preciosDefaultMap && preciosDefaultMap.has(claveInsumo)) {
-              precioInsumoLista = preciosDefaultMap.get(claveInsumo);
-              console.log(
-                `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista default: ${precioInsumoLista}`,
-              );
-            }
-            if (precioInsumoLista === undefined) {
-              precioInsumoLista = kit.precio || 0;
-              console.log(
-                `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} no encontrado en listas, usando kit.precio: ${precioInsumoLista}`,
-              );
-            }
-            const precioInsumo = (precioInsumoLista || 0) * (kit.cantidad || 1);
-            precioDelKit += precioInsumo;
+          } else if (preciosDefaultMap && preciosDefaultMap.has(claveInsumo)) {
+            precioInsumoLista = preciosDefaultMap.get(claveInsumo);
             console.log(
-              `[determinarPrecioKit]   -> Precio insumo lista: ${precioInsumoLista} * ${kit.cantidad} = ${precioInsumo}`,
-            );
-          } else {
-            // noPrecioCatalogo=true: usar precio fijo del catálogo de kits
-            console.log(`[determinarPrecioKit]   -> ✓ Kit noPrecioCatalogo=true, usando precio fijo del catálogo`);
-            const precioInsumo = (kit.precio || 0) * (kit.cantidad || 1);
-            precioDelKit += precioInsumo;
-            console.log(
-              `[determinarPrecioKit]   -> Precio insumo catalogo: ${kit.precio} * ${kit.cantidad} = ${precioInsumo}`,
+              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista default: ${precioInsumoLista}`,
             );
           }
-        } else {
+          if (precioInsumoLista === undefined) {
+            precioInsumoLista = kit.precio || 0;
+            console.log(
+              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} no encontrado en listas, usando kit.precio: ${precioInsumoLista}`,
+            );
+          }
+          const precioInsumo = (precioInsumoLista || 0) * (kit.cantidad || 1);
+          precioDelKit += precioInsumo;
           console.log(
-            `[determinarPrecioKit]   -> Insumo NO tiene precioCatalogo (valor=${insumoProducto?.precioCatalogo})`,
+            `[determinarPrecioKit]   -> Precio insumo lista: ${precioInsumoLista} * ${kit.cantidad} = ${precioInsumo}`,
+          );
+        } else {
+          // El insumo NO tiene precioCatalogo: usar precio fijo del catálogo de kits
+          console.log(`[determinarPrecioKit]   -> ✓ Insumo NO tiene precioCatalogo, usando precio fijo del catálogo`);
+          const precioInsumo = (kit.precio || 0) * (kit.cantidad || 1);
+          precioDelKit += precioInsumo;
+          console.log(
+            `[determinarPrecioKit]   -> Precio insumo catalogo: ${kit.precio} * ${kit.cantidad} = ${precioInsumo}`,
           );
         }
       }
 
       console.log(
-        `[determinarPrecioKit]   -> Resumen: tieneInsumoConPrecioCatalogo=${tieneInsumoConPrecioCatalogo}, todosLosKitsTienenNoPrecioCatalogo=${todosLosKitsTienenNoPrecioCatalogo}, precioDelKit=${precioDelKit}`,
+        `[determinarPrecioKit]   -> Resumen: precio total del kit calculado = ${precioDelKit}`,
       );
 
-      // Si hay algún insumo con precioCatalogo, usar el precio calculado (ya sea de lista o de catálogo)
-      if (tieneInsumoConPrecioCatalogo) {
+      // Siempre usar el precio calculado del kit cuando hay insumos y el precio > 0
+      if (precioDelKit > 0) {
         console.log(`[determinarPrecioKit]   -> ✓✓✓ DECISIÓN: USAR PRECIO CALCULADO = ${precioDelKit}`);
         return { usarPrecioKit: true, precioKit: precioDelKit };
       }
 
-      console.log(`[determinarPrecioKit]   -> ✗✗✗ DECISIÓN: NO usar precio del kit`);
+      console.log(`[determinarPrecioKit]   -> ✗✗✗ DECISIÓN: NO usar precio del kit (precio=0)`);
       return { usarPrecioKit: false };
     },
     [],
