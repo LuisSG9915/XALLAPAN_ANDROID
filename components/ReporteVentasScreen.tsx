@@ -490,6 +490,83 @@ export default function ReporteVentasScreen() {
 
   const consultarLocal = () => filtrarVentas(true);
 
+  // Helper para obtener desglose de kits/combos para el ticket
+  const getComboBreakdownForTicket = (claveProd: number, cantidad: number, importeTotal: number, cveCliente?: number): { isCombo: boolean; esInventariable?: boolean; comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }> } => {
+    // Buscar producto por claveProd
+    const allProductos = FullSyncService.getProductos(10000);
+    const producto = allProductos.find((p: any) => parseInt(p.claveProd || "0", 10) === claveProd);
+
+    if (!producto?.esKit) return { isCombo: false };
+
+    // Si es kit inventariable, NO mostrar desglose
+    if (producto?.inventariable) return { isCombo: false, esInventariable: true };
+
+    const kitsDelProducto = FullSyncService.getKitsByProducto(producto.id);
+    if (kitsDelProducto.length === 0) return { isCombo: false };
+
+    // Obtener precios
+    const cliente = cveCliente ? FullSyncService.getClienteFullById(cveCliente) : null;
+    const listaPrecios = cliente?.listaPrecio ?? 0;
+    const preciosPromo = FullSyncService.getPreciosPromoByCliente(cveCliente || 0);
+    const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
+    const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
+
+    // Mapa de precios
+    const preciosPromoMap = new Map<number, number>();
+    const preciosMap = new Map<number, number>();
+    const preciosDefaultMap = new Map<number, number>();
+
+    preciosPromo.forEach((p: any) => {
+      const clave = parseInt(p.claveProd || "0", 10);
+      if (!Number.isNaN(clave)) preciosPromoMap.set(clave, p.precio || 0);
+    });
+    preciosCliente.forEach((p: any) => {
+      const clave = parseInt(p.claveProd || "0", 10);
+      if (!Number.isNaN(clave)) preciosMap.set(clave, p.precio || 0);
+    });
+    preciosDefault.forEach((p: any) => {
+      const clave = parseInt(p.claveProd || "0", 10);
+      if (!Number.isNaN(clave)) preciosDefaultMap.set(clave, p.precio || 0);
+    });
+
+    const productosPorId = new Map<number, any>();
+    allProductos.forEach((p: any) => productosPorId.set(p.id, p));
+
+    const breakdown = kitsDelProducto.map((kit: any) => {
+      const insumoProducto = productosPorId.get(kit.idInsumo);
+      const claveInsumo = kit.idInsumo;
+
+      let precioInsumo: number;
+      // Si el insumo tiene precioCatalogo=true: buscar en listas
+      // Si NO tiene precioCatalogo: usar precio fijo del catálogo de kits
+      if (insumoProducto?.precioCatalogo === true) {
+        if (preciosPromoMap.has(claveInsumo)) {
+          precioInsumo = preciosPromoMap.get(claveInsumo)!;
+        } else if (preciosMap.has(claveInsumo)) {
+          precioInsumo = preciosMap.get(claveInsumo)!;
+        } else if (preciosDefaultMap.has(claveInsumo)) {
+          precioInsumo = preciosDefaultMap.get(claveInsumo)!;
+        } else {
+          precioInsumo = kit.precio || 0;
+        }
+      } else {
+        // Usar precio fijo del catálogo de kits
+        precioInsumo = kit.precio || 0;
+      }
+
+      const kitQty = (kit.cantidad || 1) * cantidad;
+
+      return {
+        description: insumoProducto?.descripcion || `Insumo ${kit.idInsumo}`,
+        quantity: kitQty,
+        price: precioInsumo,
+        total: precioInsumo * kitQty,
+      };
+    });
+
+    return { isCombo: true, esInventariable: false, comboBreakdown: breakdown };
+  };
+
   const buildSaleTicketDataFromRow = (row: ReporteItem | GroupedSale): SaleTicketData => {
     // Si es GroupedSale, usar directamente los productos agrupados
     if ("productos" in row && "totalImporte" in row) {
@@ -498,12 +575,17 @@ export default function ReporteVentasScreen() {
       const clientName = groupedRow.nombre;
       const paymentMethod = groupedRow.tipoPago;
 
-      const items = groupedRow.productos.map((prod) => ({
-        description: prod.nombreProducto,
-        quantity: prod.cantProducto,
-        price: prod.precio,
-        total: prod.importe,
-      }));
+      const items = groupedRow.productos.map((prod) => {
+        const comboInfo = getComboBreakdownForTicket(prod.claveProd || 0, prod.cantProducto, prod.importe, groupedRow.cve_cliente);
+        return {
+          description: prod.nombreProducto,
+          quantity: prod.cantProducto,
+          price: prod.precio,
+          total: prod.importe,
+          esInventariable: comboInfo.esInventariable,
+          ...comboInfo,
+        };
+      });
 
       const total = groupedRow.totalImporte;
 
@@ -638,21 +720,29 @@ export default function ReporteVentasScreen() {
             const quantity = venta.cantProducto ?? 1;
             const price = venta.precio ?? 0;
             const total = venta.importe ?? quantity * price;
+            const comboInfo = getComboBreakdownForTicket(venta.claveProd || 0, quantity, total, venta.cveCliente);
             return {
               description: String(venta.nombreProducto ?? "Producto"),
               quantity,
               price,
               total,
+              esInventariable: comboInfo.esInventariable,
+              ...comboInfo,
             };
           })
         : reporteRow.nombreProducto
         ? [
-            {
-              description: String(reporteRow.nombreProducto),
-              quantity: reporteRow.cantProducto ?? 1,
-              price: reporteRow.precio ?? reporteRow.importe,
-              total: reporteRow.importe,
-            },
+            (() => {
+              const comboInfo = getComboBreakdownForTicket(reporteRow.id, reporteRow.cantProducto ?? 1, reporteRow.importe, reporteRow.cve_cliente);
+              return {
+                description: String(reporteRow.nombreProducto),
+                quantity: reporteRow.cantProducto ?? 1,
+                price: reporteRow.precio ?? reporteRow.importe,
+                total: reporteRow.importe,
+                esInventariable: comboInfo.esInventariable,
+                ...comboInfo,
+              };
+            })(),
           ]
         : [];
 

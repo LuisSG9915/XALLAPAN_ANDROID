@@ -2094,16 +2094,91 @@ export default function SalesScreen({ route }: { route?: any }) {
           console.log("[Sales] Domicilio del cliente para ticket:", clientDomicilio);
         }
 
+        // Helper para obtener desglose de kits para el ticket
+        const getComboBreakdown = (item: CartItem): { isCombo: boolean; esInventariable?: boolean; comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }> } => {
+          if (!item.esKit) return { isCombo: false };
+
+          // Si es kit inventariable, NO mostrar desglose
+          if (item.inventariable) return { isCombo: false, esInventariable: true };
+
+          const kitsDelProducto = FullSyncService.getKitsByProducto(item.id);
+          if (kitsDelProducto.length === 0) return { isCombo: false };
+
+          // Obtener precios desde FullSyncService
+          const listaPrecios = client.listaPrecio ?? 0;
+          const preciosPromo = FullSyncService.getPreciosPromoByCliente(client.id);
+          const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
+          const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
+
+          // Mapa de precios para calcular precios de insumos
+          const preciosPromoMap = new Map<number, number>();
+          const preciosMap = new Map<number, number>();
+          const preciosDefaultMap = new Map<number, number>();
+
+          preciosPromo.forEach((p: any) => {
+            const clave = parseInt(p.claveProd || "0", 10);
+            if (!Number.isNaN(clave)) preciosPromoMap.set(clave, p.precio || 0);
+          });
+          preciosCliente.forEach((p: any) => {
+            const clave = parseInt(p.claveProd || "0", 10);
+            if (!Number.isNaN(clave)) preciosMap.set(clave, p.precio || 0);
+          });
+          preciosDefault.forEach((p: any) => {
+            const clave = parseInt(p.claveProd || "0", 10);
+            if (!Number.isNaN(clave)) preciosDefaultMap.set(clave, p.precio || 0);
+          });
+
+          const productosPorId = new Map<number, any>();
+          productosBase.forEach((p: any) => productosPorId.set(p.id, p));
+
+          const breakdown = kitsDelProducto.map((kit: any) => {
+            const insumoProducto = productosPorId.get(kit.idInsumo);
+            const claveInsumo = kit.idInsumo;
+
+            let precioInsumo: number;
+            // Si el insumo tiene precioCatalogo=true: buscar en listas
+            // Si NO tiene precioCatalogo: usar precio fijo del catálogo de kits
+            if (insumoProducto?.precioCatalogo === true) {
+              if (preciosPromoMap.has(claveInsumo)) {
+                precioInsumo = preciosPromoMap.get(claveInsumo)!;
+              } else if (preciosMap.has(claveInsumo)) {
+                precioInsumo = preciosMap.get(claveInsumo)!;
+              } else if (preciosDefaultMap.has(claveInsumo)) {
+                precioInsumo = preciosDefaultMap.get(claveInsumo)!;
+              } else {
+                precioInsumo = kit.precio || 0;
+              }
+            } else {
+              // Usar precio fijo del catálogo de kits
+              precioInsumo = kit.precio || 0;
+            }
+
+            return {
+              description: insumoProducto?.descripcion || `Insumo ${kit.idInsumo}`,
+              quantity: kit.cantidad || 1,
+              price: precioInsumo,
+              total: precioInsumo * (kit.cantidad || 1),
+            };
+          });
+
+          return { isCombo: true, esInventariable: false, comboBreakdown: breakdown };
+        };
+
         const ticketData = {
           clientName: client.nombre,
           clientDomicilio,
           paymentMethod: descripcionMedioPago,
-          items: validCart.map((item) => ({
-            description: item.descripcion,
-            quantity: item.cantidad,
-            price: item.precio,
-            total: item.precio * item.cantidad,
-          })),
+          items: validCart.map((item) => {
+            const comboInfo = getComboBreakdown(item);
+            return {
+              description: item.descripcion,
+              quantity: item.cantidad,
+              price: item.precio,
+              total: item.precio * item.cantidad,
+              esInventariable: item.inventariable,
+              ...comboInfo,
+            };
+          }),
           total: esPago0 ? 0 : updatedTotal,
           businessName: empresaTicketData.nombreCia || APP_NAME,
           date: now,

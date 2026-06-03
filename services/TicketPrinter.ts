@@ -10,16 +10,28 @@ export interface TicketOptions {
   encoding?: string;
 }
 
+export interface KitBreakdownItem {
+  description: string;
+  quantity: number;
+  price: number;
+  total: number;
+}
+
+export interface SaleTicketItem {
+  description: string;
+  quantity: number;
+  price: number;
+  total: number;
+  isCombo?: boolean;
+  comboBreakdown?: KitBreakdownItem[];
+  esInventariable?: boolean;
+}
+
 export interface SaleTicketData {
   clientName: string;
   clientDomicilio?: string;
   paymentMethod: string;
-  items: Array<{
-    description: string;
-    quantity: number;
-    price: number;
-    total: number;
-  }>;
+  items: Array<SaleTicketItem>;
   total: number;
   date?: Date;
   ticketNumber?: string;
@@ -202,6 +214,21 @@ class TicketPrinter {
       const importeCol = importe.padStart(9);
       const lineaNum = `  ${cantidad} x ${precioCol} ${importeCol}`;
       lines.push(lineaNum);
+
+      // Desglose de combo/kit (solo si NO es inventariable)
+      if (item.isCombo && !item.esInventariable && item.comboBreakdown && item.comboBreakdown.length > 0) {
+        lines.push(this.center("└──--------------------", width));
+        item.comboBreakdown.forEach((kitItem, index) => {
+          const isLast = index === item.comboBreakdown!.length - 1;
+          const connector = isLast ? "└" : "├";
+          const kitDesc = kitItem.description.substring(0, width - 15);
+          const kitQty = kitItem.quantity.toString().padStart(2);
+          const kitPrice = `$${kitItem.price.toFixed(2)}`.padStart(8);
+          lines.push(`  ${connector}─ ${kitQty} ${kitDesc}`);
+          lines.push(`      ${kitPrice}`);
+        });
+        lines.push(this.center("─────────────────────", width));
+      }
     });
 
     lines.push(this.separator("-"));

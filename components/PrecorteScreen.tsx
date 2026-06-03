@@ -209,9 +209,11 @@ export default function PrecorteScreen() {
 
   const imprimir = async () => {
     try {
+      // Solo incluir items con existencia > 0 en el ticket
+      const itemsConExistencia = items.filter((it) => it.ifValue > 0);
       await TicketPrinter.printPrecorteTicket({
         date: new Date(fecha),
-        items: items.map((it) => ({
+        items: itemsConExistencia.map((it) => ({
           product: it.descripcion,
           entries: it.entradas,
           exits: it.salidas,
@@ -314,10 +316,12 @@ export default function PrecorteScreen() {
           <Text style={styles.footerValue}>${totalEfectivo.toFixed(2)}</Text>
         </View>
 
-        <TouchableOpacity style={styles.primaryBtn} onPress={imprimir}>
-          <Icon name="print" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
-          <Text style={styles.primaryBtnText}>Imprimir Reporte</Text>
-        </TouchableOpacity>
+        {items.some((it) => it.ifValue > 0) && (
+          <TouchableOpacity style={styles.primaryBtn} onPress={imprimir}>
+            <Icon name="print" type="material" color="#fff" size={20} style={{ marginRight: 8 }} />
+            <Text style={styles.primaryBtnText}>Imprimir Reporte</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );
