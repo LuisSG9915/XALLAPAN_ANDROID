@@ -245,35 +245,113 @@ class BluetoothPrinterService {
   }
 
   /**
-   * Imprime texto plano
+   * Verifica el estado REAL de la conexión Bluetooth consultando al nativo.
+   * El flag local `isConnected` puede quedar obsoleto si la impresora se apaga
+   * o sale de rango, por lo que aquí intentamos validar contra el sistema.
    */
-  async printText(text: string): Promise<boolean> {
-    if (!this.isConnected) {
-      Alert.alert("No Conectado", "Selecciona una impresora primero");
+  private async isReallyConnected(): Promise<boolean> {
+    try {
+      const anyMgr = BluetoothManager as any;
+      if (typeof anyMgr.getConnectedDeviceAddress === "function") {
+        const addr = await anyMgr.getConnectedDeviceAddress();
+        if (!addr) return false;
+        // Si tenemos impresora actual, confirmar que coincide la dirección
+        return !this.currentPrinter || addr === this.currentPrinter.address;
+      }
+    } catch (e) {
+      console.warn("No se pudo verificar conexión real de impresora:", e);
+    }
+    // Si no se puede verificar nativamente, confiar en el flag local
+    return this.isConnected;
+  }
+
+  /**
+   * Garantiza que haya una conexión activa con la impresora.
+   * Si la conexión cayó, intenta reconectar automáticamente a la impresora guardada.
+   */
+  async ensureConnected(): Promise<boolean> {
+    // Si creemos estar conectados, verificar el estado real
+    if (this.isConnected && this.currentPrinter) {
+      const reallyConnected = await this.isReallyConnected();
+      if (reallyConnected) return true;
+      // El flag estaba obsoleto: la conexión real cayó
+      console.warn("[Printer] Flag conectado pero conexión real caída. Reconectando...");
+      this.isConnected = false;
+    }
+
+    // Intentar reconectar a la impresora guardada (silencioso)
+    return await this.connectToSavedPrinter();
+  }
+
+  /**
+   * Fuerza una reconexión limpia: desconecta y vuelve a conectar a la impresora guardada.
+   */
+  private async forceReconnect(): Promise<boolean> {
+    try {
+      await BluetoothManager.disconnect();
+    } catch (e) {
+      // ignorar errores al desconectar
+    }
+    this.isConnected = false;
+    return await this.connectToSavedPrinter();
+  }
+
+  /**
+   * Ejecuta una operación de impresión garantizando la conexión y reintentando
+   * una vez si la impresora se desconectó. Centraliza la lógica de auto-reconexión
+   * para que aplique en TODOS los lugares donde se imprime.
+   */
+  private async executeWithReconnect(printFn: () => Promise<void>): Promise<boolean> {
+    // Asegurar conexión antes de imprimir (reconecta si es necesario)
+    const connected = await this.ensureConnected();
+    if (!connected) {
+      Alert.alert(
+        "Impresora no disponible",
+        "No se pudo conectar a la impresora. Verifica que esté encendida, dentro de rango y vinculada.",
+      );
       return false;
     }
 
     try {
-      await BluetoothEscposPrinter.printerInit();
-      await BluetoothEscposPrinter.printText(text + "\n\n\n", this.PRINT_OPTS);
+      await printFn();
       return true;
     } catch (error) {
-      console.error("Error printing:", error);
-      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
-      return false;
+      console.warn("[Printer] Error al imprimir, intentando reconectar y reintentar...", error);
+      // La conexión pudo caerse justo al imprimir: reconectar y reintentar una vez
+      const reconnected = await this.forceReconnect();
+      if (!reconnected) {
+        Alert.alert(
+          "Error de Impresión",
+          "La impresora se desconectó y no se pudo reconectar automáticamente.",
+        );
+        return false;
+      }
+      try {
+        await printFn();
+        return true;
+      } catch (retryError) {
+        console.error("[Printer] Error al imprimir tras reconexión:", retryError);
+        Alert.alert("Error de Impresión", "No se pudo imprimir el ticket.");
+        return false;
+      }
     }
   }
 
   /**
-   * Imprime líneas de ticket con formato
+   * Imprime texto plano (con auto-reconexión)
+   */
+  async printText(text: string): Promise<boolean> {
+    return this.executeWithReconnect(async () => {
+      await BluetoothEscposPrinter.printerInit();
+      await BluetoothEscposPrinter.printText(text + "\n\n\n", this.PRINT_OPTS);
+    });
+  }
+
+  /**
+   * Imprime líneas de ticket con formato (con auto-reconexión)
    */
   async printTicket(lines: string[]): Promise<boolean> {
-    if (!this.isConnected) {
-      Alert.alert("No Conectado", "Selecciona una impresora primero");
-      return false;
-    }
-
-    try {
+    return this.executeWithReconnect(async () => {
       await BluetoothEscposPrinter.printerInit();
 
       for (let line of lines) {
@@ -306,25 +384,14 @@ class BluetoothPrinterService {
 
       // Alimentación adicional
       await BluetoothEscposPrinter.printText("\n\n\n", this.PRINT_OPTS);
-
-      return true;
-    } catch (error) {
-      console.error("Error printing ticket:", error);
-      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
-      return false;
-    }
+    });
   }
 
   /**
    * Imprime un ticket con encabezado formateado
    */
   async printFormattedTicket(businessName: string, title: string, lines: string[]): Promise<boolean> {
-    if (!this.isConnected) {
-      Alert.alert("No Conectado", "Selecciona una impresora primero");
-      return false;
-    }
-
-    try {
+    return this.executeWithReconnect(async () => {
       await BluetoothEscposPrinter.printerInit();
 
       // Encabezado
@@ -354,24 +421,13 @@ class BluetoothPrinterService {
       });
       await BluetoothEscposPrinter.printText("================================\n", this.PRINT_OPTS);
       await BluetoothEscposPrinter.printText("\n\n\n", this.PRINT_OPTS);
-
-      return true;
-    } catch (error) {
-      console.error("Error printing formatted ticket:", error);
-      Alert.alert("Error de Impresión", "No se pudo imprimir el ticket");
-      return false;
-    }
+    });
   }
 
   /**
    * Prueba de impresión
    */
   async printTest(): Promise<boolean> {
-    if (!this.isConnected) {
-      Alert.alert("No Conectado", "Selecciona una impresora primero");
-      return false;
-    }
-
     try {
       const testLines = [
         "================================",
@@ -385,6 +441,7 @@ class BluetoothPrinterService {
         "================================",
       ];
 
+      // printTicket ya garantiza conexión y reintenta si la impresora se desconectó
       return await this.printTicket(testLines);
     } catch (error) {
       console.error("Error printing test:", error);

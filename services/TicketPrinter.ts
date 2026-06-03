@@ -227,7 +227,6 @@ class TicketPrinter {
           lines.push(`  ${connector}─ ${kitQty} ${kitDesc}`);
           lines.push(`      ${kitPrice}`);
         });
-        lines.push(this.center("─────────────────────", width));
       }
     });
 
@@ -348,10 +347,11 @@ class TicketPrinter {
     const text = this.normalize(lines);
 
     try {
-      // Intentar imprimir en impresora Bluetooth primero
-      const printerStatus = BluetoothPrinterService.getStatus();
+      // Asegurar conexión: reconecta automáticamente a la impresora guardada
+      // si la conexión se cayó (impresora apagada, fuera de rango, etc.)
+      const connected = await BluetoothPrinterService.ensureConnected();
 
-      if (printerStatus.connected) {
+      if (connected) {
         const success = await BluetoothPrinterService.printTicket(lines);
         if (success) {
           return; // Impresión exitosa
