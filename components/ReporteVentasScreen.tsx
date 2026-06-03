@@ -491,18 +491,49 @@ export default function ReporteVentasScreen() {
   const consultarLocal = () => filtrarVentas(true);
 
   // Helper para obtener desglose de kits/combos para el ticket
-  const getComboBreakdownForTicket = (claveProd: number, cantidad: number, importeTotal: number, cveCliente?: number): { isCombo: boolean; esInventariable?: boolean; comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }> } => {
-    // Buscar producto por claveProd
-    const allProductos = FullSyncService.getProductos(10000);
-    const producto = allProductos.find((p: any) => parseInt(p.claveProd || "0", 10) === claveProd);
+  const getComboBreakdownForTicket = (
+    claveProd: number,
+    cantidad: number,
+    importeTotal: number,
+    cveCliente?: number,
+  ): {
+    isCombo: boolean;
+    esInventariable?: boolean;
+    comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }>;
+  } => {
+    console.log("[getComboBreakdownForTicket] Input:", { claveProd, cantidad, importeTotal, cveCliente });
 
-    if (!producto?.esKit) return { isCombo: false };
+    // Buscar producto por id (claveProd es el id del producto, no clave_prod)
+    const allProductos = FullSyncService.getProductos(10000);
+    const producto = allProductos.find((p: any) => p.id === claveProd);
+
+    console.log(
+      "[getComboBreakdownForTicket] Producto encontrado:",
+      producto?.id,
+      producto?.descripcion,
+      "esKit:",
+      producto?.esKit,
+      "inventariable:",
+      producto?.inventariable,
+    );
+
+    if (!producto?.esKit) {
+      console.log("[getComboBreakdownForTicket] No es kit, retornando isCombo=false");
+      return { isCombo: false };
+    }
 
     // Si es kit inventariable, NO mostrar desglose
-    if (producto?.inventariable) return { isCombo: false, esInventariable: true };
+    if (producto?.inventariable) {
+      console.log("[getComboBreakdownForTicket] Es kit inventariable, retornando esInventariable=true");
+      return { isCombo: false, esInventariable: true };
+    }
 
     const kitsDelProducto = FullSyncService.getKitsByProducto(producto.id);
-    if (kitsDelProducto.length === 0) return { isCombo: false };
+    console.log("[getComboBreakdownForTicket] Kits del producto:", kitsDelProducto.length);
+    if (kitsDelProducto.length === 0) {
+      console.log("[getComboBreakdownForTicket] No hay kits, retornando isCombo=false");
+      return { isCombo: false };
+    }
 
     // Obtener precios
     const cliente = cveCliente ? FullSyncService.getClienteFullById(cveCliente) : null;
@@ -511,21 +542,21 @@ export default function ReporteVentasScreen() {
     const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
     const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
 
-    // Mapa de precios
+    // Mapa de precios (usar id del producto como clave)
     const preciosPromoMap = new Map<number, number>();
     const preciosMap = new Map<number, number>();
     const preciosDefaultMap = new Map<number, number>();
 
     preciosPromo.forEach((p: any) => {
-      const clave = parseInt(p.claveProd || "0", 10);
+      const clave = p.id || parseInt(p.claveProd || "0", 10);
       if (!Number.isNaN(clave)) preciosPromoMap.set(clave, p.precio || 0);
     });
     preciosCliente.forEach((p: any) => {
-      const clave = parseInt(p.claveProd || "0", 10);
+      const clave = p.id || parseInt(p.claveProd || "0", 10);
       if (!Number.isNaN(clave)) preciosMap.set(clave, p.precio || 0);
     });
     preciosDefault.forEach((p: any) => {
-      const clave = parseInt(p.claveProd || "0", 10);
+      const clave = p.id || parseInt(p.claveProd || "0", 10);
       if (!Number.isNaN(clave)) preciosDefaultMap.set(clave, p.precio || 0);
     });
 
@@ -576,15 +607,23 @@ export default function ReporteVentasScreen() {
       const paymentMethod = groupedRow.tipoPago;
 
       const items = groupedRow.productos.map((prod) => {
-        const comboInfo = getComboBreakdownForTicket(prod.claveProd || 0, prod.cantProducto, prod.importe, groupedRow.cve_cliente);
-        return {
+        const comboInfo = getComboBreakdownForTicket(
+          prod.claveProd || 0,
+          prod.cantProducto,
+          prod.importe,
+          groupedRow.cve_cliente,
+        );
+        const item = {
           description: prod.nombreProducto,
           quantity: prod.cantProducto,
           price: prod.precio,
           total: prod.importe,
+          isCombo: comboInfo.isCombo,
           esInventariable: comboInfo.esInventariable,
-          ...comboInfo,
+          comboBreakdown: comboInfo.comboBreakdown,
         };
+        console.log("[buildSaleTicketDataFromRow] Item procesado:", item);
+        return item;
       });
 
       const total = groupedRow.totalImporte;
@@ -726,21 +765,28 @@ export default function ReporteVentasScreen() {
               quantity,
               price,
               total,
+              isCombo: comboInfo.isCombo,
               esInventariable: comboInfo.esInventariable,
-              ...comboInfo,
+              comboBreakdown: comboInfo.comboBreakdown,
             };
           })
         : reporteRow.nombreProducto
         ? [
             (() => {
-              const comboInfo = getComboBreakdownForTicket(reporteRow.id, reporteRow.cantProducto ?? 1, reporteRow.importe, reporteRow.cve_cliente);
+              const comboInfo = getComboBreakdownForTicket(
+                reporteRow.id,
+                reporteRow.cantProducto ?? 1,
+                reporteRow.importe,
+                reporteRow.cve_cliente,
+              );
               return {
                 description: String(reporteRow.nombreProducto),
                 quantity: reporteRow.cantProducto ?? 1,
                 price: reporteRow.precio ?? reporteRow.importe,
                 total: reporteRow.importe,
+                isCombo: comboInfo.isCombo,
                 esInventariable: comboInfo.esInventariable,
-                ...comboInfo,
+                comboBreakdown: comboInfo.comboBreakdown,
               };
             })(),
           ]
@@ -821,6 +867,11 @@ export default function ReporteVentasScreen() {
 
   const visualizarTicket = (row: ReporteItem | GroupedSale) => {
     const ticketData = buildSaleTicketDataFromRow(row);
+    console.log("[visualizarTicket] Ticket data completo:", ticketData);
+    console.log(
+      "[visualizarTicket] Items con comboBreakdown:",
+      ticketData.items.filter((i: any) => i.isCombo && i.comboBreakdown),
+    );
     const lines = TicketPrinter.generateSaleTicket(ticketData);
     setTicketContent(lines);
     setTicketVisible(true);
@@ -828,6 +879,11 @@ export default function ReporteVentasScreen() {
 
   const imprimirTicket = async (row: ReporteItem | GroupedSale) => {
     const ticketData = buildSaleTicketDataFromRow(row);
+    console.log("[imprimirTicket] Ticket data completo:", ticketData);
+    console.log(
+      "[imprimirTicket] Items con comboBreakdown:",
+      ticketData.items.filter((i: any) => i.isCombo && i.comboBreakdown),
+    );
     await TicketPrinter.printSaleTicket(ticketData);
   };
 
