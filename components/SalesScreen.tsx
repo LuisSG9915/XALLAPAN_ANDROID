@@ -236,8 +236,37 @@ export default function SalesScreen({ route }: { route?: any }) {
       // Calcular precio del kit sumando TODOS los insumos
       let precioDelKit = 0;
 
+      // Mapa inverso por claveProd: el campo kit.idInsumo es inconsistente en el codebase
+      // (en unas partes representa el id del producto y en otras la clave_prod del inventario),
+      // por lo que resolvemos el insumo por ambas llaves.
+      const productosPorClave = new Map<number, any>();
+      productosPorId.forEach((prod: any) => {
+        const clave = prod?.claveProd !== undefined && prod?.claveProd !== null ? parseInt(prod.claveProd, 10) : NaN;
+        if (!Number.isNaN(clave)) productosPorClave.set(clave, prod);
+      });
+
       for (const kit of kitsDelProducto) {
-        const insumoProducto = productosPorId.get(kit.idInsumo);
+        const insumoProducto = productosPorId.get(kit.idInsumo) ?? productosPorClave.get(kit.idInsumo);
+
+        // Llaves candidatas para buscar el precio del insumo (id y clave_prod), porque los
+        // mapas de precios pueden estar indexados por cualquiera de las dos según los datos.
+        const clavesInsumo: number[] = [];
+        const addClaveInsumo = (valor: any) => {
+          const n = typeof valor === "number" ? valor : parseInt(valor ?? "", 10);
+          if (!Number.isNaN(n) && !clavesInsumo.includes(n)) clavesInsumo.push(n);
+        };
+        addClaveInsumo(kit.idInsumo);
+        addClaveInsumo(insumoProducto?.id);
+        addClaveInsumo(insumoProducto?.claveProd);
+
+        const buscarPrecioInsumo = (map?: Map<number, number>): number | undefined => {
+          if (!map) return undefined;
+          for (const key of clavesInsumo) {
+            if (map.has(key)) return map.get(key);
+          }
+          return undefined;
+        };
+
         console.log(
           `[determinarPrecioKit]   -> Kit id=${kit.id}, idInsumo=${kit.idInsumo}, precioCatalogo del insumo=${insumoProducto?.precioCatalogo}, kit.precio=${kit.precio}`,
         );
@@ -248,16 +277,19 @@ export default function SalesScreen({ route }: { route?: any }) {
           console.log(`[determinarPrecioKit]   -> ✓ Insumo tiene precioCatalogo=true, buscando en listas de precios`);
           const claveInsumo = kit.idInsumo;
           let precioInsumoLista: number | undefined;
-          if (preciosPromoMap && preciosPromoMap.has(claveInsumo)) {
-            precioInsumoLista = preciosPromoMap.get(claveInsumo);
+          const precioPromo = buscarPrecioInsumo(preciosPromoMap);
+          const precioCliente = buscarPrecioInsumo(preciosMap);
+          const precioDefault = buscarPrecioInsumo(preciosDefaultMap);
+          if (precioPromo !== undefined) {
+            precioInsumoLista = precioPromo;
             console.log(`[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde PROMO: ${precioInsumoLista}`);
-          } else if (preciosMap && preciosMap.has(claveInsumo)) {
-            precioInsumoLista = preciosMap.get(claveInsumo);
+          } else if (precioCliente !== undefined) {
+            precioInsumoLista = precioCliente;
             console.log(
               `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista cliente: ${precioInsumoLista}`,
             );
-          } else if (preciosDefaultMap && preciosDefaultMap.has(claveInsumo)) {
-            precioInsumoLista = preciosDefaultMap.get(claveInsumo);
+          } else if (precioDefault !== undefined) {
+            precioInsumoLista = precioDefault;
             console.log(
               `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista default: ${precioInsumoLista}`,
             );
@@ -525,7 +557,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         // Para kits: verificar si debe usar precio del catálogo de kits o de lista de precios
         // NOTA: Solo aplicar precioCatalogo si NO hay precio promocional (esPromocion=false)
         // El precio promocional tiene prioridad sobre la lógica de precioCatalogo
-        if (esKit && !esPromocion) {
+        // NOTA: Si el kit es inventariable, se trata como producto normal y se usa el precio
+        // del propio idProducto (ya resuelto arriba), NO el precio calculado de los insumos.
+        if (esKit && !inventariable && !esPromocion) {
           const { usarPrecioKit, precioKit } = determinarPrecioKit(
             productoId,
             kitsData,
@@ -2129,22 +2163,44 @@ export default function SalesScreen({ route }: { route?: any }) {
           });
 
           const productosPorId = new Map<number, any>();
-          productosBase.forEach((p: any) => productosPorId.set(p.id, p));
+          const productosPorClave = new Map<number, any>();
+          productosBase.forEach((p: any) => {
+            productosPorId.set(p.id, p);
+            const clave = p?.claveProd !== undefined && p?.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+            if (!Number.isNaN(clave)) productosPorClave.set(clave, p);
+          });
 
           const breakdown = kitsDelProducto.map((kit: any) => {
-            const insumoProducto = productosPorId.get(kit.idInsumo);
-            const claveInsumo = kit.idInsumo;
+            // kit.idInsumo puede ser id de producto o clave_prod según los datos: resolver por ambas.
+            const insumoProducto = productosPorId.get(kit.idInsumo) ?? productosPorClave.get(kit.idInsumo);
+            const clavesInsumo: number[] = [];
+            const addClaveInsumo = (valor: any) => {
+              const n = typeof valor === "number" ? valor : parseInt(valor ?? "", 10);
+              if (!Number.isNaN(n) && !clavesInsumo.includes(n)) clavesInsumo.push(n);
+            };
+            addClaveInsumo(kit.idInsumo);
+            addClaveInsumo(insumoProducto?.id);
+            addClaveInsumo(insumoProducto?.claveProd);
+            const buscarPrecioInsumo = (map: Map<number, number>): number | undefined => {
+              for (const key of clavesInsumo) {
+                if (map.has(key)) return map.get(key);
+              }
+              return undefined;
+            };
 
             let precioInsumo: number;
-            // Si el insumo tiene precioCatalogo=true: buscar en listas
+            // Si el insumo tiene precioCatalogo=true: buscar en listas (promo -> cliente -> default)
             // Si NO tiene precioCatalogo: usar precio fijo del catálogo de kits
             if (insumoProducto?.precioCatalogo === true) {
-              if (preciosPromoMap.has(claveInsumo)) {
-                precioInsumo = preciosPromoMap.get(claveInsumo)!;
-              } else if (preciosMap.has(claveInsumo)) {
-                precioInsumo = preciosMap.get(claveInsumo)!;
-              } else if (preciosDefaultMap.has(claveInsumo)) {
-                precioInsumo = preciosDefaultMap.get(claveInsumo)!;
+              const precioPromo = buscarPrecioInsumo(preciosPromoMap);
+              const precioCliente = buscarPrecioInsumo(preciosMap);
+              const precioDefault = buscarPrecioInsumo(preciosDefaultMap);
+              if (precioPromo !== undefined) {
+                precioInsumo = precioPromo;
+              } else if (precioCliente !== undefined) {
+                precioInsumo = precioCliente;
+              } else if (precioDefault !== undefined) {
+                precioInsumo = precioDefault;
               } else {
                 precioInsumo = kit.precio || 0;
               }
