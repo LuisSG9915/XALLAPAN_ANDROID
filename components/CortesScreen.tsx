@@ -124,9 +124,16 @@ export default function CortesScreen() {
   };
 
   useEffect(() => {
-    const status = BluetoothPrinterService.getStatus();
-    setPrinterConnected(status.connected);
-    setPrinterName(status.printer?.name || "");
+    const initPrinter = async () => {
+      let status = BluetoothPrinterService.getStatus();
+      if (!status.connected) {
+        await BluetoothPrinterService.connectToSavedPrinter();
+      }
+      status = BluetoothPrinterService.getStatus();
+      setPrinterConnected(status.connected);
+      setPrinterName(status.printer?.name || "");
+    };
+    initPrinter();
 
     const loadUser = async () => {
       const user = await AuthService.restoreSession();
@@ -460,7 +467,11 @@ export default function CortesScreen() {
 
   const handleImprimir = async () => {
     if (printing) return;
-    const status = BluetoothPrinterService.getStatus();
+    let status = BluetoothPrinterService.getStatus();
+    if (!status.connected) {
+      await BluetoothPrinterService.connectToSavedPrinter();
+    }
+    status = BluetoothPrinterService.getStatus();
     setPrinterConnected(status.connected);
     setPrinterName(status.printer?.name || "");
 
@@ -841,6 +852,19 @@ export default function CortesScreen() {
           const totalImportes = importesPorProducto.reduce((acc, i) => acc + i.importe, 0);
           const totalPagos = tiposPago.reduce((acc, t) => acc + t.total, 0);
           console.log(`TOTAL importes: $${totalImportes.toFixed(2)} | TOTAL pagos: $${totalPagos.toFixed(2)}`);
+
+          console.log("--- RESUMEN VISITAS (state) ---");
+          console.log("totalVisitasRealizadas:", resumenVisitas.totalVisitasRealizadas);
+          console.log("totalProgramadas:", resumenVisitas.totalProgramadas);
+          console.log("totalRealizadasAgenda:", resumenVisitas.totalRealizadasAgenda);
+          console.log("visitasNoAgendadas:", resumenVisitas.visitasNoAgendadas);
+
+          console.log("--- LLAMANDO getResumenVisitas directo ---");
+          VisitaSyncService.getInstance().getResumenVisitas(fechaSeleccionada, sucursal as number).then((r) => {
+            console.log("[Debug] getResumenVisitas resultado:", JSON.stringify(r));
+          }).catch((e) => {
+            console.error("[Debug] getResumenVisitas ERROR:", e);
+          });
 
           console.log("===================");
         }}
