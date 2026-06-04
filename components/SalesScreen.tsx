@@ -518,6 +518,8 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       Array.from(todasLasClaves).forEach((claveNum) => {
         const productoBase = productosPorClave.get(claveNum) || productosPorId.get(claveNum);
+        // Si el producto no existe en Realm (fue eliminado), no mostrarlo
+        if (!productoBase) return;
         const esKit = Boolean(productoBase?.esKit);
         const inventariable = Boolean(productoBase?.inventariable);
         const productoId = productoBase?.id ?? claveNum;
@@ -2770,8 +2772,8 @@ export default function SalesScreen({ route }: { route?: any }) {
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
             {formasPago.map((fp: any) => {
-              const esCred = fp.credito === true;
-              const disabled = esCred ? (selectedClient ? !selectedClient.credito : true) : false;
+              // Si es tipo crédito, deshabilitar si no hay cliente o si el cliente no tiene crédito
+              const disabled = fp.credito ? (!selectedClient || !selectedClient.credito) : false;
               return (
                 <PayChip
                   key={fp.tipo}

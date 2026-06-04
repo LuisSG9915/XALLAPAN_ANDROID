@@ -978,6 +978,103 @@ class FullSyncService {
         },
       },
       {
+        name: "ProductosIncremental",
+        run: async () => {
+          const tableName = "Productos";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
+          );
+
+          try {
+            console.log("[Incremental] Productos desde", url);
+
+            const response = await fetch(url, {
+              headers: { accept: "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} Productos`);
+            }
+
+            const productos = await response.json();
+            const registrosLeidos = Array.isArray(productos) ? productos.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+            let registrosEliminados = 0;
+
+            this.realm!.write(() => {
+              // Crear un Set con los IDs de productos del servidor para búsqueda rápida
+              const idsDelServidor = new Set(productos.map((p: any) => p.id));
+
+              // Actualizar/crear productos del servidor
+              for (const producto of productos) {
+                const existing = this.realm!.objectForPrimaryKey("Producto", producto.id) as any;
+
+                const productoData: any = {
+                  ...producto,
+                  syncedAt: new Date(),
+                  syncedAr: nowMexico,
+                };
+
+                if (existing) {
+                  this.realm!.create("Producto", productoData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("Producto", productoData);
+                  registrosGuardados++;
+                }
+              }
+
+              // Eliminar productos locales que no están en la respuesta del servidor
+              const todosLosProductosLocales = this.realm!.objects("Producto");
+              const productosAEliminar: any[] = [];
+
+              for (const productoLocal of todosLosProductosLocales) {
+                const id = (productoLocal as any).id;
+                if (!idsDelServidor.has(id)) {
+                  productosAEliminar.push(productoLocal);
+                }
+              }
+
+              if (productosAEliminar.length > 0) {
+                console.log(
+                  `[Incremental] Eliminando ${productosAEliminar.length} productos que no están en el servidor`,
+                );
+                this.realm!.delete(productosAEliminar);
+                registrosEliminados = productosAEliminar.length;
+              }
+            });
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+              registrosEliminados,
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: error instanceof Error ? error.message : "Error desconocido",
+            });
+            throw error;
+          }
+        },
+      },
+      {
         name: "PreciosIncremental",
         run: async () => {
           const tableName = "Precio";
@@ -3916,6 +4013,117 @@ class FullSyncService {
     console.log(
       `[FullSync] Inventario sincronizado: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
     );
+
+    // Sincronizar productos (full)
+    if (this.realm && !this.realm.isClosed) {
+      console.log(`[FullSync] Sincronizando productos para sucursal ${sucursal}...`);
+      const productosUrl = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
+      
+      // Registrar inicio en BitacoraSync
+      const idBitacora = await BitacoraService.registrarInicioSync(
+        "Productos",
+        "incremental",
+        "manual",
+        idUsuario,
+        sucursal,
+        productosUrl
+      );
+
+      const productosResponse = await fetch(productosUrl, {
+        headers: { accept: "application/json" },
+      });
+
+      if (productosResponse.ok) {
+        const productos = await productosResponse.json();
+        console.log(`[FullSync] Recibidos ${productos.length} productos`);
+
+        if (Array.isArray(productos)) {
+          let productosGuardados = 0;
+          let productosActualizados = 0;
+
+          this.realm.write(() => {
+            for (const producto of productos) {
+              const existing = this.realm!.objectForPrimaryKey("Producto", producto.id);
+
+              const productoData = {
+                ...producto,
+                syncedAt: new Date(),
+                syncedAr: nowMexico,
+              };
+
+              if (existing) {
+                this.realm!.create("Producto", productoData, UpdateMode.Modified);
+                productosActualizados++;
+              } else {
+                this.realm!.create("Producto", productoData);
+                productosGuardados++;
+              }
+            }
+          });
+
+          console.log(
+            `[FullSync] ✅ Productos sincronizados: guardados=${productosGuardados}, actualizados=${productosActualizados}`,
+          );
+
+          // Registrar fin en BitacoraSync
+          await BitacoraService.registrarFinSync(idBitacora, {
+            exitoso: true,
+            registrosLeidos: productos.length,
+            registrosGuardados: productosGuardados,
+            registrosActualizados: productosActualizados,
+          });
+        }
+      } else {
+        console.warn(`[FullSync] ⚠️ Error sincronizando productos: HTTP ${productosResponse.status}`);
+        
+        // Registrar error en BitacoraSync
+        await BitacoraService.registrarFinSync(idBitacora, {
+          exitoso: false,
+          error: `HTTP ${productosResponse.status}`,
+          errorCode: String(productosResponse.status),
+        });
+      }
+    }
+
+    // Sincronizar formas de pago
+    if (this.realm && !this.realm.isClosed) {
+      console.log(`[FullSync] Sincronizando formas de pago para sucursal ${sucursal}...`);
+      const formasPagoUrl = `${this.apiBaseUrl}/api/MovilesVentas/formas-pagos?sucursal=${sucursal}`;
+      const formasPagoResponse = await fetch(formasPagoUrl, {
+        headers: { accept: "application/json" },
+      });
+
+      if (formasPagoResponse.ok) {
+        const formasPago = await formasPagoResponse.json();
+        console.log(`[FullSync] Recibidas ${formasPago.length} formas de pago`);
+
+        if (Array.isArray(formasPago)) {
+          this.realm.write(() => {
+            // Limpiar formas de pago existentes
+            const existingFormasPago = this.realm!.objects("FormaPago");
+            this.realm!.delete(existingFormasPago);
+
+            // Insertar todas las formas de pago
+            formasPago.forEach((fp: any) => {
+              this.realm!.create("FormaPago", {
+                tipo: fp.tipo,
+                sucursal: fp.sucursal ?? null,
+                descripcion: fp.descripcion ?? null,
+                grupoOperacion: fp.grupoOperacion ?? null,
+                tarjeta: fp.tarjeta ?? null,
+                cuentaBancaria: fp.cuentaBancaria ?? null,
+                pago0: fp.pago0 ?? null,
+                credito: fp.credito ?? null,
+                syncedAt: new Date(),
+              });
+            });
+          });
+          console.log(`[FullSync] ✅ Formas de pago sincronizadas: ${formasPago.length} registros`);
+        }
+      } else {
+        console.warn(`[FullSync] ⚠️ Error sincronizando formas de pago: HTTP ${formasPagoResponse.status}`);
+      }
+    }
   }
 
   /**
