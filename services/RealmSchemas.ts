@@ -467,6 +467,7 @@ export const FormaPagoSchema = {
     tarjeta: "bool?",
     cuentaBancaria: "string?",
     pago0: "bool?",
+    credito: "bool?",
     syncedAt: "date",
   },
   primaryKey: "tipo",

@@ -6,6 +6,7 @@ import FullSyncService from "../services/FullSyncService";
 import AuthService from "../services/AuthService";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import TicketPrinter from "../services/TicketPrinter";
+import VisitaSyncService from "../services/VisitaSyncService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type ProductoCantidad = {
@@ -26,6 +27,14 @@ type TipoPagoTotal = {
 type InvABordoItem = {
   descripcion: string;
   saldo: number;
+};
+
+type ResumenVisitas = {
+  totalProgramadas: number;
+  totalRealizadasAgenda: number;
+  porcentajeAgenda: number;
+  totalVisitasRealizadas: number;
+  visitasNoAgendadas: number;
 };
 
 type EnvasesData = {
@@ -72,6 +81,13 @@ export default function CortesScreen() {
   const [inventarioABordo, setInventarioABordo] = useState<InvABordoItem[]>([]);
   const [importesPorProducto, setImportesPorProducto] = useState<ProductoImporte[]>([]);
   const [tiposPago, setTiposPago] = useState<TipoPagoTotal[]>([]);
+  const [resumenVisitas, setResumenVisitas] = useState<ResumenVisitas>({
+    totalProgramadas: 0,
+    totalRealizadasAgenda: 0,
+    porcentajeAgenda: 0,
+    totalVisitasRealizadas: 0,
+    visitasNoAgendadas: 0,
+  });
   const [envases, setEnvases] = useState<EnvasesData>({
     envVendido: 0,
     envVendidoEco: 0,
@@ -428,6 +444,12 @@ export default function CortesScreen() {
       setEnvases(envasesCombinados);
       // console.log("=== ENVASES DATA ===");
       // console.log(envasesCombinados);
+
+      // Resumen de visitas (cumplimiento de agenda + visitas no agendadas)
+      if (sucursal != null) {
+        const resumen = await VisitaSyncService.getInstance().getResumenVisitas(fecha, sucursal);
+        setResumenVisitas(resumen);
+      }
     } catch (error) {
       console.error("Error cargando datos de corte:", error);
       Alert.alert("Error", "No se pudieron cargar los datos del corte");
@@ -457,6 +479,7 @@ export default function CortesScreen() {
         inventarioABordo,
         importesPorProducto,
         tiposPago,
+        resumenVisitas,
         envases,
       });
       Alert.alert("✅ Impreso", `Corte enviado a ${status.printer?.name || "impresora"}`);
@@ -733,6 +756,24 @@ export default function CortesScreen() {
               </View>
             ))
           )}
+        </View>
+      </View>
+
+      {/* Resumen de Visitas */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>VISITAS</Text>
+        <View style={styles.table}>
+          <View style={styles.tr}>
+            <Text style={[styles.td, styles.tdFlex]}>Cumplimiento de agenda</Text>
+            <Text style={[styles.td, styles.tdRight]}>
+              {resumenVisitas.totalRealizadasAgenda} de {resumenVisitas.totalProgramadas} (
+              {resumenVisitas.porcentajeAgenda.toFixed(1)}%)
+            </Text>
+          </View>
+          <View style={styles.tr}>
+            <Text style={[styles.td, styles.tdFlex]}>Total visitas realizadas</Text>
+            <Text style={[styles.td, styles.tdRight]}>{resumenVisitas.totalVisitasRealizadas}</Text>
+          </View>
         </View>
       </View>
 

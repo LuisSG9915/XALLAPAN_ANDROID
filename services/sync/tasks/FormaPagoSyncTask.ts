@@ -64,6 +64,7 @@ export class FormaPagoSyncTask extends SyncTask {
             tarjeta: fp.tarjeta ?? null,
             cuentaBancaria: fp.cuentaBancaria ?? null,
             pago0: fp.pago0 ?? null,
+            credito: fp.credito ?? null,
             syncedAt: new Date(),
           });
           registrosGuardados++;

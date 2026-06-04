@@ -316,9 +316,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
       }
 
-      console.log(
-        `[determinarPrecioKit]   -> Resumen: precio total del kit calculado = ${precioDelKit}`,
-      );
+      console.log(`[determinarPrecioKit]   -> Resumen: precio total del kit calculado = ${precioDelKit}`);
 
       // Siempre usar el precio calculado del kit cuando hay insumos y el precio > 0
       if (precioDelKit > 0) {
@@ -1014,8 +1012,13 @@ export default function SalesScreen({ route }: { route?: any }) {
   const handleVisitarCliente = async (cliente: Cliente) => {
     console.log("[Sales] handleVisitarCliente:", cliente.nombre);
 
+    // Si el cliente fue reubicado, omitir validación de ubicación
+    const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
+
     // Verificar ubicación
-    if (cliente.latitud && cliente.longitud) {
+    if (omitirValidacionUbicacion) {
+      console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
+    } else if (cliente.latitud && cliente.longitud) {
       try {
         setValidandoUbicacion(true);
         const ubicacionVendedor = await LocationService.getBestLocation();
@@ -1167,8 +1170,12 @@ export default function SalesScreen({ route }: { route?: any }) {
 
     if (desdeaIniciarVisita) {
       console.log("[Sales] Iniciando validación de ubicación...");
+      // Si el cliente fue reubicado, omitir validación de ubicación
+      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(clientePendienteVisita.id);
       // Verificar ubicación del vendedor
-      if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
+      if (omitirValidacionUbicacion) {
+        console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
+      } else if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
         try {
           console.log("[Sales] Seteando validandoUbicacion = true");
           setValidandoUbicacion(true);
@@ -2129,7 +2136,13 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
 
         // Helper para obtener desglose de kits para el ticket
-        const getComboBreakdown = (item: CartItem): { isCombo: boolean; esInventariable?: boolean; comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }> } => {
+        const getComboBreakdown = (
+          item: CartItem,
+        ): {
+          isCombo: boolean;
+          esInventariable?: boolean;
+          comboBreakdown?: Array<{ description: string; quantity: number; price: number; total: number }>;
+        } => {
           if (!item.esKit) return { isCombo: false };
 
           // Si es kit inventariable, NO mostrar desglose
@@ -2757,7 +2770,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           <Text style={styles.cardTitle}>Pago</Text>
           <View style={styles.payRow}>
             {formasPago.map((fp: any) => {
-              const esCred = fp.tipo === 3;
+              const esCred = fp.credito === true;
               const disabled = esCred ? (selectedClient ? !selectedClient.credito : true) : false;
               return (
                 <PayChip

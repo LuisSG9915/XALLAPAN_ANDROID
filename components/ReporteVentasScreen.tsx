@@ -542,41 +542,69 @@ export default function ReporteVentasScreen() {
     const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecios);
     const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
 
-    // Mapa de precios (usar id del producto como clave)
+    // Mapa de precios indexado por claveProd (igual que SalesScreen).
+    // Los registros de precio traen un campo id (del producto), pero las listas
+    // se deben resolver por claveProd para que coincida con kit.idInsumo.
     const preciosPromoMap = new Map<number, number>();
     const preciosMap = new Map<number, number>();
     const preciosDefaultMap = new Map<number, number>();
 
     preciosPromo.forEach((p: any) => {
-      const clave = p.id || parseInt(p.claveProd || "0", 10);
+      const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
       if (!Number.isNaN(clave)) preciosPromoMap.set(clave, p.precio || 0);
     });
     preciosCliente.forEach((p: any) => {
-      const clave = p.id || parseInt(p.claveProd || "0", 10);
+      const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
       if (!Number.isNaN(clave)) preciosMap.set(clave, p.precio || 0);
     });
     preciosDefault.forEach((p: any) => {
-      const clave = p.id || parseInt(p.claveProd || "0", 10);
+      const clave = p.claveProd !== undefined && p.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
       if (!Number.isNaN(clave)) preciosDefaultMap.set(clave, p.precio || 0);
     });
 
     const productosPorId = new Map<number, any>();
-    allProductos.forEach((p: any) => productosPorId.set(p.id, p));
+    const productosPorClave = new Map<number, any>();
+    allProductos.forEach((p: any) => {
+      productosPorId.set(p.id, p);
+      const clave = p?.claveProd !== undefined && p?.claveProd !== null ? parseInt(p.claveProd, 10) : NaN;
+      if (!Number.isNaN(clave)) productosPorClave.set(clave, p);
+    });
 
     const breakdown = kitsDelProducto.map((kit: any) => {
-      const insumoProducto = productosPorId.get(kit.idInsumo);
-      const claveInsumo = kit.idInsumo;
+      // El campo kit.idInsumo es inconsistente (a veces id del producto, a veces clave_prod),
+      // por lo que resolvemos el insumo y su precio por ambas llaves, igual que en SalesScreen.
+      const insumoProducto = productosPorId.get(kit.idInsumo) ?? productosPorClave.get(kit.idInsumo);
+
+      const clavesInsumo: number[] = [];
+      const addClaveInsumo = (valor: any) => {
+        const n = typeof valor === "number" ? valor : parseInt(valor ?? "", 10);
+        if (!Number.isNaN(n) && !clavesInsumo.includes(n)) clavesInsumo.push(n);
+      };
+      addClaveInsumo(kit.idInsumo);
+      addClaveInsumo(insumoProducto?.id);
+      addClaveInsumo(insumoProducto?.claveProd);
+
+      const buscarPrecioInsumo = (map?: Map<number, number>): number | undefined => {
+        if (!map) return undefined;
+        for (const key of clavesInsumo) {
+          if (map.has(key)) return map.get(key);
+        }
+        return undefined;
+      };
 
       let precioInsumo: number;
       // Si el insumo tiene precioCatalogo=true: buscar en listas
       // Si NO tiene precioCatalogo: usar precio fijo del catálogo de kits
       if (insumoProducto?.precioCatalogo === true) {
-        if (preciosPromoMap.has(claveInsumo)) {
-          precioInsumo = preciosPromoMap.get(claveInsumo)!;
-        } else if (preciosMap.has(claveInsumo)) {
-          precioInsumo = preciosMap.get(claveInsumo)!;
-        } else if (preciosDefaultMap.has(claveInsumo)) {
-          precioInsumo = preciosDefaultMap.get(claveInsumo)!;
+        const precioPromo = buscarPrecioInsumo(preciosPromoMap);
+        const precioCliente = buscarPrecioInsumo(preciosMap);
+        const precioDefault = buscarPrecioInsumo(preciosDefaultMap);
+        if (precioPromo !== undefined) {
+          precioInsumo = precioPromo;
+        } else if (precioCliente !== undefined) {
+          precioInsumo = precioCliente;
+        } else if (precioDefault !== undefined) {
+          precioInsumo = precioDefault;
         } else {
           precioInsumo = kit.precio || 0;
         }

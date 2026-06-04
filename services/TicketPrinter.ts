@@ -68,6 +68,13 @@ export interface CorteTicketData {
   inventarioABordo: Array<{ descripcion: string; saldo: number }>;
   importesPorProducto: Array<{ nombreProducto: string; importe: number }>;
   tiposPago: Array<{ descripcion: string; total: number }>;
+  resumenVisitas?: {
+    totalProgramadas: number;
+    totalRealizadasAgenda: number;
+    porcentajeAgenda: number;
+    totalVisitasRealizadas: number;
+    visitasNoAgendadas: number;
+  };
   envases?: {
     envVendido: number;
     envVendidoEco: number;
@@ -510,6 +517,22 @@ class TicketPrinter {
         const imp = `$${item.total.toFixed(2)}`;
         lines.push(this.leftRight(desc, imp, width));
       });
+    }
+
+    // Resumen de visitas / cumplimiento de agenda
+    if (data.resumenVisitas) {
+      const r = data.resumenVisitas;
+      lines.push("");
+      lines.push("[B]VISITAS");
+      lines.push(this.separator("-", width));
+      lines.push(
+        this.leftRight(
+          "Agenda",
+          `${r.totalRealizadasAgenda} de ${r.totalProgramadas} (${r.porcentajeAgenda.toFixed(1)}%)`,
+          width,
+        ),
+      );
+      lines.push(this.leftRight("Total realizadas", `${r.totalVisitasRealizadas}`, width));
     }
 
     lines.push("");

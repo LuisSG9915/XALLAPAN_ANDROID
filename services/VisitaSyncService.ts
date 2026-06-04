@@ -286,10 +286,7 @@ class VisitaSyncService {
       mañana.setDate(hoy.getDate() + 1);
       mañana.setHours(23, 59, 59, 999);
 
-      let visitas = realm
-        .objects("Visita")
-        .filtered(`fecha >= $0 AND fecha <= $1`, ayer, mañana)
-        .sorted("fecha");
+      let visitas = realm.objects("Visita").filtered(`fecha >= $0 AND fecha <= $1`, ayer, mañana).sorted("fecha");
 
       return visitas.map((v: any) => ({
         id: v.idOriginal, // Retornar idOriginal como "id" para compatibilidad con UI
@@ -525,6 +522,78 @@ class VisitaSyncService {
       console.error("[VisitaSync] ❌ Error al obtener clientes visitados hoy:", error);
       return new Set();
     }
+  }
+
+  /**
+   * Obtiene el conjunto de clientes visitados en una fecha específica
+   * (combina Visita visitado==1, VisitaRealizada y DetalleVisitas).
+   * Incluye tanto visitas agendadas realizadas como visitas no agendadas.
+   */
+  async getClientesVisitadosPorFecha(fecha: Date, sucursal: number): Promise<Set<number>> {
+    try {
+      const realm = this.getRealm();
+      const clientesVisitados = new Set<number>();
+
+      const startOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 23, 59, 59, 999);
+
+      // 1. Tabla Visita (local) con visitado == 1
+      realm
+        .objects("Visita")
+        .filtered(
+          "visitado == 1 AND ruta == $0 AND fecha >= $1 AND fecha <= $2",
+          sucursal.toString(),
+          startOfDay,
+          endOfDay,
+        )
+        .forEach((v: any) => clientesVisitados.add(v.idCliente));
+
+      // 2. Tabla VisitaRealizada (sincronizada)
+      realm
+        .objects("VisitaRealizada")
+        .filtered("fechaInicio >= $0 AND fechaInicio <= $1", startOfDay, endOfDay)
+        .forEach((v: any) => clientesVisitados.add(v.idCliente));
+
+      // 3. Tabla DetalleVisitas (ventas/visitas no agendadas)
+      realm
+        .objects("DetalleVisitas")
+        .filtered("idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2", sucursal, startOfDay, endOfDay)
+        .forEach((v: any) => clientesVisitados.add(v.idCliente));
+
+      return clientesVisitados;
+    } catch (error) {
+      console.error("[VisitaSync] ❌ Error al obtener clientes visitados por fecha:", error);
+      return new Set();
+    }
+  }
+
+  /**
+   * Resumen de cumplimiento para el corte:
+   * - Agenda: programadas, realizadas y porcentaje.
+   * - Total de visitas realizadas (agendadas realizadas + no agendadas).
+   */
+  async getResumenVisitas(
+    fecha: Date,
+    sucursal: number,
+  ): Promise<{
+    totalProgramadas: number;
+    totalRealizadasAgenda: number;
+    porcentajeAgenda: number;
+    totalVisitasRealizadas: number;
+    visitasNoAgendadas: number;
+  }> {
+    const agenda = await this.getEstadisticasCumplimiento(fecha, sucursal);
+    const clientesVisitados = await this.getClientesVisitadosPorFecha(fecha, sucursal);
+    const totalVisitasRealizadas = clientesVisitados.size;
+    const visitasNoAgendadas = Math.max(0, totalVisitasRealizadas - agenda.totalRealizadas);
+
+    return {
+      totalProgramadas: agenda.totalProgramadas,
+      totalRealizadasAgenda: agenda.totalRealizadas,
+      porcentajeAgenda: agenda.porcentaje,
+      totalVisitasRealizadas,
+      visitasNoAgendadas,
+    };
   }
 }
 
