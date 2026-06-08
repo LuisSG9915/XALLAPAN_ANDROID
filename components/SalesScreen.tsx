@@ -55,6 +55,25 @@ type Producto = {
 
 type CartItem = Producto & { cantidad: number };
 
+// Generación de id_movil corto e irrepetible para ventas locales.
+// Estructura: MOVIL_ID_BASE + (segundos desde EPOCH * 1000) + sucursal
+//  - Siempre > 1700000000 (umbral que distingue ventas locales de las del servidor)
+//  - La sucursal queda en los últimos 3 dígitos (id_movil % 1000 === sucursal)
+//  - Reserva un bloque de 1000 por segundo para los ids locales (id = idMovil + index)
+//  - La guardia monotónica evita colisiones si se generan dos en el mismo segundo
+const MOVIL_ID_BASE = 1700000000;
+const MOVIL_ID_EPOCH_SECONDS = 1704067200; // 2024-01-01 00:00:00 UTC
+let lastMovilSeconds = 0;
+
+const generateMovilSaleId = (sucursal: number): number => {
+  let seconds = Math.floor(Date.now() / 1000) - MOVIL_ID_EPOCH_SECONDS;
+  if (seconds <= lastMovilSeconds) {
+    seconds = lastMovilSeconds + 1;
+  }
+  lastMovilSeconds = seconds;
+  return MOVIL_ID_BASE + seconds * 1000 + (sucursal % 1000);
+};
+
 export default function SalesScreen({ route }: { route?: any }) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -1698,11 +1717,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     setCart((prev) => prev.filter((ci) => ci.id !== id));
   };
 
-  const buildMovilSaleId = (sucursal: number): number => {
-    const suffix = sucursal.toString().padStart(3, "0");
-    const base = Date.now().toString();
-    return Number(`${base}${suffix}`);
-  };
+  const buildMovilSaleId = (sucursal: number): number => generateMovilSaleId(sucursal);
 
   useEffect(() => {
     if (selectedClient) {

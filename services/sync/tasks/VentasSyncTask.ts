@@ -87,13 +87,13 @@ export class VentasSyncTask extends SyncTask {
             (existingById as any).syncedAt = venta.fechaLog ? new Date(venta.fechaLog) : nowMexico;
             registrosActualizados++;
           } else {
-            // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000000)
+            // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
             const localVentas =
               idMovil === null
                 ? []
                 : this.realm
                     .objects("Venta")
-                    .filtered("idMovil == $0 AND claveProd == $1 AND id > 1700000000000", idMovil, venta.claveProd);
+                    .filtered("idMovil == $0 AND claveProd == $1 AND id > 1700000000", idMovil, venta.claveProd);
 
             if (localVentas.length > 0) {
               // Actualizar solo los campos específicos en cada registro encontrado

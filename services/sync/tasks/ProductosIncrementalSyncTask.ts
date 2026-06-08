@@ -26,10 +26,16 @@ export class ProductosIncrementalSyncTask extends SyncTask {
 
   private getFechaInicial(): string {
     // Obtener la fecha de la última sincronización exitosa de productos
+    // Se usa SyncTableLog (bitácora por tabla que escribe SyncTask.executeWithLogging)
     // Si no hay, usar una fecha de hace 24 horas
-    const lastSync = this.realm.objects("SyncStatus").filtered("entity == 'Productos'");
+    const lastSync = this.realm
+      .objects("SyncTableLog")
+      .filtered(
+        "(tabla == 'Productos' OR tabla == 'ProductosIncremental') AND exitoso == true AND fechaFinal != null",
+      )
+      .sorted("fechaFinal", true);
     if (lastSync.length > 0) {
-      const lastSyncDate = (lastSync[0] as any).lastSyncDate;
+      const lastSyncDate = (lastSync[0] as any).fechaFinal;
       if (lastSyncDate) {
         return this.formatMexicoDateForServer(lastSyncDate);
       }

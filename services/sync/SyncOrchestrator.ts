@@ -2,7 +2,9 @@ import Realm from "realm";
 import { SyncTask, SyncTaskResult, SyncProgress } from "./SyncTask";
 import { UsuariosSyncTask } from "./tasks/UsuariosSyncTask";
 import { ProductosSyncTask } from "./tasks/ProductosSyncTask";
-import { ProductosIncrementalSyncTask } from "./tasks/ProductosIncrementalSyncTask";
+// ProductosIncrementalSyncTask deshabilitada: el endpoint /productos/incremental devuelve 404.
+// Los productos se sincronizan por completo con ProductosSyncTask (/productos/full).
+// import { ProductosIncrementalSyncTask } from "./tasks/ProductosIncrementalSyncTask";
 import { PreciosSyncTask } from "./tasks/PreciosSyncTask";
 import { PreciosPromoSyncTask } from "./tasks/PreciosPromoSyncTask";
 import { ClientesSyncTask } from "./tasks/ClientesSyncTask";
@@ -55,7 +57,7 @@ export class SyncOrchestrator {
       new FormaPagoSyncTask(this.realm, this.syncLogId, this.sucursal),
       new UsuariosSyncTask(this.realm, this.syncLogId),
       new ProductosSyncTask(this.realm, this.syncLogId),
-      new ProductosIncrementalSyncTask(this.realm, this.syncLogId, this.sucursal),
+      // Incremental deshabilitada (endpoint inexistente, 404). Productos vía ProductosSyncTask (/full).
       new KitsSyncTask(this.realm, this.syncLogId),
       new KitIntercambioSyncTask(this.realm, this.syncLogId),
       new PreciosPromoSyncTask(this.realm, this.syncLogId),
