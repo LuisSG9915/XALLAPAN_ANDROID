@@ -51,6 +51,7 @@ type Producto = {
   usandoPrecioDefault?: boolean;
   esPromocion?: boolean;
   omitirMovil?: number;
+  envaseRecibe?: boolean;
 };
 
 type CartItem = Producto & { cantidad: number };
@@ -610,6 +611,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           usandoPrecioDefault,
           esPromocion,
           omitirMovil: productoBase?.omitirMovil ?? 0,
+          envaseRecibe: productoBase?.envaseRecibe ?? false,
         };
 
         // Solo agregar si no existe ya un producto con este ID, o si el nuevo tiene mejor precio
@@ -908,7 +910,14 @@ export default function SalesScreen({ route }: { route?: any }) {
         undefined,
         preciosPromoData,
       ).filter((p) => {
-        return p.existencia > 0 && p.omitirMovil !== 1;
+        const userEnvaseRuta = currentUser?.envaseRuta === true;
+        // Lógica: si omitirMovil es 1
+        // - Si envaseRuta es true: mostrar solo productos con envase_recibe
+        // - Si envaseRuta es false: NO mostrar productos
+        if (p.omitirMovil === 1) {
+          return userEnvaseRuta && p.envaseRecibe === true;
+        }
+        return p.existencia > 0;
       });
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
       console.log(preciosData);
@@ -1748,7 +1757,14 @@ export default function SalesScreen({ route }: { route?: any }) {
         preciosDefault,
         preciosPromo,
       ).filter((p) => {
-        return p.existencia > 0 && p.omitirMovil !== 1;
+        const userEnvaseRuta = currentUser?.envaseRuta === true;
+        // Lógica: si omitirMovil es 1
+        // - Si envaseRuta es true: mostrar solo productos con envase_recibe
+        // - Si envaseRuta es false: NO mostrar productos
+        if (p.omitirMovil === 1) {
+          return userEnvaseRuta && p.envaseRecibe === true;
+        }
+        return p.existencia > 0;
       });
       console.log(productosData);
       console.log("2PRODUCTOSFORMATEADOS", productosFormateados);

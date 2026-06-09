@@ -127,22 +127,40 @@ export default function PrecorteScreen() {
         return minimo === Infinity ? 0 : minimo;
       };
 
-      // Mapear inventario normal
-      const mapped: PrecorteItem[] = inventarioFiltrado.map((inv: any, index: number) => {
-        const clave = inv.claveProd;
-        const producto = productosPorClave.get(clave);
-        const esKit = Boolean(producto?.esKit);
+      // Obtener envaseRuta del usuario actual
+      const userEnvaseRuta = currentUser?.envaseRuta === true;
 
-        return {
-          id: inv.id ?? index,
-          clave_prod: String(inv.claveProd ?? ""),
-          descripcion: (inv.descripcion as string | undefined) ?? String(inv.claveProd ?? ""),
-          entradas: 0,
-          salidas: 0,
-          ifValue: inv.saldo ?? 0,
-          esKit,
-        };
-      });
+      // Mapear inventario normal con filtro de envaseRuta
+      const mapped: PrecorteItem[] = inventarioFiltrado
+        .filter((inv: any) => {
+          const clave = inv.claveProd;
+          const producto = productosPorClave.get(clave);
+          const omitirMovil = producto?.omitirMovil ?? 0;
+          const envaseRecibe = producto?.envaseRecibe ?? false;
+
+          // Lógica: si omitirMovil es 1
+          // - Si envaseRuta es true: mostrar solo productos con envase_recibe
+          // - Si envaseRuta es false: NO mostrar productos
+          if (omitirMovil === 1 || omitirMovil === true) {
+            return userEnvaseRuta && envaseRecibe === true;
+          }
+          return true;
+        })
+        .map((inv: any, index: number) => {
+          const clave = inv.claveProd;
+          const producto = productosPorClave.get(clave);
+          const esKit = Boolean(producto?.esKit);
+
+          return {
+            id: inv.id ?? index,
+            clave_prod: String(inv.claveProd ?? ""),
+            descripcion: (inv.descripcion as string | undefined) ?? String(inv.claveProd ?? ""),
+            entradas: 0,
+            salidas: 0,
+            ifValue: inv.saldo ?? 0,
+            esKit,
+          };
+        });
 
       // // Agregar kits con su existencia calculada
       // console.log({ productos });
