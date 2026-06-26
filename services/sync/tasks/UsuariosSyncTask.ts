@@ -87,6 +87,14 @@ export class UsuariosSyncTask extends SyncTask {
                 : usuario.dobleTicket === 0
                 ? false
                 : null,
+            envaseRuta:
+              typeof usuario.envaseRuta === "boolean"
+                ? usuario.envaseRuta
+                : usuario.envaseRuta === 1
+                ? true
+                : usuario.envaseRuta === 0
+                ? false
+                : null,
             syncedAt: new Date(),
           };
 

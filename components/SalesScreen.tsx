@@ -614,6 +614,15 @@ export default function SalesScreen({ route }: { route?: any }) {
           envaseRecibe: productoBase?.envaseRecibe ?? false,
         };
 
+        if (producto.omitirMovil === 1 || productoBase?.envaseRecibe) {
+          console.log(
+            `[Sales][MAP] clave=${producto.claveProd} id=${productoId} ` +
+              `omitirMovil=${String(productoBase?.omitirMovil)} (tipo=${typeof productoBase?.omitirMovil}) ` +
+              `envaseRecibe=${String(productoBase?.envaseRecibe)} (tipo=${typeof productoBase?.envaseRecibe}) ` +
+              `existencia=${existencia}`,
+          );
+        }
+
         // Solo agregar si no existe ya un producto con este ID, o si el nuevo tiene mejor precio
         const existing = productosMap.get(productoId);
         if (!existing || precio > existing.precio) {
@@ -642,6 +651,10 @@ export default function SalesScreen({ route }: { route?: any }) {
 
         const user = await AuthService.restoreSession();
         if (user) {
+          console.log(
+            `[Sales][USER] envaseRuta=${String((user as any)?.envaseRuta)} ` +
+              `(tipo=${typeof (user as any)?.envaseRuta}) usuario=${String(user.nombre)}`,
+          );
           setCurrentUser(user);
           const vendedor = (user.claveEmpleado as string | undefined) || (user.nombre as string | undefined) || "";
           const sucursal =
@@ -915,10 +928,20 @@ export default function SalesScreen({ route }: { route?: any }) {
         // - Si envaseRuta es true: mostrar solo productos con envase_recibe
         // - Si envaseRuta es false: NO mostrar productos
         if (p.omitirMovil === 1) {
-          return userEnvaseRuta && p.envaseRecibe === true;
+          const visible = userEnvaseRuta && p.envaseRecibe === true;
+          console.log(
+            `[Sales][FILTRO-1] omitirMovil=1 -> clave=${p.claveProd} id=${p.id} ` +
+              `userEnvaseRuta=${userEnvaseRuta} (raw=${String(currentUser?.envaseRuta)}) ` +
+              `envaseRecibe=${String(p.envaseRecibe)} existencia=${p.existencia} => visible=${visible}`,
+          );
+          return visible;
         }
         return p.existencia > 0;
       });
+      console.log(
+        `[Sales][FILTRO-1] currentUser.envaseRuta=${String(currentUser?.envaseRuta)} | ` +
+          `productos omitirMovil=1: ${productosFormateados.filter((p) => p.omitirMovil === 1).length}`,
+      );
       console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
       console.log(preciosData);
       setProductos(productosFormateados);
@@ -1762,10 +1785,20 @@ export default function SalesScreen({ route }: { route?: any }) {
         // - Si envaseRuta es true: mostrar solo productos con envase_recibe
         // - Si envaseRuta es false: NO mostrar productos
         if (p.omitirMovil === 1) {
-          return userEnvaseRuta && p.envaseRecibe === true;
+          const visible = userEnvaseRuta && p.envaseRecibe === true;
+          console.log(
+            `[Sales][FILTRO-2] omitirMovil=1 -> clave=${p.claveProd} id=${p.id} ` +
+              `userEnvaseRuta=${userEnvaseRuta} (raw=${String(currentUser?.envaseRuta)}) ` +
+              `envaseRecibe=${String(p.envaseRecibe)} existencia=${p.existencia} => visible=${visible}`,
+          );
+          return visible;
         }
         return p.existencia > 0;
       });
+      console.log(
+        `[Sales][FILTRO-2] currentUser.envaseRuta=${String(currentUser?.envaseRuta)} | ` +
+          `productos omitirMovil=1: ${productosFormateados.filter((p) => p.omitirMovil === 1).length}`,
+      );
       console.log(productosData);
       console.log("2PRODUCTOSFORMATEADOS", productosFormateados);
       console.log("preciosCliente", preciosCliente);

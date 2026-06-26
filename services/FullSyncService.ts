@@ -938,7 +938,30 @@ class FullSyncService {
                   nombreCia: usuario.nombreCia ?? null,
                   telefono: usuario.telefono ?? null,
                   ticketFinal: usuario.ticketFinal ?? null,
-                  permisoDomicilioTicket: usuario.permisoDomicilioTicket ?? null,
+                  permisoDomicilioTicket:
+                    typeof usuario.permisoDomicilioTicket === "boolean"
+                      ? usuario.permisoDomicilioTicket
+                      : usuario.permisoDomicilioTicket === 1
+                      ? true
+                      : usuario.permisoDomicilioTicket === 0
+                      ? false
+                      : null,
+                  dobleTicket:
+                    typeof usuario.dobleTicket === "boolean"
+                      ? usuario.dobleTicket
+                      : usuario.dobleTicket === 1
+                      ? true
+                      : usuario.dobleTicket === 0
+                      ? false
+                      : null,
+                  envaseRuta:
+                    typeof usuario.envaseRuta === "boolean"
+                      ? usuario.envaseRuta
+                      : usuario.envaseRuta === 1
+                      ? true
+                      : usuario.envaseRuta === 0
+                      ? false
+                      : null,
                   syncedAt: nowMexico,
                 };
 
