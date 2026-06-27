@@ -1,6 +1,7 @@
 import Realm from "realm";
 import { SyncTableLogSchema } from "../RealmSchemas";
 import BitacoraService from "../BitacoraService";
+import { fetchWithTimeout, isTimeoutError, DEFAULT_REQUEST_TIMEOUT_MS } from "../fetchWithTimeout";
 
 /**
  * Interfaz para el resultado de una sincronización individual
@@ -50,6 +51,18 @@ export abstract class SyncTask {
    */
   protected getMexicoNow(): Date {
     return new Date();
+  }
+
+  /**
+   * Realiza una petición de red que se cancela automáticamente si tarda más de 1 minuto.
+   * Reemplazo directo de fetch para todas las tareas de sincronización.
+   */
+  protected fetchWithTimeout(
+    input: string,
+    init: RequestInit = {},
+    timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<Response> {
+    return fetchWithTimeout(input, init, timeoutMs);
   }
 
   /**
@@ -167,18 +180,26 @@ export abstract class SyncTask {
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Error desconocido");
-        console.error(`[${this.getTableName()}] Intento ${attempt}/${maxRetries} fallido:`, lastError.message);
+        const noReintentable = this.isNonRetryable(lastError);
+        console.error(
+          `[${this.getTableName()}] Intento ${attempt}/${maxRetries} fallido${noReintentable ? " (no reintentable)" : ""}:`,
+          lastError.message,
+        );
 
-        // Si es el último intento, guardar el error y retornar
-        if (attempt === maxRetries) {
+        // No reintentar timeouts (>1 min) ni errores 4xx: reintentarlos no ayuda y solo alarga la espera.
+        if (attempt === maxRetries || noReintentable) {
           const fechaFinal = new Date();
+          const esTimeout = isTimeoutError(lastError);
           const errorResult: SyncTaskResult = {
             success: false,
             error: lastError.message,
+            timedOut: esTimeout,
             detalles: {
-              intentos: maxRetries,
+              intentos: attempt,
               ultimoError: lastError.message,
               esErrorDeRed: this.isNetworkError(lastError),
+              esTimeout,
+              noReintentable,
             },
           };
 
@@ -188,12 +209,12 @@ export abstract class SyncTask {
           await BitacoraService.registrarFinSync(idBitacora, {
             exitoso: false,
             error: lastError.message,
-            errorCode: "500",
+            errorCode: esTimeout ? "TIMEOUT" : "500",
           });
 
           console.error(
-            `[${this.getTableName()}] Sincronización fallida después de ${maxRetries} intentos:`,
-            lastError
+            `[${this.getTableName()}] Sincronización fallida (${attempt} intento(s)):`,
+            lastError.message,
           );
           return errorResult;
         }
@@ -206,6 +227,18 @@ export abstract class SyncTask {
       error: lastError?.message || "Error desconocido",
     };
     return errorResult;
+  }
+
+  /**
+   * Determina si un error NO debe reintentarse: timeouts (ya esperó el máximo)
+   * y errores de validación/cliente 4xx (reintentar daría el mismo resultado).
+   */
+  private isNonRetryable(error: Error): boolean {
+    if (isTimeoutError(error)) {
+      return true;
+    }
+    // HTTP 400-499
+    return /HTTP 4\d\d/i.test(error.message);
   }
 
   /**

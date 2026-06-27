@@ -3,6 +3,7 @@ import { allSchemas } from "./RealmSchemas";
 import Realm from "realm";
 import BitacoraService from "./BitacoraService";
 import AuthService from "./AuthService";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 class VisitaSyncService {
   private static instance: VisitaSyncService;
@@ -55,7 +56,7 @@ class VisitaSyncService {
     try {
       console.log(`[VisitaSync] Sincronizando visitas para fecha: ${fecha.toISOString()}`);
 
-      const response = await fetch(endpoint);
+      const response = await fetchWithTimeout(endpoint);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -375,7 +376,7 @@ class VisitaSyncService {
     try {
       console.log(`[VisitaSync] 🔄 Sincronizando visitas realizadas para ruta: ${sucursal}`);
 
-      const response = await fetch(endpoint, {
+      const response = await fetchWithTimeout(endpoint, {
         method: "GET",
         headers: {
           accept: "application/json",

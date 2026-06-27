@@ -30,7 +30,7 @@ export class TipoVisitaSyncTask extends SyncTask {
     try {
       console.log(`[TipoVisitaSyncTask] Sincronizando tipos de visita...`);
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: {
           accept: "application/json",
         },

@@ -6,7 +6,7 @@ import { SyncTask, SyncTaskResult } from "../SyncTask";
  * Este task envía los registros pendientes de sincronizar al endpoint
  */
 export class DetalleVisitasSyncTask extends SyncTask {
-  private idUsuario: number;
+  protected idUsuario: number;
 
   constructor(realm: Realm, syncLogId: string, idUsuario: number) {
     super(realm, syncLogId);
@@ -75,7 +75,7 @@ export class DetalleVisitasSyncTask extends SyncTask {
 
       console.log(`[DetalleVisitasSyncTask] Enviando ${visitasArray.length} visitas al servidor`);
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

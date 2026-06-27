@@ -30,7 +30,7 @@ export class VentasSyncTask extends SyncTask {
     try {
       console.log(`[VentasSyncTask] Obteniendo ventas para sucursal ${this.sucursal}...`);
 
-      const response = await fetch(this.getEndpoint());
+      const response = await this.fetchWithTimeout(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

@@ -27,7 +27,7 @@ export class KitsSyncTask extends SyncTask {
     try {
       console.log("[KitsSyncTask] Obteniendo kits desde API...");
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: { accept: "application/json" },
       });
 

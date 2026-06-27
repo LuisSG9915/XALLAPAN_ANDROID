@@ -25,7 +25,7 @@ export class CiasSyncTask extends SyncTask {
     try {
       console.log("[CiasSyncTask] Obteniendo compañías desde API...");
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: { accept: "application/json" },
       });
 

@@ -91,35 +91,17 @@ class BackgroundSyncService {
       return;
     }
 
-    console.log("[BackgroundSync] 🚀 Iniciando sincronización automática cada 3 minutos");
+    // Sincronización automática desactivada por configuración temporal.
+    // El usuario puede sincronizar manualmente con el botón de App.tsx.
+    console.log("[BackgroundSync] 🚫 Sincronización automática desactivada. Solo manual disponible.");
 
-    // Calcular próxima sincronización
-    const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
     this.updateState({
       status: "idle",
-      nextSyncTime: nextSync,
+      nextSyncTime: null,
+      errorMessage: "Sincronización automática desactivada (solo manual)",
     });
 
-    // DESACTIVADO: BackgroundFetch causa sincronizaciones adicionales impredecibles
-    // El sistema operativo decide cuándo ejecutarlo, no respeta el intervalo exacto
-    // Usar solo setInterval para control preciso de 3 minutos
-    /*
-    if (!this.isBackgroundFetchConfigured) {
-      await this.configureBackgroundFetch();
-    }
-    */
-
-    // Crear intervalo para sincronización cada 3 minutos (preciso)
-    this.intervalId = setInterval(() => {
-      this.performSync();
-    }, this.SYNC_INTERVAL_MS);
-    console.log("[BackgroundSync] ✅ Intervalo de 3 minutos configurado");
-
-    // Ejecutar primera sincronización inmediatamente solo si es la primera vez
-    if (!this.state.lastSyncTime) {
-      console.log("[BackgroundSync] Ejecutando primera sincronización inmediata");
-      this.performSync();
-    }
+    // No se configura setInterval ni BackgroundFetch para evitar syncs automáticas.
   }
 
   /**
@@ -371,17 +353,21 @@ class BackgroundSyncService {
       errorMessage: null,
     });
 
-    // Timeout de seguridad: si la sincronización tarda más de 5 minutos, forzar finalización
+    // Timeout de seguridad: si la sincronización tarda más de 1 minuto, forzar cancelación
     const timeoutId = setTimeout(() => {
-      console.error("[BackgroundSync] ⏱️ TIMEOUT: Sincronización tardó más de 5 minutos, forzando finalización");
+      console.error(
+        "[BackgroundSync] ⏱️ TIMEOUT: Sincronización automática superó 1 minuto, cancelando...",
+      );
+      this.cancelRequested = true;
       const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
       this.updateState({
         status: "error",
         nextSyncTime: nextSync,
         currentProgress: null,
-        errorMessage: "Timeout: La sincronización tardó demasiado",
+        errorMessage:
+          "Sincronización cancelada: superó 1 minuto por inestabilidad de red o conexión muy lenta",
       });
-    }, 5 * 60 * 1000); // 5 minutos
+    }, 60 * 1000); // 1 minuto
 
     try {
       const sucursal = user.sucursal_origen || user.sucursal || 1;
@@ -439,12 +425,15 @@ class BackgroundSyncService {
           console.warn("[BackgroundSync] Error enviando bitácoras, no es crítico:", bitacoraError);
         }
       } else {
+        const errorMessage = this.cancelRequested
+          ? "Sincronización cancelada: superó 1 minuto por inestabilidad de red o conexión muy lenta"
+          : result.error || "Error desconocido";
         this.updateState({
           status: "error",
           lastSyncTime: now,
           nextSyncTime: nextSync,
           currentProgress: null,
-          errorMessage: result.error || "Error desconocido",
+          errorMessage,
         });
         console.log(
           `[BackgroundSync] ❌ Sincronización completada con errores (Sucursal: ${sucursal}, Usuario: ${idUsuario}):`,

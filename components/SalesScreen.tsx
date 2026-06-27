@@ -35,6 +35,7 @@ type Cliente = {
   latitud?: number;
   longitud?: number;
   metros?: number; // Distancia máxima permitida en metros
+  domicilio?: string;
 };
 
 type Producto = {
@@ -684,8 +685,16 @@ export default function SalesScreen({ route }: { route?: any }) {
             }
           }
 
+          // Si la sincronización automática está corriendo, evitar duplicar tráfico de red
+          // y bloquear la pantalla. Solo cargar datos locales.
+          const skipNetworkSync =
+            BackgroundSyncService.getState().status === "syncing";
+          if (skipNetworkSync) {
+            console.log("[Sales] Sync automática en curso, omitiendo sync de visitas al entrar");
+          }
+
           // Cargar datos después de establecer la sucursal
-          await loadDataFromRealm(sucursal);
+          await loadDataFromRealm(sucursal, skipNetworkSync);
         }
       } finally {
         setInitializingPrinter(false);
@@ -734,13 +743,16 @@ export default function SalesScreen({ route }: { route?: any }) {
       try {
         if (showLoading) setLoadingAgendados(true);
         // Si es refresh manual, sincronizar visitas realizadas con el servidor
-        if (showLoading) {
+        // (omitiendo si la sync automática está corriendo para no duplicar tráfico ni bloquear)
+        if (showLoading && BackgroundSyncService.getState().status !== "syncing") {
           try {
             await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
             await VisitaSyncService.getInstance().syncByDate(new Date());
           } catch (syncErr) {
             console.warn("[Sales] Sync visitas fallido (no crítico):", syncErr);
           }
+        } else if (showLoading) {
+          console.log("[Sales] Omitiendo sync manual de visitas: sync automática en curso");
         }
 
         console.log(`[Sales] 📅 Recargando visitas para sucursal: ${sucursal}`);
@@ -764,6 +776,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           latitud: c.latitud,
           longitud: c.longitud,
           metros: c.metros,
+          domicilio: c.domicilio ? String(c.domicilio) : undefined,
         }));
         setClientes(clientesFormateados);
 
@@ -814,7 +827,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     }, [currentSucursal, reloadVisitasDelDia]),
   );
 
-  const loadDataFromRealm = async (sucursal: number): Promise<Cliente[]> => {
+  const loadDataFromRealm = async (sucursal: number, skipNetworkSync = false): Promise<Cliente[]> => {
     try {
       await FullSyncService.initialize();
 
@@ -847,7 +860,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         listaPrecio: c.listaPrecio,
         latitud: c.latitud,
         longitud: c.longitud,
-
+        domicilio: c.domicilio ? String(c.domicilio) : undefined,
         metros: c.metros,
       }));
       setClientes(clientesFormateados);
@@ -865,11 +878,15 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.log("[Sales] Ejemplo cliente con coords:", JSON.stringify(clientesConCoords[0]));
       }
 
-      // Sincronizar visitas realizadas al inicio
-      try {
-        await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
-      } catch (syncErr) {
-        console.warn("[Sales] Sync visitas realizadas fallido (no crítico):", syncErr);
+      // Sincronizar visitas realizadas al inicio (solo si no hay sync automática en curso)
+      if (!skipNetworkSync) {
+        try {
+          await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
+        } catch (syncErr) {
+          console.warn("[Sales] Sync visitas realizadas fallido (no crítico):", syncErr);
+        }
+      } else {
+        console.log("[Sales] Omitiendo sync de visitas realizadas: sync automática en curso");
       }
 
       // Cargar visitas agendadas del día (para tab Agendados)
@@ -2742,6 +2759,11 @@ export default function SalesScreen({ route }: { route?: any }) {
             </View>
           </View>
           <Text style={styles.valueText}>{selectedClient ? selectedClient.nombre : "Sin seleccionar"}</Text>
+          {selectedClient?.domicilio ? (
+            <Text style={styles.domicilioTexto} numberOfLines={2}>
+              {selectedClient.domicilio}
+            </Text>
+          ) : null}
         </View>
 
         {/* Productos */}
@@ -3747,6 +3769,12 @@ const styles = StyleSheet.create({
     marginTop: SPACING.s,
     ...TYPOGRAPHY.body,
     fontSize: 16,
+  },
+  domicilioTexto: {
+    marginTop: SPACING.s,
+    ...TYPOGRAPHY.body,
+    fontSize: 13,
+    color: COLORS.muted,
   },
   smallBtn: {
     backgroundColor: COLORS.secondary,

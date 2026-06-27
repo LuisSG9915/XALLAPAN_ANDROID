@@ -5,6 +5,7 @@ import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 import BitacoraService from "./BitacoraService";
 import GpsBitacoraService from "./GpsBitacoraService";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
@@ -392,6 +393,7 @@ class FullSyncService {
    * - Precios   -> /api/MovilesVentas/precios?fechaInicial=YYYY-MM-DD HH:mm
    * - Cartera   -> /api/MovilesVentas/cartera?fechaInicial=YYYY-MM-DD
    * - Ventas    -> /api/MovilesVentas/ventas-erp-movil?fechaInicial=YYYY-MM-DD HH:mm&sucursal=...
+   * - Visitas   -> /api/MovilesVentas/visitas/full
    */
   async syncIncremental(
     sucursal: number = 1,
@@ -444,7 +446,7 @@ class FullSyncService {
           console.log(`[FullSync-Cancelacion] 🌐 URL: ${cancelacionUrl}`);
           console.log(`[FullSync-Cancelacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
 
-          const cancelacionResp = await fetch(cancelacionUrl, {
+          const cancelacionResp = await fetchWithTimeout(cancelacionUrl, {
             method: "POST",
             headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -518,7 +520,7 @@ class FullSyncService {
           console.log(`[FullSync-Modificacion] 🌐 URL: ${modificacionUrl}`);
           console.log(`[FullSync-Modificacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
 
-          const modificacionResp = await fetch(modificacionUrl, {
+          const modificacionResp = await fetchWithTimeout(modificacionUrl, {
             method: "POST",
             headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -596,7 +598,7 @@ class FullSyncService {
           console.log(`[FullSync-Reubicacion] 🌐 URL: ${reubicacionUrl}`);
           console.log(`[FullSync-Reubicacion] 📦 Payload:`, JSON.stringify(reubicacionesPayload, null, 2));
 
-          const reubicacionResp = await fetch(reubicacionUrl, {
+          const reubicacionResp = await fetchWithTimeout(reubicacionUrl, {
             method: "POST",
             headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
             body: JSON.stringify(reubicacionesPayload),
@@ -672,7 +674,7 @@ class FullSyncService {
           }));
           console.log(envasePayload);
           const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-          const envaseResp = await fetch(envaseUrl, {
+          const envaseResp = await fetchWithTimeout(envaseUrl, {
             method: "POST",
             headers: { accept: "application/json", "Content-Type": "application/json" },
             body: JSON.stringify(envasePayload),
@@ -781,7 +783,7 @@ class FullSyncService {
             console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
             console.log("[Incremental] URL completa:", url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/octet-stream" },
             });
             if (!response.ok) {
@@ -894,7 +896,7 @@ class FullSyncService {
 
           try {
             console.log("[Incremental] Usuarios full desde", url);
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/json" },
             });
             if (!response.ok) {
@@ -1017,7 +1019,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] Productos desde", url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/json" },
             });
             if (!response.ok) {
@@ -1122,7 +1124,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] Precios desde", fechaInicial, url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/octet-stream" },
             });
             if (!response.ok) {
@@ -1210,7 +1212,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] PreciosPromo desde", fechaInicial, url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/octet-stream" },
             });
             if (!response.ok) {
@@ -1288,7 +1290,7 @@ class FullSyncService {
       //     try {
       //       console.log("[Incremental] Cartera full desde", url);
 
-      //       const response = await fetch(url, {
+      //       const response = await fetchWithTimeout(url, {
       //         headers: { accept: "application/octet-stream" },
       //       });
       //       if (!response.ok) {
@@ -1351,6 +1353,29 @@ class FullSyncService {
       //   },
       // },
       {
+        name: "VisitasIncremental",
+        run: async () => {
+          const tableName = "Visita";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full`;
+          const fechaHoy = this.getMexicoNow();
+
+          const VisitaSyncService = (await import("./VisitaSyncService")).default;
+          const result = await VisitaSyncService.getInstance().syncByDate(fechaHoy);
+
+          if (!result.success) {
+            throw new Error(result.error || "Error sincronizando visitas");
+          }
+
+          return {
+            tabla: tableName,
+            endpoint: url,
+            registrosLeidos: result.registrosLeidos ?? 0,
+            registrosGuardados: result.registrosGuardados ?? 0,
+            registrosActualizados: result.registrosActualizados ?? 0,
+          };
+        },
+      },
+      {
         name: "VentasIncremental",
         run: async () => {
           const tableName = "Venta";
@@ -1377,7 +1402,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] Ventas desde", fechaInicial, url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/octet-stream" },
             });
             if (!response.ok) {
@@ -1597,7 +1622,7 @@ class FullSyncService {
             );
             console.log("[Incremental] DetalleVisitas arrastre - Payload:", JSON.stringify(visitasArray));
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1671,7 +1696,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] Inventario desde", url);
 
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
               headers: { accept: "application/octet-stream" },
             });
             if (!response.ok) {
@@ -1742,7 +1767,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] InventarioEnvasesHistorial desde", url);
 
-            const response = await fetch(url, { headers: { accept: "application/json" } });
+            const response = await fetchWithTimeout(url, { headers: { accept: "application/json" } });
             if (!response.ok) {
               throw new Error(`HTTP ${response.status} InventarioEnvasesHistorial`);
             }
@@ -1942,7 +1967,11 @@ class FullSyncService {
     return {
       success,
       cancelled: wasCancelled || undefined,
-      error: success ? undefined : wasCancelled ? "Cancelada por nueva sincronización" : errors.join("; "),
+      error: success
+        ? undefined
+        : wasCancelled
+        ? "Sincronización cancelada: superó el tiempo límite o se interrumpió por otra solicitud"
+        : errors.join("; "),
     };
   }
 
@@ -2190,7 +2219,7 @@ class FullSyncService {
 
   async getSucursales(): Promise<{ id: number; nombre: string }[]> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/api/MovilesVentas/sucursales`);
+      const response = await fetchWithTimeout(`${this.apiBaseUrl}/api/MovilesVentas/sucursales`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -3815,7 +3844,7 @@ class FullSyncService {
       // Usar el mismo endpoint que el sincronizador periódico (que funciona correctamente)
       const url = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
 
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers: {
           accept: "application/json",
@@ -3890,7 +3919,7 @@ class FullSyncService {
       console.log(`[FullSync-CierreRuta] 📦 Payload:`, JSON.stringify(payload, null, 2));
       console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
 
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers: {
           accept: "application/json",
@@ -3938,7 +3967,7 @@ class FullSyncService {
       console.log(`[FullSync-CierreRuta] 📥 Obteniendo cierres del servidor...`);
       console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
 
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: { accept: "application/json" },
       });
 
@@ -4000,7 +4029,7 @@ class FullSyncService {
 
     console.log(`[FullSync] Sincronizando inventario incremental desde: ${url}`);
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { accept: "application/octet-stream" },
     });
 
@@ -4052,7 +4081,7 @@ class FullSyncService {
         productosUrl
       );
 
-      const productosResponse = await fetch(productosUrl, {
+      const productosResponse = await fetchWithTimeout(productosUrl, {
         headers: { accept: "application/json" },
       });
 
@@ -4112,7 +4141,7 @@ class FullSyncService {
     if (this.realm && !this.realm.isClosed) {
       console.log(`[FullSync] Sincronizando formas de pago para sucursal ${sucursal}...`);
       const formasPagoUrl = `${this.apiBaseUrl}/api/MovilesVentas/formas-pagos?sucursal=${sucursal}`;
-      const formasPagoResponse = await fetch(formasPagoUrl, {
+      const formasPagoResponse = await fetchWithTimeout(formasPagoUrl, {
         headers: { accept: "application/json" },
       });
 

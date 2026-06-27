@@ -84,7 +84,7 @@ export class InventarioEnvaseSyncTask extends SyncTask {
       });
 
       // Enviar al servidor
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         method: "POST",
         headers: {
           accept: "application/json",

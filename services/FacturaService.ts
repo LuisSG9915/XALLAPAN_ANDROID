@@ -1,6 +1,7 @@
 import { Alert } from 'react-native';
 import BluetoothPrinterService from './BluetoothPrinterService';
 import FullSyncService from './FullSyncService';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 export interface FacturaItem {
   id: number;
@@ -81,7 +82,7 @@ class FacturaService {
       const cleanUrl = baseUrl.replace(/\s+/g, '');
 
       // Llamar API de generación de factura
-      const response = await fetch(`${this.apiBaseUrl}${cleanUrl}`, {
+      const response = await fetchWithTimeout(`${this.apiBaseUrl}${cleanUrl}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -167,7 +168,7 @@ class FacturaService {
   ): Promise<{ serie: string; folio: string }> {
     const url = `${this.cppApiBaseUrl}/api/Cpp/serie-xml?noVenta=${noVenta}&sucursal=${sucursal}&caja=${caja}`;
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { accept: 'application/octet-stream' },
     });
 
@@ -193,7 +194,7 @@ class FacturaService {
       serie,
     )}&folio=${encodeURIComponent(folio)}`;
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { accept: 'application/octet-stream' },
     });
 

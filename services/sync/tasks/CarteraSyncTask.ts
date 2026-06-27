@@ -26,7 +26,7 @@ export class CarteraSyncTask extends SyncTask {
     try {
       console.log('[CarteraSyncTask] Obteniendo cartera desde API...');
 
-      const response = await fetch(this.getEndpoint());
+      const response = await this.fetchWithTimeout(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

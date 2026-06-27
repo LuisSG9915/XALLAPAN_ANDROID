@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 const API_BASE_URL = 'https://api.cbinformatica.net:9031';
 
@@ -27,7 +28,7 @@ class AuthService {
     )}/${encodeURIComponent(password)}`;
 
     try {
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url);
       if (!res.ok) {
         throw new Error(`Error de conexión (${res.status}: ${res.statusText})`);
       }

@@ -1,4 +1,5 @@
 import WebhookManager from './WebhookManager';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 class ClienteService {
   // Simular creación de cliente con webhook
@@ -64,7 +65,7 @@ class ClienteService {
   async crearClienteConAPI(clienteData) {
     try {
       // Llamar a tu API real
-      const response = await fetch('http://10.0.2.2:5083/api/CatClientes', {
+      const response = await fetchWithTimeout('http://10.0.2.2:5083/api/CatClientes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

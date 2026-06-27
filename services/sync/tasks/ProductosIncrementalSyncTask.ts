@@ -59,7 +59,7 @@ export class ProductosIncrementalSyncTask extends SyncTask {
     try {
       console.log("[ProductosIncrementalSyncTask] Obteniendo productos incrementales desde API...");
 
-      const response = await fetch(this.getEndpoint());
+      const response = await this.fetchWithTimeout(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

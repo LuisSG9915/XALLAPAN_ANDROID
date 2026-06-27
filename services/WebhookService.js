@@ -1,4 +1,5 @@
 import Realm from 'realm';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 // Esquema para almacenar webhooks enviados
 const WebhookLogSchema = {
@@ -144,7 +145,7 @@ class WebhookService {
       attempts++;
       
       try {
-        const response = await fetch(subscription.url, {
+        const response = await fetchWithTimeout(subscription.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

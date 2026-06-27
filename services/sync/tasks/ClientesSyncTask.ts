@@ -27,7 +27,7 @@ export class ClientesSyncTask extends SyncTask {
       const sucursal = this.sucursal || 1;
       console.log("[ClientesSyncTask] Obteniendo clientes desde API (sucursal: " + sucursal + ")...");
 
-      const response = await fetch(this.getEndpoint(sucursal));
+      const response = await this.fetchWithTimeout(this.getEndpoint(sucursal));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

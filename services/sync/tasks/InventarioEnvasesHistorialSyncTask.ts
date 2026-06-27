@@ -34,7 +34,7 @@ export class InventarioEnvasesHistorialSyncTask extends SyncTask {
     try {
       console.log(`[InventarioEnvasesHistorial] Descargando desde ${this.getEndpoint()}`);
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: { accept: "application/json" },
       });
 

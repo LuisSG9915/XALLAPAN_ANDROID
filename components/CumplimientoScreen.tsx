@@ -39,6 +39,7 @@ interface VisitaConCliente extends Visita {
   latitud?: number;
   longitud?: number;
   metros?: number; // Distancia máxima permitida en metros
+  domicilio?: string;
 }
 
 interface ClienteLite {
@@ -47,6 +48,7 @@ interface ClienteLite {
   latitud?: number;
   longitud?: number;
   metros?: number;
+  domicilio?: string;
 }
 
 interface Estadisticas {
@@ -166,6 +168,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             latitud: cliente?.latitud != null ? Number(cliente.latitud) : undefined,
             longitud: cliente?.longitud != null ? Number(cliente.longitud) : undefined,
             metros: cliente?.metros != null ? Number(cliente.metros) : undefined,
+            domicilio: cliente?.domicilio ? String(cliente.domicilio) : undefined,
           };
         });
         setVisitas(visitasConNombres);
@@ -380,11 +383,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const handleRefreshManual = async () => {
     setRefreshingManual(true);
-    try {
-      await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
-    } catch (err) {
-      console.warn("[Cumplimiento] Error al sincronizar manual:", err);
-    }
+    // try {
+    //   await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    // } catch (err) {
+    //   console.warn("[Cumplimiento] Error al sincronizar manual:", err);
+    // }
     cargarDatos(fechaSeleccionada, currentSucursal);
   };
 
@@ -529,7 +532,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                     tipo: 1,
                     visitado: 0,
                     syncedAr: null,
-                  });
+                  }, Realm.UpdateMode.Modified);
                 });
 
                 console.log("[Cumplimiento] Visita creada manualmente para cliente", cliente.id);
@@ -548,6 +551,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                   latitud: cliente.latitud,
                   longitud: cliente.longitud,
                   metros: cliente.metros,
+                  domicilio: cliente.domicilio,
                 };
 
                 // Agregar la visita manual al estado local
@@ -556,9 +560,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 setVisitaSeleccionada(nuevaVisita);
                 setTipoVisitaSeleccionado(null);
                 setModalVisible(true);
-              } catch (error) {
+              } catch (error: any) {
                 console.error("[Cumplimiento] Error al crear visita:", error);
-                Alert.alert("Error", "No se pudo crear la visita.");
+                Alert.alert("Error", `No se pudo crear la visita. ${error?.message || error}`);
               }
             },
           },
@@ -587,6 +591,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         latitud: c.latitud != null ? Number(c.latitud) : undefined,
         longitud: c.longitud != null ? Number(c.longitud) : undefined,
         metros: c.metros != null ? Number(c.metros) : undefined,
+        domicilio: c.domicilio ? String(c.domicilio) : undefined,
       }));
       setClientes(formateados);
     } catch (error) {
@@ -640,6 +645,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               <View style={styles.clienteDetails}>
                 <Text style={styles.clienteId}>#{item.idCliente}</Text>
                 <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
+                {item.domicilio ? (
+                  <Text style={styles.domicilioTexto} numberOfLines={1}>
+                    {item.domicilio}
+                  </Text>
+                ) : null}
               </View>
             </View>
             <View style={styles.horaRow}>
@@ -763,6 +773,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 <View style={styles.clienteDetails}>
                   <Text style={styles.clienteId}>#{cliente.id}</Text>
                   <Text style={styles.clienteNombre}>{cliente.nombre}</Text>
+                  {cliente.domicilio ? (
+                    <Text style={styles.domicilioTexto} numberOfLines={1}>
+                      {cliente.domicilio}
+                    </Text>
+                  ) : null}
                   {cliente.distanciaMetros != null && (
                     <View style={styles.horaRow}>
                       <Icon name="place" type="material" size={14} color="#8E8E93" />
@@ -1296,6 +1311,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#1C1C1E",
+  },
+  domicilioTexto: {
+    fontSize: 12,
+    color: "#8E8E93",
+    marginTop: 2,
   },
   horaRow: {
     flexDirection: "row",

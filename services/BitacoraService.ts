@@ -2,8 +2,8 @@ import Realm from "realm";
 import NetInfo from "@react-native-community/netinfo";
 import DeviceInfo from "react-native-device-info";
 import { Platform, AppState } from "react-native";
-import { ALL_SCHEMAS } from "./RealmSchemas";
 import AuthService from "./AuthService";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 // Definición de tipos para los resultados de sync
 export interface SyncResult {
@@ -240,7 +240,7 @@ class BitacoraService {
     console.log(`[BitacoraService] 📊 Total registros en payload:`, payload.length);
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

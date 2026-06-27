@@ -71,7 +71,7 @@ export class VentaCancelacionSyncTask extends SyncTask {
         longitud: cancelacion.longitud ?? 0,
       }));
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         method: "POST",
         headers: {
           accept: "application/octet-stream",

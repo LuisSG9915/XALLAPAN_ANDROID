@@ -30,7 +30,7 @@ export class FormaPagoSyncTask extends SyncTask {
     try {
       console.log(`[FormaPagoSyncTask] Sincronizando formas de pago para sucursal ${this.sucursal}...`);
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: {
           accept: "application/json",
         },

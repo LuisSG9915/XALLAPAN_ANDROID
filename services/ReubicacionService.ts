@@ -1,4 +1,5 @@
 import Realm from "realm";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 /**
  * Genera un ID único numérico basado en timestamp
@@ -292,7 +293,7 @@ class ReubicacionService {
         })),
       };
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`,
         {
           method: "POST",

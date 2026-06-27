@@ -480,24 +480,47 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     ]);
   }, [navigation]);
 
+  const SYNC_TOTAL_TIMEOUT_MS = 60000;
+
   const handleFullSync = useCallback(async () => {
     if (syncing) return;
 
     setSyncing(true);
     setSyncProgress([]);
 
+    let timeoutId: number | null = null;
+
     try {
       const user = await AuthService.restoreSession();
       const sucursal = user?.sucursal_origen || user?.sucursal || 1;
       const vendedor = user?.id || 0;
 
-      const result = await FullSyncService.syncAll(
+      const syncPromise = FullSyncService.syncAll(
         sucursal,
         (progress: SyncProgress) => {
           setSyncProgress((prev) => [...prev, progress]);
         },
         vendedor,
       );
+
+      // Timeout global de 1 minuto: si el proceso completo tarda más, se suspende.
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(
+            new Error(
+              "Sincronización suspendida: superó el tiempo máximo de 1 minuto. " +
+                "Reintenta con una mejor conexión.",
+            ),
+          );
+        }, SYNC_TOTAL_TIMEOUT_MS);
+      });
+
+      const result = await Promise.race([syncPromise, timeoutPromise]);
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
 
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
@@ -516,6 +539,9 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     } catch (error: any) {
       Alert.alert("❌ Error de Sincronización", error?.message || "No se pudo completar la sincronización");
     } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       setSyncing(false);
     }
   }, [syncing]);

@@ -1,4 +1,5 @@
 import Realm from 'realm';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 class SimpleEventEmitter {
   constructor() {
@@ -350,7 +351,7 @@ class SyncService {
 
     try {
       console.log('🔄 Iniciando sincronización de grupos de clientes...');
-      const response = await fetch(endpoint);
+      const response = await fetchWithTimeout(endpoint);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -478,7 +479,7 @@ class SyncService {
       console.log('🔄 Iniciando sincronización de clientes...');
       
       // Obtener clientes del servidor
-      const response = await fetch(`${this.apiBaseUrl}/api/SincronizacionMovil/sp_movil_syncro_cliente_getVersion2`);
+      const response = await fetchWithTimeout(`${this.apiBaseUrl}/api/SincronizacionMovil/sp_movil_syncro_cliente_getVersion2`);
       console.log(response);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

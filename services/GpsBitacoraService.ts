@@ -1,5 +1,6 @@
 import Realm from "realm";
 import AuthService from "./AuthService";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 class GpsBitacoraService {
   private realm: Realm | null = null;
@@ -107,7 +108,7 @@ class GpsBitacoraService {
     }));
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

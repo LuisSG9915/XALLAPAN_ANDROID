@@ -87,17 +87,17 @@ export class ReubicacionSyncTask extends SyncTask {
 
       const endpoint = this.getEndpoint();
       console.log(`[ReubicacionSync] 🌐 Endpoint: ${endpoint}`);
-      console.log(`[ReubicacionSync] 📦 Payload:`, JSON.stringify({ request: payload }, null, 2));
+      console.log(`[ReubicacionSync] 📦 Payload:`, JSON.stringify({ reubicaciones: payload }, null, 2));
 
       // Enviar al servidor
-      const response = await fetch(endpoint, {
+      const response = await this.fetchWithTimeout(endpoint, {
         method: "POST",
         headers: {
           accept: "application/json",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          request: payload,
+          reubicaciones: payload,
         }),
       });
 

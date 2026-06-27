@@ -171,16 +171,21 @@ export class SyncOrchestrator {
       try {
         console.log(`[SyncOrchestrator] Ejecutando tarea: ${task.getTableName()}`);
 
-        // Ejecutar con timeout de 10 segundos
-        const TIMEOUT_MS = 10000;
+        // Red de seguridad por tarea. El corte real de cada petición lo hace
+        // fetchWithTimeout (1 min) dentro de la task; esto solo cubre cuelgues
+        // que no sean de red (p. ej. un procesamiento local muy largo).
+        const TIMEOUT_MS = 90000;
         let timeoutId: number | null = null;
 
         const timeoutPromise = new Promise<SyncTaskResult>((resolve) => {
           timeoutId = setTimeout(() => {
-            console.warn(`[SyncOrchestrator] ⏱️ Timeout en ${task.getTableName()} (10s), saltando a siguiente tarea`);
+            const segundos = Math.round(TIMEOUT_MS / 1000);
+            console.warn(
+              `[SyncOrchestrator] ⏱️ ${task.getTableName()} excedió ${segundos}s, se omite y se continúa con la siguiente tarea`,
+            );
             resolve({
               success: false,
-              error: "Timeout: La tarea tardó más de 10 segundos",
+              error: `Tiempo de espera agotado (${segundos}s): la tarea tardó demasiado y se omitió. Revisa tu conexión.`,
               timedOut: true,
             });
           }, TIMEOUT_MS);
@@ -197,7 +202,7 @@ export class SyncOrchestrator {
         results.set(task.getTableName(), result);
 
         if (!result.success) {
-          const errorMsg = (result as any).timedOut ? `Timeout (>10s)` : result.error || "Error desconocido";
+          const errorMsg = result.error || "Error desconocido";
           errors.push(`${task.getTableName()}: ${errorMsg}`);
           console.error(`[SyncOrchestrator] Error en ${task.getTableName()}:`, errorMsg);
         } else {

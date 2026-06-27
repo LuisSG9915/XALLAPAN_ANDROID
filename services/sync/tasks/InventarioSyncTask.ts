@@ -37,7 +37,7 @@ export class InventarioSyncTask extends SyncTask {
     try {
       console.log(`[InventarioSyncTask] Obteniendo inventario para sucursal ${this.sucursal}...`);
 
-      const response = await fetch(this.getEndpoint());
+      const response = await this.fetchWithTimeout(this.getEndpoint());
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

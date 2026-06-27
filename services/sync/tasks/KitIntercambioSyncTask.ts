@@ -27,7 +27,7 @@ export class KitIntercambioSyncTask extends SyncTask {
     try {
       console.log("[KitIntercambioSyncTask] Obteniendo kits intercambio desde API...");
 
-      const response = await fetch(this.getEndpoint(), {
+      const response = await this.fetchWithTimeout(this.getEndpoint(), {
         headers: { accept: "application/json" },
       });
 
