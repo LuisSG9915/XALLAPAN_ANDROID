@@ -393,7 +393,6 @@ class FullSyncService {
    * - Precios   -> /api/MovilesVentas/precios?fechaInicial=YYYY-MM-DD HH:mm
    * - Cartera   -> /api/MovilesVentas/cartera?fechaInicial=YYYY-MM-DD
    * - Ventas    -> /api/MovilesVentas/ventas-erp-movil?fechaInicial=YYYY-MM-DD HH:mm&sucursal=...
-   * - Visitas   -> /api/MovilesVentas/visitas/full
    */
   async syncIncremental(
     sucursal: number = 1,
@@ -1353,29 +1352,6 @@ class FullSyncService {
       //   },
       // },
       {
-        name: "VisitasIncremental",
-        run: async () => {
-          const tableName = "Visita";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full`;
-          const fechaHoy = this.getMexicoNow();
-
-          const VisitaSyncService = (await import("./VisitaSyncService")).default;
-          const result = await VisitaSyncService.getInstance().syncByDate(fechaHoy);
-
-          if (!result.success) {
-            throw new Error(result.error || "Error sincronizando visitas");
-          }
-
-          return {
-            tabla: tableName,
-            endpoint: url,
-            registrosLeidos: result.registrosLeidos ?? 0,
-            registrosGuardados: result.registrosGuardados ?? 0,
-            registrosActualizados: result.registrosActualizados ?? 0,
-          };
-        },
-      },
-      {
         name: "VentasIncremental",
         run: async () => {
           const tableName = "Venta";
@@ -1522,6 +1498,103 @@ class FullSyncService {
 
             console.log(
               `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+            );
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados,
+              registrosActualizados,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500",
+            });
+            throw error;
+          }
+        },
+      },
+      {
+        name: "VisitasIncrementalSucursalPibote",
+        run: async () => {
+          const tableName = "Visita";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-pibote/${sucursal}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
+          );
+
+          try {
+            console.log("[Incremental] Visitas Pivote desde", url);
+
+            const response = await fetchWithTimeout(url, {
+              headers: { accept: "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} VisitasPivote`);
+            }
+
+            const visitasData = await response.json();
+            const registrosLeidos = Array.isArray(visitasData) ? visitasData.length : 0;
+            let registrosGuardados = 0;
+            let registrosActualizados = 0;
+
+            this.realm!.write(() => {
+              for (const visita of visitasData) {
+                const fechaVisita = visita.fecha ? new Date(visita.fecha) : new Date();
+                const fechaStr = fechaVisita.toISOString().split("T")[0];
+                const idCompuesto = `${visita.id}-${fechaStr}`;
+                const existing = this.realm!.objectForPrimaryKey("Visita", idCompuesto) as any;
+
+                // Preservar estado local 'visitado' si ya estaba marcado
+                const visitadoFinal =
+                  existing?.visitado === 1
+                    ? 1
+                    : typeof visita.visitado === "boolean"
+                    ? visita.visitado
+                      ? 1
+                      : 0
+                    : Number(visita.visitado);
+
+                const visitaData: any = {
+                  id: idCompuesto,
+                  idOriginal: visita.id,
+                  idCliente: visita.idCliente,
+                  ruta: visita.ruta ?? "",
+                  fecha: fechaVisita,
+                  orden: Number(visita.orden),
+                  tipo: Number(visita.tipo),
+                  visitado: visitadoFinal,
+                  syncedAr: nowMexico.toISOString(),
+                };
+
+                if (existing) {
+                  this.realm!.create("Visita", visitaData, UpdateMode.Modified);
+                  registrosActualizados++;
+                } else {
+                  this.realm!.create("Visita", visitaData);
+                  registrosGuardados++;
+                }
+              }
+            });
+
+            console.log(
+              `[Incremental] Visitas Pivote leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {

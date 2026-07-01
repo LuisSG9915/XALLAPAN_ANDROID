@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "android": "pnpm exec react-native run-android",
+    "android:install": "android\\gradlew.bat -p android app:installDebug",
+    "android:dev": "pnpm run android:install && pnpm run start",
+    "android:clean-locks": "powershell -NoProfile -Command \"android\\gradlew.bat --stop; Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item -Recurse -Force android\\app\\build\\intermediates\\incremental -ErrorAction SilentlyContinue; Write-Host 'Locks liberados'\"",
     "ios": "pnpm exec react-native run-ios",
     "lint": "eslint .",
     "start": "pnpm exec react-native start",
