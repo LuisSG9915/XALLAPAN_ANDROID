@@ -39,8 +39,10 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
   const [isBackgroundSyncEnabled, setIsBackgroundSyncEnabled] = useState<boolean>(false);
 
   useEffect(() => {
-    // Verificar si el servicio está corriendo al iniciar
-    setIsBackgroundSyncEnabled(BackgroundSyncService.isActive());
+    // Iniciar la sincronización automática si no está activa
+    if (!BackgroundSyncService.isActive()) {
+      BackgroundSyncService.start();
+    }
 
     // Suscribirse a cambios de estado
     const unsubscribe = BackgroundSyncService.subscribe((newState: BackgroundSyncState) => {
@@ -200,7 +202,7 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
         </View>
       </View>
 
-      {/* Toggle de sincronización persistente */}
+      {/* Toggle de sincronización persistente — desactivado: se inicia automáticamente */}
       {/* <View style={styles.toggleContainer}>
         <View style={styles.toggleLeft}>
           <Icon
@@ -210,9 +212,9 @@ export default function SyncStatusPanel({ compact = false }: SyncStatusPanelProp
             size={20}
           />
           <View style={styles.toggleTextContainer}>
-            <Text style={styles.toggleTitle}>Pantalla Apagada</Text>
+            <Text style={styles.toggleTitle}>Sincronización Automática</Text>
             <Text style={styles.toggleSubtitle}>
-              {isBackgroundSyncEnabled ? "Sincroniza cada 1 minuto" : "Desactivado"}
+              {isBackgroundSyncEnabled ? "Sincroniza cada 3 minutos" : "Desactivado"}
             </Text>
           </View>
         </View>

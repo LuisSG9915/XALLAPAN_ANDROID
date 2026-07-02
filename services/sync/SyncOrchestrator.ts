@@ -15,6 +15,8 @@ import { KitsSyncTask } from "./tasks/KitsSyncTask";
 import { KitIntercambioSyncTask } from "./tasks/KitIntercambioSyncTask";
 import { VisitaSyncTask } from "./tasks/VisitaSyncTask";
 import { DetalleVisitasSyncTask } from "./tasks/DetalleVisitasSyncTask";
+import { VisitasIncrementalSucursalPiboteSyncTask } from "./tasks/VisitasIncrementalSucursalPiboteSyncTask";
+import { VisitasVisitadosSucursalSyncTask } from "./tasks/VisitasVisitadosSucursalSyncTask";
 import { TipoVisitaSyncTask } from "./tasks/TipoVisitaSyncTask";
 import { VentasArrastreSyncTask } from "./tasks/VentasArrastreSyncTask";
 import { InventarioEnvaseSyncTask } from "./tasks/InventarioEnvaseSyncTask";
@@ -68,7 +70,11 @@ export class SyncOrchestrator {
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
       new VisitaSyncTask(this.realm, this.syncLogId),
+      // Descarga las visitas de la sucursal desde el endpoint pivote
+      new VisitasIncrementalSucursalPiboteSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       new DetalleVisitasSyncTask(this.realm, this.syncLogId, this.idUsuario),
+      // Descarga las visitas ya visitadas de la sucursal desde el servidor
+      new VisitasVisitadosSucursalSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Arrastre de envases antes de ventas - prioridad 95
       new InventarioEnvaseSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Historial de envases - descarga desde servidor

@@ -180,11 +180,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       // 3. Precio por defecto (lista 13 - DOMIC.)
       // NOTA: En la tabla Precio, el campo claveProd contiene el ID del producto, no la clave_prod
 
-      console.log(`[obtenerPrecioProducto] 🔍 Buscando precio para producto ID: ${idProducto}`);
-      console.log(`[obtenerPrecioProducto] Precios promo disponibles: ${preciosPromo?.length || 0}`);
-      console.log(`[obtenerPrecioProducto] Precios cliente disponibles: ${preciosCliente?.length || 0}`);
-      console.log(`[obtenerPrecioProducto] Precios default disponibles: ${preciosDefault?.length || 0}`);
-
+    
       // Mapa de precios promocionales
       if (preciosPromo) {
         const precioPromo = preciosPromo.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
@@ -243,14 +239,11 @@ export default function SalesScreen({ route }: { route?: any }) {
       preciosDefaultMap?: Map<number, number>,
       preciosPromoMap?: Map<number, number>,
     ): { usarPrecioKit: boolean; precioKit?: number } => {
-      console.log(`[determinarPrecioKit] 🔍 Analizando kit productoId=${productoId}`);
 
       // Obtener los kits para este producto
       const kitsDelProducto = kitsData.filter((k: any) => k.idProducto === productoId);
-      console.log(`[determinarPrecioKit]   -> Encontrados ${kitsDelProducto.length} kits para este producto`);
 
       if (kitsDelProducto.length === 0) {
-        console.log(`[determinarPrecioKit]   -> No hay kits, retornando usarPrecioKit=false`);
         return { usarPrecioKit: false };
       }
 
@@ -288,14 +281,9 @@ export default function SalesScreen({ route }: { route?: any }) {
           return undefined;
         };
 
-        console.log(
-          `[determinarPrecioKit]   -> Kit id=${kit.id}, idInsumo=${kit.idInsumo}, precioCatalogo del insumo=${insumoProducto?.precioCatalogo}, kit.precio=${kit.precio}`,
-        );
-
         // Si el insumo tiene precioCatalogo=true: buscar precio en listas del cliente (promo, cliente, default)
         // Si el insumo NO tiene precioCatalogo: usar precio fijo del catálogo de kits (kit.precio)
         if (insumoProducto?.precioCatalogo === true) {
-          console.log(`[determinarPrecioKit]   -> ✓ Insumo tiene precioCatalogo=true, buscando en listas de precios`);
           const claveInsumo = kit.idInsumo;
           let precioInsumoLista: number | undefined;
           const precioPromo = buscarPrecioInsumo(preciosPromoMap);
@@ -303,49 +291,34 @@ export default function SalesScreen({ route }: { route?: any }) {
           const precioDefault = buscarPrecioInsumo(preciosDefaultMap);
           if (precioPromo !== undefined) {
             precioInsumoLista = precioPromo;
-            console.log(`[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde PROMO: ${precioInsumoLista}`);
           } else if (precioCliente !== undefined) {
             precioInsumoLista = precioCliente;
-            console.log(
-              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista cliente: ${precioInsumoLista}`,
-            );
+           
           } else if (precioDefault !== undefined) {
             precioInsumoLista = precioDefault;
-            console.log(
-              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} desde lista default: ${precioInsumoLista}`,
-            );
+         
           }
           if (precioInsumoLista === undefined) {
             precioInsumoLista = kit.precio || 0;
-            console.log(
-              `[determinarPrecioKit]   -> Precio insumo ${claveInsumo} no encontrado en listas, usando kit.precio: ${precioInsumoLista}`,
-            );
+        
           }
           const precioInsumo = (precioInsumoLista || 0) * (kit.cantidad || 1);
           precioDelKit += precioInsumo;
-          console.log(
-            `[determinarPrecioKit]   -> Precio insumo lista: ${precioInsumoLista} * ${kit.cantidad} = ${precioInsumo}`,
-          );
+         
         } else {
           // El insumo NO tiene precioCatalogo: usar precio fijo del catálogo de kits
-          console.log(`[determinarPrecioKit]   -> ✓ Insumo NO tiene precioCatalogo, usando precio fijo del catálogo`);
           const precioInsumo = (kit.precio || 0) * (kit.cantidad || 1);
           precioDelKit += precioInsumo;
-          console.log(
-            `[determinarPrecioKit]   -> Precio insumo catalogo: ${kit.precio} * ${kit.cantidad} = ${precioInsumo}`,
-          );
+        
         }
       }
 
-      console.log(`[determinarPrecioKit]   -> Resumen: precio total del kit calculado = ${precioDelKit}`);
 
       // Siempre usar el precio calculado del kit cuando hay insumos y el precio > 0
       if (precioDelKit > 0) {
-        console.log(`[determinarPrecioKit]   -> ✓✓✓ DECISIÓN: USAR PRECIO CALCULADO = ${precioDelKit}`);
         return { usarPrecioKit: true, precioKit: precioDelKit };
       }
 
-      console.log(`[determinarPrecioKit]   -> ✗✗✗ DECISIÓN: NO usar precio del kit (precio=0)`);
       return { usarPrecioKit: false };
     },
     [],
@@ -360,21 +333,17 @@ export default function SalesScreen({ route }: { route?: any }) {
       preciosDefault?: any[],
       preciosPromo?: any[],
     ): Producto[] => {
-      console.log({ productosData });
       // DEBUG intercambio/prestamo (ahora detectado por cat_kits)
-      console.log(`[Sales] DEBUG total kits en kitsData: ${kitsData.length}`);
       const kitsConRecuperaOtro = kitsData.filter((k: any) => k.recuperaEnvaseOtro);
       const kitsConControlPresamo = kitsData.filter((k: any) => k.controlPresamo);
-      console.log(`[Sales] DEBUG kits con recuperaEnvaseOtro=true: ${kitsConRecuperaOtro.length}`);
-      console.log(`[Sales] DEBUG kits con controlPresamo=true: ${kitsConControlPresamo.length}`);
-      kitsConRecuperaOtro.forEach((k: any) =>
-        console.log(
-          `[Sales] DEBUG kit recuperaEnvaseOtro: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`,
-        ),
-      );
-      kitsConControlPresamo.forEach((k: any) =>
-        console.log(`[Sales] DEBUG kit controlPresamo: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`),
-      );
+      // kitsConRecuperaOtro.forEach((k: any) =>
+      //   console.log(
+      //     `[Sales] DEBUG kit recuperaEnvaseOtro: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`,
+      //   ),
+      // );
+      // kitsConControlPresamo.forEach((k: any) =>
+      //   console.log(`[Sales] DEBUG kit controlPresamo: id=${k.id}, idProducto=${k.idProducto}, idInsumo=${k.idInsumo}`),
+      // );
       // Mapa de precios promocionales (PRIMERA JERARQUÍA)
       const preciosPromoMap = new Map<number, number>();
       // ... rest of the code remains the same ...
@@ -417,15 +386,8 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Inventario por claveProd de la sucursal actual
       const inventarioPorClave = new Map<number, number>();
-      console.log(`[SalesScreen] currentSucursal=${currentSucursal} total inventarioData=${inventarioData.length}`);
-      console.log(
-        `[SalesScreen] Inventario claveProd 12 o 16 (todos):`,
-        inventarioData
-          .filter((i: any) => i.claveProd === 12 || i.claveProd === 16)
-          .map((i: any) => ({ id: i.id, claveProd: i.claveProd, saldo: i.saldo, sucursal: i.sucursal })),
-      );
+  
       const inventarioExcluido = inventarioData.filter((i: any) => i.sucursal == currentSucursal && i.id >= 10000);
-      console.log(`[SalesScreen] Inventario excluido por id>=10000: ${inventarioExcluido.length}`);
       inventarioData
         .filter((i: any) => i.sucursal == currentSucursal && i.id < 10000)
         .forEach((i: any) => {
@@ -434,11 +396,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           const saldoActual = inventarioPorClave.get(clave) || 0;
           inventarioPorClave.set(clave, saldoActual + (i.saldo || 0));
         });
-      console.log(
-        `[SalesScreen] inventarioPorClave claveProd=12: ${inventarioPorClave.get(
-          12,
-        )}, claveProd=16: ${inventarioPorClave.get(16)}`,
-      );
+      
 
       // Kits por idProducto
       const kitsPorProducto = new Map<number, any[]>();
@@ -463,18 +421,10 @@ export default function SalesScreen({ route }: { route?: any }) {
           if (!componentes.length) return 0;
           let minimo = Infinity;
 
-          console.log(
-            `[calcularExistencia] Kit productoId=${productoId} componentes:`,
-            componentes.map((c: any) => ({
-              idInsumo: c.idInsumo,
-              cantidad: c.cantidad,
-              noRecuperaEnvase: c.noRecuperaEnvase,
-            })),
-          );
+          
 
           for (const comp of componentes) {
             if (comp.noRecuperaEnvase) {
-              console.log(`[calcularExistencia] Saltando idInsumo=${comp.idInsumo} (noRecuperaEnvase=true)`);
               continue;
             }
             const cantidadInsumo = comp.cantidad ? Number(comp.cantidad) : 0;
@@ -492,11 +442,9 @@ export default function SalesScreen({ route }: { route?: any }) {
 
             const saldo = inventarioPorClave.get(claveInsumo) || 0;
             const posible = Math.floor(saldo / cantidadInsumo);
-            console.log(`[calcularExistencia] idInsumo=${claveInsumo} saldo=${saldo} posible=${posible}`);
             minimo = Math.min(minimo, posible);
           }
 
-          console.log(`[calcularExistencia] Kit productoId=${productoId} minimo=${minimo === Infinity ? 0 : minimo}`);
           return minimo === Infinity ? 0 : minimo;
         }
 
@@ -590,9 +538,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             preciosPromoMap,
           );
           if (usarPrecioKit && precioKit !== undefined) {
-            console.log(
-              `[buildProductosFormateados] Kit ${productoId} usando precio del catálogo: $${precioKit} (en lugar de lista: $${precio})`,
-            );
+          
             precio = precioKit;
           }
         }
@@ -616,12 +562,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         };
 
         if (producto.omitirMovil === 1 || productoBase?.envaseRecibe) {
-          console.log(
-            `[Sales][MAP] clave=${producto.claveProd} id=${productoId} ` +
-              `omitirMovil=${String(productoBase?.omitirMovil)} (tipo=${typeof productoBase?.omitirMovil}) ` +
-              `envaseRecibe=${String(productoBase?.envaseRecibe)} (tipo=${typeof productoBase?.envaseRecibe}) ` +
-              `existencia=${existencia}`,
-          );
+         
         }
 
         // Solo agregar si no existe ya un producto con este ID, o si el nuevo tiene mejor precio
@@ -873,7 +814,6 @@ export default function SalesScreen({ route }: { route?: any }) {
       console.log(
         `[Sales] Total clientes: ${clientesFormateados.length}, con coordenadas válidas: ${clientesConCoords.length}`,
       );
-      console.log("clientesFormateados", clientesFormateados);
       if (clientesConCoords.length > 0) {
         console.log("[Sales] Ejemplo cliente con coords:", JSON.stringify(clientesConCoords[0]));
       }
@@ -901,9 +841,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       const idsClientesVisitaHoy = new Set(
         visitasDelDia.filter((v: any) => v.visitado === 0).map((v: any) => v.idCliente),
       );
-      console.log(`[Sales] Clientes agendados pendientes (visitado===0): ${idsClientesVisitaHoy.size}`);
       const clientesConVisitaHoy = clientesFormateados.filter((c) => idsClientesVisitaHoy.has(c.id));
-      console.log(`[Sales] clientesEntregaDia (match con clientes): ${clientesConVisitaHoy.length}`);
       setClientesEntregaDia(clientesConVisitaHoy);
 
       // Guardar IDs de todos los clientes agendados hoy
@@ -955,12 +893,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
         return p.existencia > 0;
       });
-      console.log(
-        `[Sales][FILTRO-1] currentUser.envaseRuta=${String(currentUser?.envaseRuta)} | ` +
-          `productos omitirMovil=1: ${productosFormateados.filter((p) => p.omitirMovil === 1).length}`,
-      );
-      console.log("1PRODUCTOSFORMATEADOS", productosFormateados);
-      console.log(preciosData);
+
       setProductos(productosFormateados);
       // Por defecto mostrar solo productos normales (sin kits ni promociones)
       // PERO incluir kits que tengan recuperaEnvase=true
@@ -1764,14 +1697,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         }
         return p.existencia > 0;
       });
-      console.log(
-        `[Sales][FILTRO-2] currentUser.envaseRuta=${String(currentUser?.envaseRuta)} | ` +
-          `productos omitirMovil=1: ${productosFormateados.filter((p) => p.omitirMovil === 1).length}`,
-      );
-      console.log(productosData);
-      console.log("2PRODUCTOSFORMATEADOS", productosFormateados);
-      console.log("preciosCliente", preciosCliente);
-      console.log("preciosDefault", preciosDefault);
+      
       setProductos(productosFormateados);
 
       const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
