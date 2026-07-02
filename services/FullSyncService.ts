@@ -24,8 +24,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 43,
+        schemaVersion: 44,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v44: Agregar campos sincronizado y agenda a DetalleVisitas
+          if (oldRealm.schemaVersion < 44) {
+            console.log("[Migration v44] Agregando campos sincronizado y agenda a DetalleVisitas");
+          }
+
           // Migración v43: Agregar campo dobleTicket a Usuario
           if (oldRealm.schemaVersion < 43) {
             console.log("[Migration v43] Agregando campo dobleTicket a Usuario");
@@ -1639,8 +1644,7 @@ class FullSyncService {
           try {
             console.log("[Incremental] DetalleVisitas - Enviando visitas pendientes...");
 
-            const fiveMinutesAgo = new Date(nowMexico.getTime() - 5 * 60 * 1000);
-            const detallesVisitas = this.realm!.objects("DetalleVisitas").filtered("syncedAt < $0", fiveMinutesAgo);
+            const detallesVisitas = this.realm!.objects("DetalleVisitas").filtered("sincronizado == false");
 
             if (detallesVisitas.length === 0) {
               console.log("[Incremental] DetalleVisitas - No hay visitas pendientes");
@@ -1713,6 +1717,7 @@ class FullSyncService {
             this.realm!.write(() => {
               for (const detalle of detallesVisitas) {
                 (detalle as any).syncedAt = nowSync;
+                (detalle as any).sincronizado = true;
               }
             });
 
@@ -1735,6 +1740,94 @@ class FullSyncService {
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : "Error desconocido";
             console.error("[Incremental] DetalleVisitas - Error:", error);
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: false,
+              error: errorMsg,
+              errorCode: "500",
+            });
+
+            throw error;
+          }
+        },
+      },
+      {
+        name: "VisitasVisitadosSucursal",
+        run: async () => {
+          const tableName = "DetalleVisitas";
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-visitados/${sucursal}`;
+          const idBitacora = await BitacoraService.registrarInicioSync(
+            tableName,
+            "incremental",
+            "background",
+            idUsuario,
+            sucursal,
+            url,
+          );
+
+          try {
+            console.log("[Incremental] Visitas Visitados desde", url);
+
+            const response = await fetchWithTimeout(url, {
+              headers: { accept: "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status} VisitasVisitados`);
+            }
+
+            const visitadosData = await response.json();
+            const registros = Array.isArray(visitadosData) ? visitadosData : [];
+            const registrosLeidos = registros.length;
+
+            this.realm!.write(() => {
+              // Eliminar información anterior proveniente del servidor (ya sincronizada),
+              // preservando los registros locales pendientes de enviar (sincronizado == false)
+              const sincronizados = this.realm!.objects("DetalleVisitas").filtered("sincronizado == true");
+              this.realm!.delete(sincronizados);
+
+              // Insertar la lista autoritativa del servidor
+              for (const v of registros) {
+                const fechaInicio = v.fechaInicio ? new Date(v.fechaInicio) : null;
+                const fechaFin = v.fechaFin ? new Date(v.fechaFin) : null;
+
+                this.realm!.create(
+                  "DetalleVisitas",
+                  {
+                    id: String(v.id),
+                    fechaInicio,
+                    fechaFin,
+                    idCliente: v.idCliente != null ? Number(v.idCliente) : null,
+                    idUsuario: v.idUsuario != null ? Number(v.idUsuario) : null,
+                    idRuta: v.idRuta != null ? Number(v.idRuta) : null,
+                    tipoVisita: v.tipoVisita != null ? Number(v.tipoVisita) : null,
+                    agenda: v.agenda != null ? Number(v.agenda) : null,
+                    syncedAt: nowMexico,
+                    sincronizado: true,
+                  },
+                  UpdateMode.Modified,
+                );
+              }
+            });
+
+            console.log(`[Incremental] Visitas Visitados - ✅ ${registrosLeidos} registros insertados`);
+
+            await BitacoraService.registrarFinSync(idBitacora, {
+              exitoso: true,
+              registrosLeidos,
+              registrosGuardados: registrosLeidos,
+              registrosActualizados: 0,
+            });
+
+            return {
+              tabla: tableName,
+              endpoint: url,
+              registrosLeidos,
+              registrosGuardados: registrosLeidos,
+              registrosActualizados: 0,
+            };
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+            console.error("[Incremental] Visitas Visitados - Error:", error);
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: false,
@@ -3834,7 +3927,7 @@ class FullSyncService {
     );
   }
 
-  getVisitasRealizadasPaginated(offset: number = 0, limit: number = 50): any[] {
+  getVisitasRealizadasPaginated(offset: number = 0, limit: number = 5000): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm

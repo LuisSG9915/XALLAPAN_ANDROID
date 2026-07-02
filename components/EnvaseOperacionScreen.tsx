@@ -16,7 +16,7 @@ import {
 import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import LocationService, { LocationCoordinates } from "../services/LocationService";
+import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import TicketPrinter from "../services/TicketPrinter";
 import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
@@ -149,19 +149,6 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     };
     init();
   }, []);
-
-  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  };
 
   const actualizarCoordenadas = async () => {
     setLoadingCercanos(true);

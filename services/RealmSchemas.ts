@@ -299,7 +299,9 @@ export const DetalleVisitasSchema = {
     idUsuario: "int?",
     idRuta: "int?",
     tipoVisita: "int?",
+    agenda: "int?",
     syncedAt: "date",
+    sincronizado: { type: "bool", default: false },
   },
   primaryKey: "id",
 };

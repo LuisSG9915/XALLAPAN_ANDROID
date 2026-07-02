@@ -49,10 +49,7 @@ export class DetalleVisitasSyncTask extends SyncTask {
     try {
       console.log(`[DetalleVisitasSyncTask] Enviando visitas pendientes...`);
 
-      const nowMexico = this.getMexicoNow();
-      const fiveMinutesAgo = new Date(nowMexico.getTime() - 5 * 60 * 1000);
-
-      const detallesVisitas = this.realm.objects("DetalleVisitas").filtered("syncedAt < $0", fiveMinutesAgo);
+      const detallesVisitas = this.realm.objects("DetalleVisitas").filtered("sincronizado == false");
 
       if (detallesVisitas.length === 0) {
         console.log(`[DetalleVisitasSyncTask] No hay visitas pendientes de sincronizar`);
@@ -95,6 +92,7 @@ export class DetalleVisitasSyncTask extends SyncTask {
       this.realm.write(() => {
         for (const detalle of detallesVisitas) {
           (detalle as any).syncedAt = nowSync;
+          (detalle as any).sincronizado = true;
         }
       });
 

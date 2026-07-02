@@ -1,5 +1,4 @@
 import Realm from "realm";
-import { ALL_SCHEMAS } from "./RealmSchemas";
 
 class DetalleVisitasService {
   private static instance: DetalleVisitasService;
@@ -53,6 +52,7 @@ class DetalleVisitasService {
           idRuta,
           tipoVisita: tipoVisita ?? null,
           syncedAt: new Date(0),
+          sincronizado: false,
         });
       });
 
@@ -119,6 +119,7 @@ class DetalleVisitasService {
           idRuta,
           tipoVisita: tipoVisita ?? null,
           syncedAt: new Date(0),
+          sincronizado: false,
         });
       });
 

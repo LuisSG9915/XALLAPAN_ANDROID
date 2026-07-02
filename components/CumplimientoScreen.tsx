@@ -20,7 +20,7 @@ import Realm from "realm";
 import { ALL_SCHEMAS } from "../services/RealmSchemas";
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
-import LocationService, { LocationCoordinates } from "../services/LocationService";
+import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import ReubicacionService from "../services/ReubicacionService";
 
 interface Visita {
@@ -122,6 +122,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "todos">("agendados");
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
+  const [clientesVisitadosHoy, setClientesVisitadosHoy] = useState<Set<number>>(new Set());
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
@@ -137,26 +138,16 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const tiposVisita = getTipoVisitas();
 
-  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  };
-
   const cargarDatos = useCallback((fecha: Date, sucursal: number, showLoading = true) => {
     if (showLoading) setLoading(true);
     Promise.all([
       VisitaSyncService.getInstance().getVisitasByFecha(fecha, sucursal),
       VisitaSyncService.getInstance().getEstadisticasCumplimiento(fecha, sucursal),
+      VisitaSyncService.getInstance().getClientesVisitadosHoy(sucursal),
     ])
-      .then(([visitasDelDia, stats]) => {
+      .then(([visitasDelDia, stats, visitadosHoy]) => {
+        setClientesVisitadosHoy(visitadosHoy);
+
         // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
         const visitasConNombres = visitasDelDia.map((visita: any) => {
           const idClienteNum = Number(visita.idCliente);
@@ -224,48 +215,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     // Verificar ubicación del vendedor
     if (visita.latitud && visita.longitud) {
-      try {
-        console.log("[Cumplimiento] Seteando validandoUbicacion = true");
-        setValidandoUbicacion(true);
-        console.log("[Cumplimiento] 📍 Obteniendo mejor lectura GPS...");
-        const ubicacionVendedor = await LocationService.getBestLocation();
-
-        if (ubicacionVendedor) {
-          console.log("[Cumplimiento] Ubicación obtenida:", ubicacionVendedor);
-          const distancia = calcularDistancia(
-            ubicacionVendedor.latitude,
-            ubicacionVendedor.longitude,
-            visita.latitud,
-            visita.longitud,
-          );
-          console.log("[Cumplimiento] Distancia calculada:", Math.round(distancia), "metros");
-
-          const metrosPermitidos = userMetros || visita.metros || 100; // Prioridad: Usuario > Cliente > Default (100)
-          if (distancia > metrosPermitidos) {
-            console.log("[Cumplimiento] Distancia excede el límite permitido");
-            Alert.alert(
-              "Ubicación inválida",
-              `Estás a ${Math.round(
-                distancia,
-              )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.`,
-            );
-            setValidandoUbicacion(false);
-            return;
-          }
-
-          console.log("[Cumplimiento] Validación exitosa, seteando validandoUbicacion = false");
-          setValidandoUbicacion(false);
-        } else {
-          setValidandoUbicacion(false);
-          Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
-          return;
-        }
-      } catch (locationError) {
-        setValidandoUbicacion(false);
-        console.error("[Cumplimiento] ⚠️ Error al obtener ubicación:", locationError);
-        Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.");
-        return;
-      }
+      setValidandoUbicacion(true);
+      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+        visita.latitud,
+        visita.longitud,
+        userMetros ?? visita.metros ?? 100, // Prioridad: Usuario > Cliente > Default (100)
+      );
+      setValidandoUbicacion(false);
+      if (!ubicacionValida) return;
     } else {
       Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
       return;
@@ -417,6 +374,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     navigation.navigate("Sales", {
       clienteId: cliente.id,
       nombreCliente: cliente.nombre,
+      desdeVisita: true,
     });
   };
 
@@ -754,7 +712,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
       );
     };
     const visitaHoy = visitas.find((v) => v.idCliente === cliente.id && isSameDay(v.fecha, fechaSeleccionada));
-    const fueVisitadoHoy = visitaHoy?.visitado === 1;
+    const fueVisitadoHoy = visitaHoy?.visitado === 1 || clientesVisitadosHoy.has(cliente.id);
 
     return (
       <View style={styles.visitaContainer}>

@@ -18,7 +18,7 @@ import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import BackgroundSyncService from "../services/BackgroundSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import LocationService, { LocationCoordinates } from "../services/LocationService";
+import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import ReubicacionService from "../services/ReubicacionService";
@@ -1019,19 +1019,6 @@ export default function SalesScreen({ route }: { route?: any }) {
     setVisitaConfirmModalOpen(true);
   };
 
-  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  };
-
   // Obtener tipos de visita desde Realm (como CumplimientoScreen)
   const getTipoVisitas = () => {
     if (!FullSyncService.isServiceInitialized()) return [];
@@ -1089,47 +1076,14 @@ export default function SalesScreen({ route }: { route?: any }) {
     if (omitirValidacionUbicacion) {
       console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
     } else if (cliente.latitud && cliente.longitud) {
-      try {
-        setValidandoUbicacion(true);
-        const ubicacionVendedor = await LocationService.getBestLocation();
-
-        if (ubicacionVendedor) {
-          const distancia = calcularDistancia(
-            ubicacionVendedor.latitude,
-            ubicacionVendedor.longitude,
-            cliente.latitud,
-            cliente.longitud,
-          );
-          const accuracyInfo = ubicacionVendedor.accuracy
-            ? ` (precisión GPS: ±${Math.round(ubicacionVendedor.accuracy)} m)`
-            : "";
-          console.log(`[Sales] Distancia al cliente: ${Math.round(distancia)} m${accuracyInfo}`);
-
-          const metrosPermitidos = userMetros || cliente.metros || 100;
-          // Considerar la imprecisión del GPS en el cálculo
-          const distanciaEfectiva = distancia - (ubicacionVendedor.accuracy ?? 0);
-          if (distanciaEfectiva > metrosPermitidos) {
-            Alert.alert(
-              "Ubicación inválida",
-              `Estás a ${Math.round(
-                distancia,
-              )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.${accuracyInfo}`,
-            );
-            setValidandoUbicacion(false);
-            return;
-          }
-          setValidandoUbicacion(false);
-        } else {
-          setValidandoUbicacion(false);
-          Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
-          return;
-        }
-      } catch (locationError) {
-        setValidandoUbicacion(false);
-        console.error("[Sales] Error al obtener ubicación:", locationError);
-        Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación.");
-        return;
-      }
+      setValidandoUbicacion(true);
+      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+        cliente.latitud,
+        cliente.longitud,
+        userMetros ?? cliente.metros ?? 100,
+      );
+      setValidandoUbicacion(false);
+      if (!ubicacionValida) return;
     } else {
       Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
       return;
@@ -1226,6 +1180,36 @@ export default function SalesScreen({ route }: { route?: any }) {
     setClienteParaVisitar(null);
   };
 
+  // Marca la visita agendada del día (visitado === 0) de un cliente como visitada.
+  // Consulta la BD directamente para obtener el id real de la visita, ya que
+  // visitasDelDiaMap solo contiene clientes ya visitados (sin el id de la visita).
+  const marcarVisitaAgendadaComoVisitada = async (clienteId: number): Promise<void> => {
+    try {
+      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), currentSucursal);
+      const visitaCliente = visitasDelDia
+        .filter((f: any) => f.visitado === 0)
+        .find((v: any) => v.idCliente === clienteId);
+
+      if (!visitaCliente) {
+        console.log(`[Sales] No hay visita agendada pendiente para el cliente ${clienteId}`);
+        return;
+      }
+
+      await VisitaSyncService.getInstance().marcarVisitado(visitaCliente.id, 1, visitaCliente.fecha);
+      console.log(`[Sales] ✅ Visita ${visitaCliente.id} marcada como visitada (cliente ${clienteId})`);
+
+      // Reflejar el cambio en el estado local de inmediato
+      setVisitasDelDiaMap((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(clienteId, { ...visitaCliente, visitado: 1 });
+        return newMap;
+      });
+      setClientesEntregaDia((prev) => prev.filter((c) => c.id !== clienteId));
+    } catch (error) {
+      console.error("[Sales] ⚠️ Error al marcar visita agendada como visitada:", error);
+    }
+  };
+
   const handleConfirmarVisita = async (desdeaIniciarVisita: boolean) => {
     console.log("[Sales] handleConfirmarVisita iniciado. desdeaIniciarVisita:", desdeaIniciarVisita);
     console.log("[Sales] Estado validandoUbicacion al inicio:", validandoUbicacion);
@@ -1246,55 +1230,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (omitirValidacionUbicacion) {
         console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
       } else if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
-        try {
-          console.log("[Sales] Seteando validandoUbicacion = true");
-          setValidandoUbicacion(true);
-          console.log("[Sales] 📍 Obteniendo mejor lectura GPS...");
-          const ubicacionVendedor = await LocationService.getBestLocation();
-
-          if (ubicacionVendedor) {
-            console.log("[Sales] Ubicación obtenida:", ubicacionVendedor);
-            const distancia = calcularDistancia(
-              ubicacionVendedor.latitude,
-              ubicacionVendedor.longitude,
-              clientePendienteVisita.latitud,
-              clientePendienteVisita.longitud,
-            );
-            const accuracyInfo = ubicacionVendedor.accuracy
-              ? ` (precisión GPS: ±${Math.round(ubicacionVendedor.accuracy)} m)`
-              : "";
-            console.log(`[Sales] Distancia calculada: ${Math.round(distancia)} m${accuracyInfo}`);
-
-            const metrosPermitidos = userMetros || clientePendienteVisita.metros || 100;
-            // Descontar la imprecisión del GPS antes de comparar
-            const distanciaEfectiva = distancia - (ubicacionVendedor.accuracy ?? 0);
-            if (distanciaEfectiva > metrosPermitidos) {
-              console.log("[Sales] Distancia excede el límite permitido");
-              Alert.alert(
-                "Ubicación inválida",
-                `Estás a ${Math.round(
-                  distancia,
-                )} metros del cliente. La distancia máxima permitida es de ${metrosPermitidos} metros.${accuracyInfo}`,
-              );
-              setValidandoUbicacion(false);
-              return;
-            }
-
-            console.log("[Sales] Validación exitosa");
-            setValidandoUbicacion(false);
-          } else {
-            setValidandoUbicacion(false);
-            Alert.alert(
-              "Ubicación no disponible",
-              "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.",
-            );
-            setVisitaConfirmModalOpen(false);
-            return;
-          }
-        } catch (locationError) {
-          setValidandoUbicacion(false);
-          console.error("[Sales] ⚠️ Error al obtener ubicación:", locationError);
-          Alert.alert("Error de ubicación", "No se pudo verificar tu ubicación. Verifica que el GPS esté activado.");
+        console.log("[Sales] 📍 Validando ubicación del vendedor...");
+        setValidandoUbicacion(true);
+        const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+          clientePendienteVisita.latitud,
+          clientePendienteVisita.longitud,
+          userMetros ?? clientePendienteVisita.metros ?? 100,
+        );
+        setValidandoUbicacion(false);
+        if (!ubicacionValida) {
           setVisitaConfirmModalOpen(false);
           return;
         }
@@ -1308,6 +1252,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             clientePendienteVisita.id,
             currentUser?.id || 0,
             currentSucursal,
+            1,
           );
           console.log("[Sales] Visita registrada con ID:", detalleId);
           setCurrentDetalleVisitaId(detalleId);
@@ -1315,6 +1260,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         } catch (error) {
           console.error("[Sales] ⚠️ Error al registrar inicio de visita:", error);
         }
+
+        // Marcar la visita agendada del día como visitada (consulta directa a BD)
+        await marcarVisitaAgendadaComoVisitada(clientePendienteVisita.id);
 
         // Continuar con el proceso de venta
         setSelectedClient(clientePendienteVisita);
@@ -1336,6 +1284,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           clientePendienteVisita.id,
           currentUser?.id || 0,
           currentSucursal,
+          1,
         );
         console.log("[Sales] Visita registrada con ID:", detalleId);
         setCurrentDetalleVisitaId(detalleId);
@@ -1343,6 +1292,9 @@ export default function SalesScreen({ route }: { route?: any }) {
       } catch (error) {
         console.error("[Sales] ⚠️ Error al registrar inicio de visita:", error);
       }
+
+      // Marcar la visita agendada del día como visitada (consulta directa a BD)
+      await marcarVisitaAgendadaComoVisitada(clientePendienteVisita.id);
     }
 
     setSelectedClient(clientePendienteVisita);
