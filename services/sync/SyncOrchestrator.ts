@@ -69,7 +69,8 @@ export class SyncOrchestrator {
       // new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
       new TipoVisitaSyncTask(this.realm, this.syncLogId),
-      new VisitaSyncTask(this.realm, this.syncLogId),
+      // Desactivado: usa endpoint /api/MovilesVentas/visitas/full sin sucursal
+      // new VisitaSyncTask(this.realm, this.syncLogId),
       // Descarga las visitas de la sucursal desde el endpoint pivote
       new VisitasIncrementalSucursalPiboteSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       new DetalleVisitasSyncTask(this.realm, this.syncLogId, this.idUsuario),

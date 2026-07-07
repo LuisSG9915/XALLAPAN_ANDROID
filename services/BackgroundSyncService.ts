@@ -91,17 +91,39 @@ class BackgroundSyncService {
       return;
     }
 
-    // Sincronización automática desactivada por configuración temporal.
-    // El usuario puede sincronizar manualmente con el botón de App.tsx.
-    console.log("[BackgroundSync] 🚫 Sincronización automática desactivada. Solo manual disponible.");
+    try {
+      // Configurar BackgroundFetch para sincronización en segundo plano
+      await this.configureBackgroundFetch();
 
-    this.updateState({
-      status: "idle",
-      nextSyncTime: null,
-      errorMessage: "Sincronización automática desactivada (solo manual)",
-    });
+      // Iniciar intervalo de sincronización en primer plano (cada 3 minutos)
+      this.intervalId = setInterval(() => {
+        this.performSync();
+      }, this.SYNC_INTERVAL_MS);
 
-    // No se configura setInterval ni BackgroundFetch para evitar syncs automáticas.
+      const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
+      this.updateState({
+        status: "idle",
+        nextSyncTime: nextSync,
+        errorMessage: null,
+      });
+
+      console.log(
+        "[BackgroundSync] ✅ Sincronización automática iniciada. Intervalo:",
+        this.SYNC_INTERVAL_MS,
+        "ms",
+      );
+
+      // Ejecutar sincronización inicial sin bloquear
+      this.performSync().catch((error) => {
+        console.error("[BackgroundSync] Error en sincronización inicial:", error);
+      });
+    } catch (error) {
+      console.error("[BackgroundSync] ❌ Error al iniciar sincronización automática:", error);
+      this.updateState({
+        status: "error",
+        errorMessage: "No se pudo iniciar la sincronización automática",
+      });
+    }
   }
 
   /**

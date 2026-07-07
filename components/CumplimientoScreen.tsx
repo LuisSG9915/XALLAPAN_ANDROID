@@ -17,7 +17,6 @@ import { Icon } from "react-native-elements";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import Realm from "realm";
-import { ALL_SCHEMAS } from "../services/RealmSchemas";
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
 import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
@@ -146,6 +145,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
       VisitaSyncService.getInstance().getClientesVisitadosHoy(sucursal),
     ])
       .then(([visitasDelDia, stats, visitadosHoy]) => {
+        console.log("[Cumplimiento] cargarDatos -> visitadosHoy:", Array.from(visitadosHoy), "sucursal:", sucursal, "fecha:", fecha.toISOString());
         setClientesVisitadosHoy(visitadosHoy);
 
         // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
@@ -220,6 +220,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         visita.latitud,
         visita.longitud,
         userMetros ?? visita.metros ?? 100, // Prioridad: Usuario > Cliente > Default (100)
+        undefined,
+        {
+          nombre: visita.nombreCliente,
+          lat: visita.latitud,
+          lng: visita.longitud,
+        },
       );
       setValidandoUbicacion(false);
       if (!ubicacionValida) return;
@@ -330,11 +336,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const sincronizarFecha = async () => {
     setRefreshing(true);
-    try {
-      await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
-    } catch (err) {
-      console.warn("[Cumplimiento] Error al sincronizar:", err);
-    }
+    // Desactivado: usa endpoint /api/MovilesVentas/visitas/full sin sucursal
+    // try {
+    //   await VisitaSyncService.getInstance().syncByDate(fechaSeleccionada);
+    // } catch (err) {
+    //   console.warn("[Cumplimiento] Error al sincronizar:", err);
+    // }
     cargarDatos(fechaSeleccionada, currentSucursal);
   };
 
@@ -361,7 +368,24 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     return `${formatoHora(horaInicio)} - ${formatoHora(horaFin)}`;
   };
 
-  const handleIrAVentas = (visita: VisitaConCliente) => {
+  const handleIrAVentas = async (visita: VisitaConCliente) => {
+    if (visita.latitud && visita.longitud) {
+      setValidandoUbicacion(true);
+      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+        visita.latitud,
+        visita.longitud,
+        userMetros ?? visita.metros ?? 100,
+        undefined,
+        {
+          nombre: visita.nombreCliente,
+          lat: visita.latitud,
+          lng: visita.longitud,
+        },
+      );
+      setValidandoUbicacion(false);
+      if (!ubicacionValida) return;
+    }
+
     navigation.navigate("Sales", {
       clienteId: visita.idCliente,
       nombreCliente: visita.nombreCliente,
@@ -370,7 +394,24 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   };
 
   // Navegar a Punto de Venta para un cliente seleccionado (Cercanos / Todos)
-  const handleIrAVentasCliente = (cliente: ClienteLite) => {
+  const handleIrAVentasCliente = async (cliente: ClienteLite) => {
+    if (cliente.latitud && cliente.longitud) {
+      setValidandoUbicacion(true);
+      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+        cliente.latitud,
+        cliente.longitud,
+        userMetros ?? cliente.metros ?? 100,
+        undefined,
+        {
+          nombre: cliente.nombre,
+          lat: cliente.latitud,
+          lng: cliente.longitud,
+        },
+      );
+      setValidandoUbicacion(false);
+      if (!ubicacionValida) return;
+    }
+
     navigation.navigate("Sales", {
       clienteId: cliente.id,
       nombreCliente: cliente.nombre,
@@ -458,6 +499,34 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const visitaHoy = visitas.find((v) => v.idCliente === cliente.id && isSameDay(v.fecha, fechaSeleccionada));
 
     if (!visitaHoy) {
+      // Si no hay visita programada, validar ubicación antes de permitir crear visita manual
+      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
+
+      if (!omitirValidacionUbicacion) {
+        if (cliente.latitud && cliente.longitud) {
+          setValidandoUbicacion(true);
+          const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+            cliente.latitud,
+            cliente.longitud,
+            userMetros ?? cliente.metros ?? 100,
+            undefined,
+            {
+              nombre: cliente.nombre,
+              lat: cliente.latitud,
+              lng: cliente.longitud,
+            },
+          );
+          setValidandoUbicacion(false);
+          if (!ubicacionValida) return;
+        } else {
+          Alert.alert(
+            "Cliente sin ubicación",
+            "El cliente no tiene ubicación registrada. No se puede registrar la visita.",
+          );
+          return;
+        }
+      }
+
       // Si no hay visita programada, crear una nueva visita para hoy
       Alert.alert(
         "Crear visita",
@@ -567,6 +636,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         const clientesConCoords = clientes.filter(
           (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
         );
+        console.log("[Cumplimiento] actualizarCoordenadas -> clientesConCoords:", clientesConCoords.length, "de", clientes.length, "clientes totales");
+        console.log("[Cumplimiento] actualizarCoordenadas -> clientes SIN coords:", clientes.filter((c) => !c.latitud || !c.longitud || (c.latitud === 0 && c.longitud === 0)).map((c) => ({ id: c.id, nombre: c.nombre })));
+
         const clientesConDistancia = clientesConCoords
           .map((c) => ({
             ...c,
@@ -574,6 +646,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           }))
           .sort((a, b) => a.distanciaMetros - b.distanciaMetros)
           .slice(0, 5);
+        console.log("[Cumplimiento] actualizarCoordenadas -> nearestClientes (top 5):", clientesConDistancia.map((c) => ({ id: c.id, nombre: c.nombre, distanciaMetros: c.distanciaMetros })));
         setNearestClientes(clientesConDistancia);
       } else {
         Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
@@ -713,6 +786,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     };
     const visitaHoy = visitas.find((v) => v.idCliente === cliente.id && isSameDay(v.fecha, fechaSeleccionada));
     const fueVisitadoHoy = visitaHoy?.visitado === 1 || clientesVisitadosHoy.has(cliente.id);
+    console.log("[Cumplimiento] renderClienteVenta -> cliente:", cliente.id, cliente.nombre, "distancia:", cliente.distanciaMetros, "visitaHoy:", visitaHoy ? { id: visitaHoy.id, visitado: visitaHoy.visitado } : null, "fueVisitadoHoy:", fueVisitadoHoy, "visitadosHoy size:", clientesVisitadosHoy.size);
 
     return (
       <View style={styles.visitaContainer}>

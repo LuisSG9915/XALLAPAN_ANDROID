@@ -688,7 +688,8 @@ export default function SalesScreen({ route }: { route?: any }) {
         if (showLoading && BackgroundSyncService.getState().status !== "syncing") {
           try {
             await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
-            await VisitaSyncService.getInstance().syncByDate(new Date());
+            // Desactivado: usa endpoint /api/MovilesVentas/visitas/full sin sucursal
+            // await VisitaSyncService.getInstance().syncByDate(new Date());
           } catch (syncErr) {
             console.warn("[Sales] Sync visitas fallido (no crítico):", syncErr);
           }
@@ -1014,6 +1015,12 @@ export default function SalesScreen({ route }: { route?: any }) {
         cliente.latitud,
         cliente.longitud,
         userMetros ?? cliente.metros ?? 100,
+        undefined,
+        {
+          nombre: cliente.nombre,
+          lat: cliente.latitud,
+          lng: cliente.longitud,
+        },
       );
       setValidandoUbicacion(false);
       if (!ubicacionValida) return;
@@ -1169,6 +1176,12 @@ export default function SalesScreen({ route }: { route?: any }) {
           clientePendienteVisita.latitud,
           clientePendienteVisita.longitud,
           userMetros ?? clientePendienteVisita.metros ?? 100,
+          undefined,
+          {
+            nombre: clientePendienteVisita.nombre,
+            lat: clientePendienteVisita.latitud,
+            lng: clientePendienteVisita.longitud,
+          },
         );
         setValidandoUbicacion(false);
         if (!ubicacionValida) {
@@ -1470,7 +1483,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                 setSelectedClient(updatedCliente);
 
                 // Pequeño delay para asegurar que la actualización en Realm se complete totalmente
-                await new Promise((resolve) => setTimeout(resolve, 500));
+                await new Promise<void>((resolve) => setTimeout(() => resolve(), 500));
 
                 // Verificar DIRECTAMENTE en Realm si el cliente tiene las nuevas coordenadas
                 try {

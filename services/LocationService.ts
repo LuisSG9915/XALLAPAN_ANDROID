@@ -352,6 +352,7 @@ class LocationService {
     clienteLng: number,
     metrosPermitidos: number,
     onProgreso?: (intento: number, total: number, accuracy: number) => void,
+    clienteInfo?: { nombre?: string; lat?: number; lng?: number },
   ): Promise<boolean> {
     const r = await this.validarUbicacionCliente(clienteLat, clienteLng, metrosPermitidos, onProgreso);
 
@@ -378,13 +379,22 @@ class LocationService {
           )} m, demasiado baja para validar tu ubicación. Sal a un espacio abierto e inténtalo de nuevo.`,
         );
         return false;
-      case "fuera_de_rango":
+      case "fuera_de_rango": {
+        const nombreCliente = clienteInfo?.nombre ? `Cliente: ${clienteInfo.nombre}\n` : "";
+        const tuUbicacion = r.ubicacion
+          ? `Tu ubicación: ${r.ubicacion.latitude.toFixed(6)}, ${r.ubicacion.longitude.toFixed(6)}\n`
+          : "";
+        const ubicacionCliente = `Ubicación cliente: ${clienteLat.toFixed(6)}, ${clienteLng.toFixed(6)}`;
+
         Alert.alert(
           "Ubicación inválida",
-          `Estás a ${Math.round(r.distancia ?? 0)} metros del cliente. La distancia máxima permitida es de ` +
-            `${metrosPermitidos} metros (precisión GPS: ±${Math.round(r.accuracy ?? 0)} m).`,
+          `${nombreCliente}` +
+            `Estás a ${Math.round(r.distancia ?? 0)} metros del cliente. La distancia máxima permitida es de ` +
+            `${metrosPermitidos} metros (precisión GPS: ±${Math.round(r.accuracy ?? 0)} m).\n\n` +
+            `${tuUbicacion}${ubicacionCliente}`,
         );
         return false;
+      }
       default:
         return false;
     }

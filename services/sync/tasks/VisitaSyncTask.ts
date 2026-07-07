@@ -15,6 +15,7 @@ export class VisitaSyncTask extends SyncTask {
   }
 
   getEndpoint(): string {
+    // Endpoint: GET /api/MovilesVentas/visitas/full
     return "https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full";
   }
 

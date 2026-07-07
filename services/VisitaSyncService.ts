@@ -41,6 +41,7 @@ class VisitaSyncService {
     const sucursal = user?.sucursal || user?.sucursal_origen || 1;
 
     const fechaStr = fecha.toISOString().split("T")[0];
+    // Endpoint: GET /api/MovilesVentas/visitas/full
     const endpoint = "https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full";
 
     // Registrar inicio de sincronización de visitas
@@ -362,6 +363,7 @@ class VisitaSyncService {
     const user = await AuthService.restoreSession();
     const idUsuario = user?.id || user?.idUsuario || 0;
 
+    // Endpoint: GET /api/MovilesVentas/visitas/full/{sucursal}
     const endpoint = `https://api.cbinformatica.net:9031/api/MovilesVentas/visitas/full/${sucursal}`;
 
     const idBitacora = await BitacoraService.registrarInicioSync(
@@ -470,59 +472,12 @@ class VisitaSyncService {
   }
 
   async getClientesVisitadosHoy(sucursal: number): Promise<Set<number>> {
-    try {
-      const realm = this.getRealm();
-      const clientesVisitados = new Set<number>();
-
-      // Obtener rango del día actual
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-
-      // 1. Consultar tabla Visita (local, antes de sincronizar) con visitado == 1
-      const visitasLocales = realm
-        .objects("Visita")
-        .filtered(
-          "visitado == 1 AND ruta == $0 AND fecha >= $1 AND fecha <= $2",
-          sucursal.toString(),
-          startOfDay,
-          endOfDay,
-        );
-
-      visitasLocales.forEach((v: any) => {
-        clientesVisitados.add(v.idCliente);
-      });
-
-      console.log(`[VisitaSync] 📍 Visitas locales (Visita) hoy: ${visitasLocales.length}`);
-
-      // 2. Consultar tabla VisitaRealizada (sincronizada al servidor)
-      const visitasRealizadas = realm
-        .objects("VisitaRealizada")
-        .filtered("fechaInicio >= $0 AND fechaInicio <= $1", startOfDay, endOfDay);
-
-      visitasRealizadas.forEach((v: any) => {
-        clientesVisitados.add(v.idCliente);
-      });
-
-      console.log(`[VisitaSync] 📍 Visitas realizadas (VisitaRealizada) hoy: ${visitasRealizadas.length}`);
-
-      // 3. Consultar tabla DetalleVisitas (ventas/visitas registradas hoy)
-      const detalleVisitas = realm
-        .objects("DetalleVisitas")
-        .filtered("idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2", sucursal, startOfDay, endOfDay);
-
-      detalleVisitas.forEach((v: any) => {
-        clientesVisitados.add(v.idCliente);
-      });
-
-      console.log(`[VisitaSync] 📍 Detalle visitas (DetalleVisitas) hoy: ${detalleVisitas.length}`);
-      console.log(`[VisitaSync] 📍 Total clientes visitados hoy (combinado): ${clientesVisitados.size}`);
-
-      return clientesVisitados;
-    } catch (error) {
-      console.error("[VisitaSync] ❌ Error al obtener clientes visitados hoy:", error);
-      return new Set();
-    }
+    const clientesVisitados = await this.getClientesVisitadosPorFecha(new Date(), sucursal);
+    console.log(
+      `[VisitaSync] 📍 Total clientes visitados hoy (combinado): ${clientesVisitados.size}`,
+      Array.from(clientesVisitados),
+    );
+    return clientesVisitados;
   }
 
   /**
@@ -538,6 +493,19 @@ class VisitaSyncService {
       const startOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 0, 0, 0, 0);
       const endOfDay = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 23, 59, 59, 999);
 
+      // Rango ampliado para cubrir desfases de zona horaria (±1 día)
+      const rangoInicio = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() - 1, 0, 0, 0, 0);
+      const rangoFin = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1, 23, 59, 59, 999);
+
+      const esMismoDiaLocal = (fechaInicio: Date) => {
+        const inicioDia = new Date(
+          fechaInicio.getFullYear(),
+          fechaInicio.getMonth(),
+          fechaInicio.getDate(),
+        );
+        return inicioDia.getTime() >= startOfDay.getTime() && inicioDia.getTime() <= endOfDay.getTime();
+      };
+
       // 1. Tabla Visita (local) con visitado == 1
       const visitasLocales = realm
         .objects("Visita")
@@ -550,23 +518,31 @@ class VisitaSyncService {
       visitasLocales.forEach((v: any) => clientesVisitados.add(v.idCliente));
       console.log("[Visitas] Fuente 1 - Visita local (visitado=1):", visitasLocales.length, "registros. Clientes:", Array.from(visitasLocales).map((v: any) => v.idCliente));
 
-      // 2. Tabla VisitaRealizada (sincronizada) - filtrar por sucursal/ruta
+      // 2. Tabla VisitaRealizada (sincronizada) - filtrar por sucursal/ruta y día local
       const visitasRealizadas = realm
         .objects("VisitaRealizada")
-        .filtered("idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2", sucursal, startOfDay, endOfDay);
-      visitasRealizadas.forEach((v: any) => clientesVisitados.add(v.idCliente));
+        .filtered("idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2", sucursal, rangoInicio, rangoFin);
+      visitasRealizadas.forEach((v: any) => {
+        if (v.fechaInicio && esMismoDiaLocal(new Date(v.fechaInicio))) {
+          clientesVisitados.add(v.idCliente);
+        }
+      });
       console.log("[Visitas] Fuente 2 - VisitaRealizada:", visitasRealizadas.length, "registros. Clientes:", Array.from(visitasRealizadas).map((v: any) => v.idCliente));
 
-      // 3. Tabla DetalleVisitas (ventas/visitas no agendadas)
+      // 3. Tabla DetalleVisitas (ventas/visitas no agendadas) - filtrar por día local
       const detalleVisitas = realm
         .objects("DetalleVisitas")
         .filtered(
           "idRuta == $0 AND fechaInicio >= $1 AND fechaInicio <= $2",
           sucursal,
-          startOfDay,
-          endOfDay,
+          rangoInicio,
+          rangoFin,
         );
-      detalleVisitas.forEach((v: any) => clientesVisitados.add(v.idCliente));
+      detalleVisitas.forEach((v: any) => {
+        if (v.fechaInicio && esMismoDiaLocal(new Date(v.fechaInicio))) {
+          clientesVisitados.add(v.idCliente);
+        }
+      });
       console.log("[Visitas] Fuente 3 - DetalleVisitas:", detalleVisitas.length, "registros. Clientes:", Array.from(detalleVisitas).map((v: any) => ({ id: (v as any).id, idCliente: (v as any).idCliente, idRuta: (v as any).idRuta, fechaInicio: (v as any).fechaInicio, fechaFin: (v as any).fechaFin })));
       console.log("[Visitas] Set final de clientes visitados:", clientesVisitados.size, Array.from(clientesVisitados));
 
