@@ -39,6 +39,7 @@ import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
 import CumplimientoScreen from "./components/CumplimientoScreen";
 import EnvaseOperacionScreen from "./components/EnvaseOperacionScreen";
 import CortesScreen from "./components/CortesScreen";
+import MapaClientesScreen from "./components/MapaClientesScreen";
 import AuthService from "./services/AuthService";
 import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
@@ -46,6 +47,7 @@ import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
+import RouteTrackingService from "./services/RouteTrackingService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
@@ -348,6 +350,11 @@ function App() {
             options={{ title: "Operaciones de Envase", headerShown: false }}
           />
           <Stack.Screen name="Cortes" component={CortesScreen} options={{ title: " Corte" }} />
+          <Stack.Screen
+            name="MapaClientes"
+            component={MapaClientesScreen}
+            options={{ title: "🗺️ Mapa de Clientes" }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
@@ -388,6 +395,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
         console.log(`[App] Estado de ruta obtenido: ${rutaStatus ? "CERRADA" : "ABIERTA"}`);
         setRutaCerrada(rutaStatus);
+
+        await syncRouteTracking(rutaStatus);
 
         checkPendingTraspasos(user);
       }
@@ -444,19 +453,36 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     };
   }, [currentUser, checkPendingTraspasos]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", async () => {
-      // Solo verificar ruta si los servicios están listos y hay usuario
-      if (servicesReady && currentUser) {
-        const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
-        const vendedor = currentUser.id || 0;
-        const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
-        setRutaCerrada(rutaStatus);
+  const syncRouteTracking = useCallback(async (rutaStatus: boolean) => {
+    try {
+      if (!rutaStatus) {
+        console.log("[App] Sincronizando tracking: ruta abierta, iniciando GPS...");
+        const started = await RouteTrackingService.iniciarRuta();
+        console.log(`[App] Tracking GPS iniciado: ${started}`);
+      } else {
+        console.log("[App] Sincronizando tracking: ruta cerrada, deteniendo GPS...");
+        await RouteTrackingService.finalizarRuta();
       }
-    });
+    } catch (trackingError) {
+      console.error("[App] Error al sincronizar tracking GPS:", trackingError);
+    }
+  }, []);
 
-    return unsubscribe;
-  }, [navigation, currentUser, servicesReady]);
+  useEffect(() => {
+    if (!servicesReady || !currentUser) return;
+
+    const verificarRuta = async () => {
+      const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
+      const vendedor = currentUser.id || 0;
+      const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+      setRutaCerrada(rutaStatus);
+      await syncRouteTracking(rutaStatus);
+    };
+
+    verificarRuta();
+    const interval = setInterval(verificarRuta, 60000);
+    return () => clearInterval(interval);
+  }, [servicesReady, currentUser, syncRouteTracking]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Cerrar Sesión", "¿Estás seguro de que deseas cerrar sesión?", [
@@ -601,6 +627,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           onPress: async () => {
             await CierreRutaService.setRutaCerrada(sucursal, vendedor, true);
             setRutaCerrada(true);
+            await syncRouteTracking(true);
             Alert.alert(
               "Ruta Cerrada",
               "El punto de venta ha sido bloqueado. Solo se desbloqueará al recibir una carga.",
@@ -609,7 +636,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         },
       ],
     );
-  }, [currentUser]);
+  }, [currentUser, syncRouteTracking]);
 
   const handleTapRutaCerrada = useCallback(() => {
     Alert.alert(
@@ -637,8 +664,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     navigation.navigate("Sales");
   }, [currentUser, navigation]);
 
-  // Orden de prioridad: Punto de Venta, Agenda, Cargas, Inventario, Corte, Impresora
-  const priorityOrder = ["cumplimiento", "sales", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
+  // Orden de prioridad: Punto de Venta, Agenda, Mapa, Cargas, Inventario, Corte, Impresora
+  const priorityOrder = ["cumplimiento", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion"];
@@ -663,6 +690,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       color: "#8E44AD",
       screen: "Cumplimiento",
       description: "Cumplimiento de visitas",
+    },
+    {
+      id: "mapa",
+      title: "Mapa",
+      icon: "map",
+      type: "material",
+      color: "#00897B",
+      screen: "MapaClientes",
+      description: "Clientes y ruta",
     },
     {
       id: "traspaso",

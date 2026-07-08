@@ -25,7 +25,7 @@ class GpsBitacoraService {
    * Registra una ubicación GPS en la bitácora local (Realm).
    * Se llama automáticamente desde LocationService.getCurrentLocation()
    */
-  async registrarUbicacion(latitud: number, longitud: number, precision?: number): Promise<void> {
+  async registrarUbicacion(latitud: number, longitud: number, precision?: number, conCobertura?: boolean): Promise<void> {
     try {
       if (!this.realm || this.realm.isClosed) {
         console.warn("[GpsBitacoraService] Realm no inicializado. Se omitirá registro GPS.");
@@ -63,6 +63,7 @@ class GpsBitacoraService {
           longitud,
           precision: precision ?? null,
           bateria: metros ?? null, // Campo reutilizado: ahora almacena metros de validación
+          conCobertura: conCobertura ?? null,
           id_movil: null,
           fecha: new Date(),
           enviado: false,
@@ -70,7 +71,7 @@ class GpsBitacoraService {
       });
 
       console.log(
-        `[GpsBitacoraService] 📍 GPS registrado: lat=${latitud}, lng=${longitud}, precision=${precision}, metros=${metros}`,
+        `[GpsBitacoraService] 📍 GPS registrado: lat=${latitud}, lng=${longitud}, precision=${precision}, metros=${metros}, conCobertura=${conCobertura}`,
       );
     } catch (error) {
       console.warn("[GpsBitacoraService] Error al registrar ubicación GPS:", error);
@@ -87,25 +88,36 @@ class GpsBitacoraService {
 
     const realm = this.getRealm();
 
-    // Limpiar registros más antiguos a 7 días
-    this.limpiarBitacorasAntiguas(realm);
+    const todosPendientes = realm.objects("BitacoraGps").filtered("enviado == false");
+    if (todosPendientes.length === 0) return;
 
-    const pendientes = realm.objects("BitacoraGps").filtered("enviado == false");
-    if (pendientes.length === 0) return;
+    const BATCH_SIZE = 100;
+    const total = todosPendientes.length;
+    console.log(`[GpsBitacoraService] Enviando ${total} registros GPS al servidor en lotes de ${BATCH_SIZE}...`);
 
     const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraGpsArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-    console.log(`[GpsBitacoraService] Enviando ${pendientes.length} registros GPS al servidor...`);
 
-    const payload = pendientes.map((p: any) => ({
-      idUsuario: p.idUsuario,
-      sucursal: p.sucursal,
-      latitud: p.latitud,
-      longitud: p.longitud,
-      precision: p.precision ?? null,
-      bateria: p.bateria ?? null,
-      id_movil: p.id_movil ?? null,
-      fecha: this.formatDate(p.fecha),
-    }));
+    for (let offset = 0; offset < total; offset += BATCH_SIZE) {
+      const batch = todosPendientes.slice(offset, offset + BATCH_SIZE);
+      const payload = batch.map((p: any) => ({
+        idUsuario: p.idUsuario,
+        sucursal: p.sucursal,
+        latitud: p.latitud,
+        longitud: p.longitud,
+        precision: p.precision ?? null,
+        bateria: p.bateria ?? null,
+        conCobertura: p.conCobertura ?? null,
+        id_movil: p.id_movil ?? null,
+        fecha: this.formatDate(p.fecha),
+      }));
+
+      await this.enviarLote(url, batch, payload);
+    }
+  }
+
+  private async enviarLote(url: string, batch: any, payload: any[]): Promise<void> {
+    const realm = this.getRealm();
+    console.log(`[GpsBitacoraService] Enviando lote de ${payload.length} registros GPS...`);
 
     try {
       const response = await fetchWithTimeout(url, {
@@ -118,32 +130,18 @@ class GpsBitacoraService {
       });
 
       if (response.ok) {
-        console.log("[GpsBitacoraService] ✅ Bitácoras GPS enviadas correctamente.");
+        console.log(`[GpsBitacoraService] ✅ Lote de ${payload.length} bitácoras GPS enviado correctamente.`);
         realm.write(() => {
-          realm.delete(pendientes);
+          for (const item of batch) {
+            item.enviado = true;
+          }
         });
       } else {
         const txt = await response.text().catch(() => "");
-        console.error("[GpsBitacoraService] ❌ Error al enviar bitácoras GPS:", response.status, txt);
+        console.error("[GpsBitacoraService] ❌ Error al enviar lote GPS:", response.status, txt);
       }
     } catch (error) {
-      console.error("[GpsBitacoraService] ❌ Error crítico enviando bitácoras GPS:", error);
-    }
-  }
-
-  private limpiarBitacorasAntiguas(realm: Realm): void {
-    try {
-      const sieteDiasAtras = new Date();
-      sieteDiasAtras.setDate(sieteDiasAtras.getDate() - 7);
-      const antiguos = realm.objects("BitacoraGps").filtered("fecha < $0", sieteDiasAtras);
-      if (antiguos.length > 0) {
-        realm.write(() => {
-          realm.delete(antiguos);
-        });
-        console.log(`[GpsBitacoraService] 🗑️ ${antiguos.length} registros GPS antiguos eliminados`);
-      }
-    } catch (e) {
-      console.warn("[GpsBitacoraService] Error en limpieza de GPS antiguos:", e);
+      console.error("[GpsBitacoraService] ❌ Error crítico enviando lote GPS:", error);
     }
   }
 

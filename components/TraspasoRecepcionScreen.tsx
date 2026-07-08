@@ -16,6 +16,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import FullSyncService from "../services/FullSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
 import CierreRutaService from "../services/CierreRutaService";
+import RouteTrackingService from "../services/RouteTrackingService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 const API_BASE_URL = "https://api.cbinformatica.net:9031";
@@ -369,6 +370,8 @@ export default function TraspasoRecepcionScreen() {
       );
       await CierreRutaService.setRutaCerrada(sucursal, vendedorId, false);
       console.log("[TraspasoRecepcion] ✅ Ruta abierta exitosamente");
+      await RouteTrackingService.iniciarRuta();
+      console.log("[TraspasoRecepcion] ✅ Tracking GPS iniciado");
 
       console.log("[TraspasoRecepcion] DEBUG - Recargando traspasos...");
       await loadTraspasos();

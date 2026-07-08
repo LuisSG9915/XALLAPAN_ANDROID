@@ -40,6 +40,7 @@ export const UsuarioSchema = {
     descripcionPuesto: "string?",
     claveEmpleado: "string?",
     password: "string?",
+    ruta: "string?",
     sucursalOrigen: "int?",
     sucursalNombre: "string?",
     metros: "float?",
@@ -300,6 +301,7 @@ export const DetalleVisitasSchema = {
     idRuta: "int?",
     tipoVisita: "int?",
     agenda: "int?",
+    conCobertura: "bool?", // true = había datos al registrar, false = sin cobertura, null = no aplica
     syncedAt: "date",
     sincronizado: { type: "bool", default: false },
   },
@@ -385,6 +387,7 @@ export const BitacoraGpsSchema = {
     longitud: "float",
     precision: "float?", // Precisión GPS en metros
     bateria: "float?", // Metros permitidos para validación del usuario
+    conCobertura: "bool?", // true = había red al capturar, false = offline, null = no evaluado
     id_movil: "int?",
     fecha: "date", // Hora en que se toma el GPS
     enviado: "bool", // true = ya sincronizado al servidor
@@ -457,6 +460,26 @@ export const VisitaRealizadaSchema = {
     idUsuario: "int",
     idRuta: "int",
     syncedAt: "date",
+  },
+  primaryKey: "id",
+};
+
+/**
+ * Configuración local de ruta y GPS.
+ * Inicialmente se maneja en el móvil; en el futuro puede venir del servidor.
+ */
+export const RouteConfigSchema = {
+  name: "RouteConfig",
+  properties: {
+    id: "string", // clave fija: "routeConfig"
+    idUsuario: "int?",
+    sucursal: "int?",
+    intervaloGPS: "int", // segundos entre capturas (default 30, min 15, max 300)
+    radioTolerancia: "int", // metros para validación geoposición (default 100)
+    rutaActiva: { type: "bool" as const, default: false }, // true = inicio de ruta activo
+    fechaInicioRuta: "date?",
+    fechaFinRuta: "date?",
+    updatedAt: "date",
   },
   primaryKey: "id",
 };
@@ -560,5 +583,6 @@ export const allSchemas = [
   VisitaRealizadaSchema,
   VentaCancelacionSchema,
   VentaModificacionSchema,
+  RouteConfigSchema,
   FormaPagoSchema,
 ];

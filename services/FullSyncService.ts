@@ -24,8 +24,18 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 44,
+        schemaVersion: 46,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v46: Agregar campo ruta a Usuario
+          if (oldRealm.schemaVersion < 46) {
+            console.log("[Migration v46] Agregando campo ruta a Usuario");
+          }
+
+          // Migración v45: Agregar campo conCobertura a DetalleVisitas y BitacoraGps, y tabla RouteConfig
+          if (oldRealm.schemaVersion < 45) {
+            console.log("[Migration v45] Agregando conCobertura y RouteConfig");
+          }
+
           // Migración v44: Agregar campos sincronizado y agenda a DetalleVisitas
           if (oldRealm.schemaVersion < 44) {
             console.log("[Migration v44] Agregando campos sincronizado y agenda a DetalleVisitas");
@@ -234,6 +244,10 @@ class FullSyncService {
       // Inyectar a VentaModificacionService
       const VentaModificacionService = (await import("./VentaModificacionService")).default;
       VentaModificacionService.getInstance().setRealm(this.realm);
+
+      // Inyectar a RouteTrackingService
+      const RouteTrackingService = (await import("./RouteTrackingService")).default;
+      RouteTrackingService.setRealm(this.realm);
 
       console.log("✅ Realm inyectado a todos los servicios");
     } catch (error) {
@@ -3825,6 +3839,13 @@ class FullSyncService {
 
   isServiceInitialized(): boolean {
     return this.isInitialized;
+  }
+
+  getRealm(): Realm | null {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      return null;
+    }
+    return this.realm;
   }
 
   getSyncTableLogsPaginated(offset: number = 0, limit: number = 50): any[] {
