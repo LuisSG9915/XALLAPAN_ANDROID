@@ -2,6 +2,11 @@ import Realm, { UpdateMode } from "realm";
 import { SyncTask, SyncTaskResult } from "../SyncTask";
 import { UsuarioSchema } from "../../RealmSchemas";
 
+function toStringOrNull(value: any): string | null {
+  if (value === null || value === undefined) return null;
+  return String(value);
+}
+
 /**
  * Tarea de sincronización para la tabla Usuarios
  */
@@ -47,16 +52,16 @@ export class UsuariosSyncTask extends SyncTask {
 
           const usuarioData: any = {
             id: usuario.id,
-            nombre: usuario.nombre ?? null,
+            nombre: toStringOrNull(usuario.nombre),
             perfil: usuario.perfil ?? null,
-            descripcionPerfil: usuario.descripcionPerfil ?? null,
+            descripcionPerfil: toStringOrNull(usuario.descripcionPerfil),
             puesto: usuario.puesto ?? null,
-            descripcionPuesto: usuario.descripcionPuesto ?? null,
-            claveEmpleado: usuario.claveEmpleado ?? null,
-            password: usuario.password ?? null,
-            ruta: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? null,
+            descripcionPuesto: toStringOrNull(usuario.descripcionPuesto),
+            claveEmpleado: toStringOrNull(usuario.claveEmpleado),
+            password: toStringOrNull(usuario.password),
+            ruta: toStringOrNull(usuario.sucursal_origen ?? usuario.sucursalOrigen),
             sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? null,
-            sucursalNombre: usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
+            sucursalNombre: toStringOrNull(usuario.sucursal_nombre ?? usuario.sucursalNombre),
             metros: usuario.metros ?? null,
             reubicacion:
               typeof usuario.reubicacion === "boolean"
@@ -66,12 +71,12 @@ export class UsuariosSyncTask extends SyncTask {
                 : usuario.reubicacion === 0
                 ? false
                 : null,
-            rfc: usuario.rfc ?? null,
-            domicilio: usuario.domicilio ?? null,
-            regimenFiscal: usuario.regimenFiscal ?? null,
-            nombreCia: usuario.nombreCia ?? null,
-            telefono: usuario.telefono ?? null,
-            ticketFinal: usuario.ticketFinal ?? null,
+            rfc: toStringOrNull(usuario.rfc),
+            domicilio: toStringOrNull(usuario.domicilio),
+            regimenFiscal: toStringOrNull(usuario.regimenFiscal),
+            nombreCia: toStringOrNull(usuario.nombreCia),
+            telefono: toStringOrNull(usuario.telefono),
+            ticketFinal: toStringOrNull(usuario.ticketFinal),
             permisoDomicilioTicket:
               typeof usuario.permisoDomicilioTicket === "boolean"
                 ? usuario.permisoDomicilioTicket

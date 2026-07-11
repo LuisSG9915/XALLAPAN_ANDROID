@@ -395,6 +395,40 @@ export const BitacoraGpsSchema = {
   primaryKey: "id",
 };
 
+/**
+ * Schema para diagnóstico de validaciones de ubicación.
+ * Guarda UNA fila por cada intento de validación (LocationService.validarUbicacionCliente)
+ * para poder analizar en el servidor por qué falla una visita en campo.
+ */
+export const BitacoraValidacionSchema = {
+  name: "BitacoraValidacion",
+  properties: {
+    id: "string", // UUID único: timestamp-random
+    idUsuario: "int",
+    sucursal: "int",
+    idCliente: "int?",
+    motivo: "string", // ok | sin_permiso | sin_senal | precision_baja | fuera_de_rango
+    valido: "bool",
+    distancia: "float?", // metros medidos al cliente
+    accuracy: "float?", // precisión (±m) del mejor fix
+    metrosPermitidos: "float?",
+    latitud: "float?", // posición del vendedor (mejor fix)
+    longitud: "float?",
+    clienteLatitud: "float?",
+    clienteLongitud: "float?",
+    numFixes: "int?", // cuántos fixes recibió watchPosition
+    peorAccuracy: "float?", // peor precisión vista en la sesión
+    tiempoMs: "int?", // ms que tardó en resolver la ubicación
+    conCobertura: "bool?",
+    id_movil: "int?",
+    plataforma: "string?", // android | ios
+    versionApp: "string?",
+    fecha: "date",
+    enviado: "bool", // true = ya sincronizado al servidor
+  },
+  primaryKey: "id",
+};
+
 export const InventarioEnvaseSchema = {
   name: "InventarioEnvase",
   properties: {
@@ -577,6 +611,7 @@ export const allSchemas = [
   TipoVisitaSchema,
   BitacoraSyncSchema,
   BitacoraGpsSchema,
+  BitacoraValidacionSchema,
   InventarioEnvaseSchema,
   InventarioEnvasesHistorialSchema,
   ReubicacionSchema,

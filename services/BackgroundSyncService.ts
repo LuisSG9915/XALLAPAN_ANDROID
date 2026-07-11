@@ -443,6 +443,8 @@ class BackgroundSyncService {
           await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Enviando bitácoras GPS pendientes al finalizar...");
           await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+          console.log("[BackgroundSync] Enviando bitácoras de validación de ubicación pendientes al finalizar...");
+          await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
         } catch (bitacoraError) {
           console.warn("[BackgroundSync] Error enviando bitácoras, no es crítico:", bitacoraError);
         }

@@ -3,6 +3,7 @@ import NetInfo from "@react-native-community/netinfo";
 import LocationService, { calcularDistancia, LocationCoordinates } from "./LocationService";
 import GpsBitacoraService from "./GpsBitacoraService";
 import AuthService from "./AuthService";
+import BackgroundLocationService from "./BackgroundLocationService";
 
 const ROUTE_CONFIG_ID = "routeConfig";
 const DEFAULT_INTERVAL_SECONDS = 30;
@@ -32,7 +33,6 @@ export type RouteSummary = {
 class RouteTrackingService {
   private static instance: RouteTrackingService;
   private realm: Realm | null = null;
-  private timerId: ReturnType<typeof setInterval> | null = null;
   private status: RouteStatus = "idle";
   private listeners: Set<(status: RouteStatus) => void> = new Set();
 
@@ -139,7 +139,11 @@ class RouteTrackingService {
       console.log("[RouteTrackingService] La ruta ya está activa");
       if (this.status !== "active") {
         this.setStatus("active");
-        this.scheduleCaptures();
+        try {
+          await BackgroundLocationService.start();
+        } catch (e) {
+          console.error("[RouteTrackingService] Error iniciando background location:", e);
+        }
       }
       return true;
     }
@@ -169,11 +173,15 @@ class RouteTrackingService {
     const intervalo = Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, updatedConfig.intervaloGPS || DEFAULT_INTERVAL_SECONDS));
     console.log(`[RouteTrackingService] ✅ Ruta iniciada con intervalo GPS: ${intervalo}s`);
 
-    // Capturar primer punto inmediatamente
+    // Capturar primer punto inmediatamente y iniciar seguimiento continuo en background
     await this.captureRoutePoint();
 
-    // Programar captura periódica
-    this.scheduleCaptures();
+    try {
+      await BackgroundLocationService.setInterval(intervalo * 1000);
+      await BackgroundLocationService.start();
+    } catch (e) {
+      console.error("[RouteTrackingService] Error iniciando background location:", e);
+    }
     return true;
   }
 
@@ -188,7 +196,12 @@ class RouteTrackingService {
     }
 
     this.setStatus("finishing");
-    this.clearTimer();
+
+    try {
+      await BackgroundLocationService.stop();
+    } catch (e) {
+      console.error("[RouteTrackingService] Error deteniendo background location:", e);
+    }
 
     // Capturar último punto al finalizar
     await this.captureRoutePoint();
@@ -208,32 +221,6 @@ class RouteTrackingService {
     this.setStatus("idle");
     console.log("[RouteTrackingService] ✅ Ruta finalizada", summary);
     return summary;
-  }
-
-  private scheduleCaptures(): void {
-    this.clearTimer();
-    const config = this.ensureConfig();
-    const intervalMs = (config.intervaloGPS || DEFAULT_INTERVAL_SECONDS) * 1000;
-
-    const startTime = Date.now();
-    this.timerId = setInterval(async () => {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      console.log(`[RouteTrackingService] ⏰ Tick de captura después de ${elapsed}s, status=${this.status}`);
-      if (this.status !== "active") {
-        this.clearTimer();
-        return;
-      }
-      await this.captureRoutePoint();
-    }, intervalMs);
-
-    console.log(`[RouteTrackingService] Captura programada cada ${intervalMs}ms`);
-  }
-
-  private clearTimer(): void {
-    if (this.timerId) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
   }
 
   private async captureRoutePoint(): Promise<void> {

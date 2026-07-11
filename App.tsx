@@ -99,16 +99,13 @@ function App() {
         // Primero verificar si ya tiene el permiso
         const hasPermission = await LocationService.checkPermission();
         if (hasPermission) {
-          console.log("[App] Permiso ya otorgado previamente");
           setPermissionStatus("granted");
           return;
         }
 
         // Si no tiene permiso, solicitarlo
-        console.log("[App] Solicitando permiso de ubicación...");
         const status = await LocationService.requestPermission();
         setPermissionStatus(status);
-        console.log(`[App] Estado de permiso de ubicación: ${status}`);
       } catch (error) {
         console.error("[App] Error al solicitar permisos de ubicación:", error);
         setPermissionStatus("denied");
@@ -130,20 +127,15 @@ function App() {
       if (appState.current.match(/inactive|background/) && nextAppState === "active") {
         // Evitar múltiples verificaciones simultáneas
         if (isCheckingRef.current) {
-          console.log("[App] Ya hay una verificación en progreso, omitiendo...");
           return;
         }
 
         isCheckingRef.current = true;
-        console.log("[App] App volvió al foreground, verificando estado de permisos...");
-
         try {
           // Solicitar el estado del permiso
           const status = await LocationService.requestPermission();
           setPermissionStatus(status);
-          console.log(`[App] Estado de permiso de ubicación: ${status}`);
         } catch (error) {
-          console.error("[App] Error al re-verificar permisos:", error);
         } finally {
           isCheckingRef.current = false;
         }
@@ -210,9 +202,7 @@ function App() {
 
       const status = await LocationService.requestPermission();
       setPermissionStatus(status);
-      console.log(`[App] Reintento de permiso: ${status}`);
     } catch (error) {
-      console.error("[App] Error al reintentar permisos:", error);
       setPermissionStatus("denied");
     } finally {
       setCheckingPermissions(false);
@@ -668,7 +658,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const priorityOrder = ["cumplimiento", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
-  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion"];
+  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
   const isAdmin = currentUser?.id === 4;
 
   const allMenuItems = [

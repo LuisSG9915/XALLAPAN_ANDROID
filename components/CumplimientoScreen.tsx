@@ -222,6 +222,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         userMetros ?? visita.metros ?? 100, // Prioridad: Usuario > Cliente > Default (100)
         undefined,
         {
+          id: visita.idCliente,
           nombre: visita.nombreCliente,
           lat: visita.latitud,
           lng: visita.longitud,
@@ -377,6 +378,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         userMetros ?? visita.metros ?? 100,
         undefined,
         {
+          id: visita.idCliente,
           nombre: visita.nombreCliente,
           lat: visita.latitud,
           lng: visita.longitud,
@@ -403,6 +405,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         userMetros ?? cliente.metros ?? 100,
         undefined,
         {
+          id: cliente.id,
           nombre: cliente.nombre,
           lat: cliente.latitud,
           lng: cliente.longitud,

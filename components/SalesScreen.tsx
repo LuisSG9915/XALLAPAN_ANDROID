@@ -1017,6 +1017,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         userMetros ?? cliente.metros ?? 100,
         undefined,
         {
+          id: cliente.id,
           nombre: cliente.nombre,
           lat: cliente.latitud,
           lng: cliente.longitud,
@@ -1178,6 +1179,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           userMetros ?? clientePendienteVisita.metros ?? 100,
           undefined,
           {
+            id: clientePendienteVisita.id,
             nombre: clientePendienteVisita.nombre,
             lat: clientePendienteVisita.latitud,
             lng: clientePendienteVisita.longitud,

@@ -1,0 +1,49 @@
+diff --git a/android/src/main/java/com/agontuk/RNFusedLocation/FusedLocationProvider.java b/android/src/main/java/com/agontuk/RNFusedLocation/FusedLocationProvider.java
+index 1234567..abcdefg 100644
+--- a/android/src/main/java/com/agontuk/RNFusedLocation/FusedLocationProvider.java
++++ b/android/src/main/java/com/agontuk/RNFusedLocation/FusedLocationProvider.java
+@@ -20,6 +20,7 @@ import com.google.android.gms.common.api.ResolvableApiException;
+ import com.google.android.gms.location.FusedLocationProviderClient;
+ import com.google.android.gms.location.LocationAvailability;
+ import com.google.android.gms.location.LocationCallback;
++import com.google.android.gms.location.Priority;
+ import com.google.android.gms.location.LocationRequest;
+ import com.google.android.gms.location.LocationResult;
+ import com.google.android.gms.location.LocationServices;
+@@ -153,12 +154,13 @@ public class FusedLocationProvider implements LocationProvider {
+   }
+ 
+   private LocationRequest buildLocationRequest(LocationOptions options) {
+-    LocationRequest locationRequest = new LocationRequest();
+     int priority = getLocationPriority(options.getAccuracy());
+ 
+-    locationRequest.setPriority(priority)
+-      .setInterval(options.getInterval())
+-      .setFastestInterval(options.getFastestInterval())
+-      .setSmallestDisplacement(isSingleUpdate ? 0 : options.getDistanceFilter());
++    LocationRequest locationRequest = new LocationRequest.Builder(options.getInterval())
++      .setPriority(priority)
++      .setMinUpdateIntervalMillis(options.getFastestInterval())
++      .setMinUpdateDistanceMeters(isSingleUpdate ? 0 : options.getDistanceFilter())
++      .build();
+ 
+     return locationRequest;
+   }
+@@ -226,13 +228,13 @@ public class FusedLocationProvider implements LocationProvider {
+   private int getLocationPriority(LocationAccuracy locationAccuracy) {
+     switch (locationAccuracy) {
+       case high:
+-        return LocationRequest.PRIORITY_HIGH_ACCURACY;
++        return Priority.PRIORITY_HIGH_ACCURACY;
+       case balanced:
+-        return LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY;
++        return Priority.PRIORITY_BALANCED_POWER_ACCURACY;
+       case low:
+-        return LocationRequest.PRIORITY_LOW_POWER;
++        return Priority.PRIORITY_LOW_POWER;
+       case passive:
+-        return LocationRequest.PRIORITY_NO_POWER;
++        return Priority.PRIORITY_PASSIVE;
+       default:
+         throw new IllegalStateException("Unexpected value: " + locationAccuracy);
+     }

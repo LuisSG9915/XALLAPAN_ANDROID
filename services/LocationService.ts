@@ -19,11 +19,27 @@ export type ValidacionUbicacionResultado = {
   distancia?: number;
   accuracy?: number;
   ubicacion?: LocationCoordinates;
+  numFixes?: number;
+  peorAccuracy?: number;
+  tiempoMs?: number;
 };
 
-// Precisión (accuracy) máxima aceptable para dar por válida una lectura GPS.
-// Por encima de este valor la lectura es demasiado imprecisa para validar cercanía.
+// Diagnóstico de la última lectura de getBestLocation, para trazabilidad en campo.
+export type DiagnosticoGps = {
+  numFixes: number;
+  peorAccuracy: number;
+  tiempoMs: number;
+};
+
+// Precisión (accuracy) a partir de la cual una lectura se considera "confiable".
+// Solo se usa cuando la posición parece estar FUERA de rango, para distinguir
+// entre "estás realmente fuera" (GPS confiable) y "reintenta" (GPS impreciso).
+// NO se usa para rechazar lecturas que ya caen dentro del rango.
 export const PRECISION_MAXIMA_ACEPTABLE = 50; // metros
+
+// Precisión tan mala que la lectura no sirve ni siquiera cuando parece caer
+// dentro del rango. Por encima de este valor se pide reintentar siempre.
+export const PRECISION_ABSURDA = 150; // metros
 
 // Tolerancia máxima que se suma al rango permitido para absorber el error del GPS.
 // A propósito NO se descuenta el accuracy completo: hacerlo permitiría validar
@@ -48,6 +64,14 @@ export function calcularDistancia(lat1: number, lon1: number, lat2: number, lon2
 
 class LocationService {
   private hasPermission: boolean = false;
+  // Diagnóstico de la última ejecución de getBestLocation. Se lee justo después
+  // de llamar a getBestLocation (JS es de un solo hilo, así que no hay carrera).
+  private ultimoDiagnosticoGps: DiagnosticoGps = { numFixes: 0, peorAccuracy: 0, tiempoMs: 0 };
+
+  /** Devuelve el diagnóstico de la última lectura de getBestLocation. */
+  getUltimoDiagnosticoGps(): DiagnosticoGps {
+    return this.ultimoDiagnosticoGps;
+  }
 
   /**
    * Solicita permisos de ubicación al usuario.
@@ -137,6 +161,59 @@ class LocationService {
   }
 
   /**
+   * Solicita el permiso de ubicación en background (ACCESS_BACKGROUND_LOCATION).
+   * En Android 11+ es obligatorio abrir la configuración manual.
+   */
+  async requestBackgroundLocationPermission(): Promise<PermissionStatus> {
+    if (Platform.OS !== "android") return "granted";
+
+    const fineGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+    if (!fineGranted) {
+      console.warn("[LocationService] No hay permiso FINE_LOCATION; no se puede pedir background.");
+      return "denied";
+    }
+
+    const backgroundGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION);
+    if (backgroundGranted) {
+      console.log("[LocationService] Permiso background ya otorgado");
+      return "granted";
+    }
+
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
+        {
+          title: "Permiso de ubicación en segundo plano",
+          message: "Para registrar el recorrido con la pantalla apagada o la app cerrada, debes permitir el acceso a la ubicación 'Todo el tiempo'.",
+          buttonNegative: "Cancelar",
+          buttonPositive: "Configuración",
+        },
+      );
+
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+        return "granted";
+      }
+
+      if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+        Alert.alert(
+          "Permiso requerido",
+          "Ve a Configuración > Aplicaciones > Xallapan > Permisos > Ubicación y selecciona 'Permitir todo el tiempo'.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Abrir configuración", onPress: () => this.openSettings() },
+          ],
+        );
+        return "blocked";
+      }
+
+      return "denied";
+    } catch (error) {
+      console.error("[LocationService] Error al solicitar background location:", error);
+      return "denied";
+    }
+  }
+
+  /**
    * Verifica si ya se tienen los permisos de ubicación.
    * IMPORTANTE: Este método solo VERIFICA, no solicita permisos.
    */
@@ -218,15 +295,18 @@ class LocationService {
   }
 
   /**
-   * Obtiene la mejor ubicación disponible tomando hasta `intentos` lecturas
-   * y devolviendo la que tenga menor valor de accuracy (más precisa).
+   * Obtiene la mejor ubicación disponible manteniendo el GPS activo con
+   * `watchPosition` durante unos segundos y devolviendo el fix con menor
+   * accuracy (más preciso). A diferencia de un único `getCurrentPosition`,
+   * esto permite descartar el primer fix "grueso" de red celular/WiFi y
+   * esperar a que el chip GPS refine la precisión (clave en ciudad, donde el
+   * cañón urbano puede dar errores de 100-400 m al principio).
    *
-   * Ideal para validar si el vendedor está dentro del rango de un cliente,
-   * ya que el GPS de bajo costo puede tener errores de 50-200 m en el primer intento.
+   * Corta antes de tiempo si alcanza la precisión objetivo (<= 15 m).
    *
-   * @param intentos  Número máximo de lecturas (default 3)
-   * @param timeoutMs Timeout por lectura en ms (default 8000)
-   * @param onProgreso Callback opcional para notificar cada intento
+   * @param intentos  Solo se usa para el callback de progreso (total esperado)
+   * @param timeoutMs Presupuesto de escucha en ms; se respeta un mínimo de 12 s
+   * @param onProgreso Callback opcional para notificar cada fix recibido
    */
   async getBestLocation(
     intentos: number = 5,
@@ -241,65 +321,117 @@ class LocationService {
       }
     }
 
-    const lecturas: LocationCoordinates[] = [];
+    // Precisión con la que consideramos el fix "suficientemente bueno" y cortamos.
+    const PRECISION_OBJETIVO = 15; // metros
+    // Tiempo mínimo de calentamiento: ignoramos fixes muy imprecisos (típicos de
+    // red celular/WiFi) durante los primeros segundos para dar tiempo al GPS.
+    const WARMUP_MS = 4000;
+    // Presupuesto total de escucha. En ciudad el GPS puede tardar en dar un fix
+    // fino, así que damos al menos 12 s aunque el llamador pida menos.
+    const tiempoMaximoMs = Math.max(timeoutMs, 12000);
 
-    const obtenerLectura = (): Promise<LocationCoordinates | null> =>
-      new Promise((resolve) => {
-        Geolocation.getCurrentPosition(
-          (position: GeoPosition) => {
-            const coords: LocationCoordinates = {
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-              accuracy: position.coords.accuracy,
-            };
-            console.log(
-              `[LocationService] Lectura GPS: lat=${coords.latitude.toFixed(6)},` +
-                ` lng=${coords.longitude.toFixed(6)}, accuracy=${Math.round(coords.accuracy ?? 999)} m`,
-            );
-            GpsBitacoraService.registrarUbicacion(coords.latitude, coords.longitude, coords.accuracy);
-            resolve(coords);
-          },
-          (error: GeoError) => {
-            console.warn("[LocationService] Error en lectura GPS:", error.message);
-            resolve(null);
-          },
-          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0, forceRequestLocation: true } as any,
-        );
-      });
+    return new Promise((resolve) => {
+      let mejor: LocationCoordinates | null = null;
+      let lecturasRecibidas = 0;
+      let peorAccuracy = 0;
+      let settled = false;
+      let watchId: number | null = null;
+      const inicio = Date.now();
 
-    for (let i = 1; i <= intentos; i++) {
-      const lectura = await obtenerLectura();
-      if (lectura) {
-        lecturas.push(lectura);
-        onProgreso?.(i, intentos, lectura.accuracy ?? 999);
-        // Si ya tenemos buena precisión (<= 15 m) no necesitamos más lecturas
-        if ((lectura.accuracy ?? 999) <= 15) {
-          console.log(`[LocationService] Precisión óptima en intento ${i}: ${lectura.accuracy} m`);
-          break;
+      const finalizar = (motivo: string) => {
+        if (settled) return;
+        settled = true;
+        if (watchId !== null) {
+          Geolocation.clearWatch(watchId);
+          watchId = null;
         }
-      }
-    }
+        clearTimeout(temporizadorTotal);
+        this.ultimoDiagnosticoGps = {
+          numFixes: lecturasRecibidas,
+          peorAccuracy,
+          tiempoMs: Date.now() - inicio,
+        };
+        if (mejor) {
+          console.log(
+            `[LocationService] Mejor lectura (${motivo}) de ${lecturasRecibidas} fixes:` +
+              ` accuracy=±${Math.round(mejor.accuracy ?? 999)} m`,
+          );
+          // Registramos SOLO el mejor fix (evita inflar la bitácora con cada lectura de watchPosition).
+          GpsBitacoraService.registrarUbicacion(mejor.latitude, mejor.longitude, mejor.accuracy);
+        } else {
+          console.warn(`[LocationService] Sin lecturas GPS válidas (${motivo})`);
+        }
+        resolve(mejor);
+      };
 
-    if (lecturas.length === 0) return null;
+      const temporizadorTotal = setTimeout(() => finalizar("timeout"), tiempoMaximoMs);
 
-    // Elegir la lectura con menor accuracy (más precisa)
-    const mejor = lecturas.reduce((prev, curr) => ((curr.accuracy ?? 999) < (prev.accuracy ?? 999) ? curr : prev));
+      watchId = Geolocation.watchPosition(
+        (position: GeoPosition) => {
+          const coords: LocationCoordinates = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          };
+          const accuracy = coords.accuracy ?? 999;
+          const transcurrido = Date.now() - inicio;
 
-    console.log(
-      `[LocationService] Mejor lectura de ${lecturas.length} intentos:` +
-        ` accuracy=${Math.round(mejor.accuracy ?? 999)} m`,
-    );
+          console.log(
+            `[LocationService] Fix GPS (+${transcurrido} ms): lat=${coords.latitude.toFixed(6)},` +
+              ` lng=${coords.longitude.toFixed(6)}, accuracy=±${Math.round(accuracy)} m`,
+          );
 
-    return mejor;
+          // Durante el warm-up descartamos fixes gruesos (probable ubicación de red)
+          // salvo que aún no tengamos ninguna lectura de respaldo.
+          const esFixGrueso = accuracy > PRECISION_ABSURDA;
+          if (transcurrido < WARMUP_MS && esFixGrueso && mejor) {
+            return;
+          }
+
+          lecturasRecibidas++;
+          if (accuracy > peorAccuracy) {
+            peorAccuracy = accuracy;
+          }
+          if (!mejor || accuracy < (mejor.accuracy ?? 999)) {
+            mejor = coords;
+          }
+          onProgreso?.(lecturasRecibidas, intentos, accuracy);
+
+          // Cortamos en cuanto el mejor fix alcanza la precisión objetivo.
+          if ((mejor.accuracy ?? 999) <= PRECISION_OBJETIVO) {
+            finalizar("precisión objetivo");
+          }
+        },
+        (error: GeoError) => {
+          console.warn("[LocationService] Error en watchPosition:", error.message);
+          // No finalizamos: dejamos que el temporizador total decida, por si llega
+          // un fix válido más adelante. Solo fallamos si nunca hubo lectura.
+          if (!mejor && (error.code === 1 || error.code === 2)) {
+            finalizar(`error ${error.code}`);
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          distanceFilter: 0,
+          interval: 1000,
+          fastestInterval: 500,
+          forceRequestLocation: true,
+          showLocationDialog: true,
+        } as any,
+      );
+    });
   }
 
   /**
    * Valida si el vendedor está dentro del rango permitido de un cliente.
    *
-   * A diferencia del enfoque anterior (distancia - accuracy), que permitía
-   * validar desde muy lejos cuando el GPS era impreciso, aquí:
-   *  - Se rechaza la lectura si su precisión es peor que PRECISION_MAXIMA_ACEPTABLE.
-   *  - Se compara la distancia real contra el rango permitido + un buffer acotado.
+   * Estrategia de "umbral relativo al rango":
+   *  1. Si la distancia medida cae dentro del rango permitido (+ buffer acotado),
+   *     se acepta aunque el accuracy sea alto, salvo precisión absurda.
+   *  2. Si parece estar fuera de rango pero el accuracy es peor que
+   *     PRECISION_MAXIMA_ACEPTABLE, no se puede afirmar que esté fuera: se pide
+   *     reintentar (precision_baja).
+   *  3. Si el accuracy es confiable y aun así está fuera, se marca fuera_de_rango.
    */
   async validarUbicacionCliente(
     clienteLat: number,
@@ -313,33 +445,50 @@ class LocationService {
     }
 
     const ubicacion = await this.getBestLocation(5, 10000, onProgreso);
+    const diag = this.getUltimoDiagnosticoGps();
     if (!ubicacion) {
-      return { valido: false, motivo: "sin_senal", metrosPermitidos };
+      return { valido: false, motivo: "sin_senal", metrosPermitidos, ...diag };
     }
 
     const accuracy = ubicacion.accuracy ?? 999;
-    if (accuracy > PRECISION_MAXIMA_ACEPTABLE) {
-      console.warn(`[LocationService] Precisión insuficiente para validar: ±${Math.round(accuracy)} m`);
-      return { valido: false, motivo: "precision_baja", accuracy, metrosPermitidos, ubicacion };
-    }
-
     const distancia = calcularDistancia(ubicacion.latitude, ubicacion.longitude, clienteLat, clienteLng);
     const buffer = Math.min(accuracy, BUFFER_MAXIMO);
     const dentroDeRango = distancia <= metrosPermitidos + buffer;
 
+    // 1) Si la posición medida cae dentro del rango permitido, es válida aunque
+    //    el accuracy sea alto, salvo que la lectura sea absurdamente imprecisa.
+    if (dentroDeRango && accuracy <= PRECISION_ABSURDA) {
+      console.log(
+        `[LocationService] Validación VÁLIDO: distancia=${Math.round(distancia)} m, ` +
+          `permitido=${metrosPermitidos} m, buffer=${Math.round(buffer)} m, accuracy=±${Math.round(accuracy)} m`,
+      );
+      return { valido: true, motivo: "ok", distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
+    }
+
+    // 2) La posición parece estar fuera de rango (o el accuracy es absurdo). Si la
+    //    precisión es baja no podemos afirmar que esté fuera: pedimos reintentar.
+    if (accuracy > PRECISION_MAXIMA_ACEPTABLE) {
+      console.warn(
+        `[LocationService] Precisión insuficiente para validar: distancia=${Math.round(distancia)} m, ` +
+          `accuracy=±${Math.round(accuracy)} m`,
+      );
+      return { valido: false, motivo: "precision_baja", distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
+    }
+
+    // 3) Accuracy confiable y aun así fuera de rango: está realmente lejos.
     console.log(
-      `[LocationService] Validación: distancia=${Math.round(distancia)} m, ` +
-        `permitido=${metrosPermitidos} m, buffer=${Math.round(buffer)} m, accuracy=±${Math.round(accuracy)} m ` +
-        `=> ${dentroDeRango ? "VÁLIDO" : "FUERA DE RANGO"}`,
+      `[LocationService] Validación FUERA DE RANGO: distancia=${Math.round(distancia)} m, ` +
+        `permitido=${metrosPermitidos} m, buffer=${Math.round(buffer)} m, accuracy=±${Math.round(accuracy)} m`,
     );
 
     return {
-      valido: dentroDeRango,
-      motivo: dentroDeRango ? "ok" : "fuera_de_rango",
+      valido: false,
+      motivo: "fuera_de_rango",
       distancia,
       accuracy,
       metrosPermitidos,
       ubicacion,
+      ...diag,
     };
   }
 
@@ -352,9 +501,27 @@ class LocationService {
     clienteLng: number,
     metrosPermitidos: number,
     onProgreso?: (intento: number, total: number, accuracy: number) => void,
-    clienteInfo?: { nombre?: string; lat?: number; lng?: number },
+    clienteInfo?: { id?: number; nombre?: string; lat?: number; lng?: number },
   ): Promise<boolean> {
     const r = await this.validarUbicacionCliente(clienteLat, clienteLng, metrosPermitidos, onProgreso);
+
+    // Registrar el diagnóstico de la validación para trazabilidad en campo.
+    // No bloquea el flujo si falla.
+    GpsBitacoraService.registrarValidacion({
+      idCliente: clienteInfo?.id ?? null,
+      motivo: r.motivo,
+      valido: r.valido,
+      distancia: r.distancia ?? null,
+      accuracy: r.accuracy ?? null,
+      metrosPermitidos: r.metrosPermitidos ?? metrosPermitidos,
+      latitud: r.ubicacion?.latitude ?? null,
+      longitud: r.ubicacion?.longitude ?? null,
+      clienteLatitud: clienteLat,
+      clienteLongitud: clienteLng,
+      numFixes: r.numFixes ?? null,
+      peorAccuracy: r.peorAccuracy ?? null,
+      tiempoMs: r.tiempoMs ?? null,
+    });
 
     switch (r.motivo) {
       case "ok":
@@ -376,7 +543,7 @@ class LocationService {
           "Señal GPS débil",
           `La precisión del GPS es de ±${Math.round(
             r.accuracy ?? 0,
-          )} m, demasiado baja para validar tu ubicación. Sal a un espacio abierto e inténtalo de nuevo.`,
+          )} m, demasiado baja para validar tu ubicación. Inténtalo de nuevo.`,
         );
         return false;
       case "fuera_de_rango": {

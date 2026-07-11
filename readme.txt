@@ -1,4 +1,11 @@
 ************************************************
+
+ABRIMOS EL EMULADOR
+
+%LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe -avd Pixel_9a -no-snapshot-load
+
+
+
 Para probar:
 
 Set-Location c:\xallapan

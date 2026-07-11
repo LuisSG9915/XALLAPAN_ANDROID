@@ -372,10 +372,19 @@ export default function MapaClientesScreen() {
   }, []);
 
   const handleIniciarRuta = useCallback(async () => {
+    const permisoFine = await LocationService.requestPermission();
+    if (permisoFine !== "granted") {
+      Alert.alert("Permiso requerido", "Se requiere acceso a la ubicación para registrar la ruta.");
+      return;
+    }
+    const permisoBackground = await LocationService.requestBackgroundLocationPermission();
+    if (permisoBackground === "blocked") {
+      return;
+    }
     const ok = await RouteTrackingService.iniciarRuta();
     if (ok) {
       setRouteActive(true);
-      Alert.alert("Ruta iniciada", "El GPS comenzó a registrar tu recorrido.");
+      Alert.alert("Ruta iniciada", "El GPS comenzará a registrar tu recorrido aun con la pantalla apagada.");
     } else {
       Alert.alert("Error", "No se pudo iniciar la ruta. Verifica permisos y usuario.");
     }

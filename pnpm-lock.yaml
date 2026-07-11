@@ -41,6 +41,9 @@ importers:
       react-native-background-fetch:
         specifier: 4.2.8
         version: 4.2.8
+      react-native-background-geolocation:
+        specifier: ^5.2.0
+        version: 5.2.0
       react-native-bluetooth-escpos-printer:
         specifier: ^0.0.5
         version: 0.0.5(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1))
@@ -1183,6 +1186,9 @@ packages:
 
   '@sinonjs/fake-timers@10.3.0':
     resolution: {integrity: sha512-V4BG07kuYSUkTCSBHG8G8TNhM+F19jXFWnQtzj+we8DrkpSBCee9Z3Ms8yiGer/dlmhe35/Xdgyo3/0rQKg7YA==}
+
+  '@transistorsoft/background-geolocation-types@5.2.0':
+    resolution: {integrity: sha512-X1cZ85eM1OMhQVo4BOEZIXHGkpnxF+MCSnL34OC/lZzIDDeq0+78NAQlK2Aa0RQWPK4CEi7D81OhQY2gskJ9+A==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -3179,6 +3185,9 @@ packages:
   react-native-background-fetch@4.2.8:
     resolution: {integrity: sha512-vKPumvhBuxr3oI1L7cNunYIsKV8jD4Xz2A9JT/FW5yvn7GAAct184FAZ9dFef75auBxixinaCjRBlip53xGWmQ==}
 
+  react-native-background-geolocation@5.2.0:
+    resolution: {integrity: sha512-lsNl6jSxxhdx8afKoxlFakcv0aiYbQ6eskFd1CNC8Wb7I+ZhImEOkoxJuHqQ6zxyBxKzxf5u/rzMh5SHozVLJQ==}
+
   react-native-bluetooth-escpos-printer@0.0.5:
     resolution: {integrity: sha512-a+GTlz8dctb48wkoJ8woE7gV24NCOoA13J95A+RFEKhjONEWf3/dP5pIqrrlO5fsf/2QYDeMfU3P8bIVQoEqig==}
     peerDependencies:
@@ -3648,6 +3657,9 @@ packages:
     engines: {node: '>=18.12'}
     peerDependencies:
       typescript: '>=4.8.4'
+
+  tslib@2.8.1:
+    resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   tunnel-agent@0.6.0:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
@@ -5402,6 +5414,8 @@ snapshots:
   '@sinonjs/fake-timers@10.3.0':
     dependencies:
       '@sinonjs/commons': 3.0.1
+
+  '@transistorsoft/background-geolocation-types@5.2.0': {}
 
   '@types/babel__core@7.20.5':
     dependencies:
@@ -7912,6 +7926,12 @@ snapshots:
 
   react-native-background-fetch@4.2.8: {}
 
+  react-native-background-geolocation@5.2.0:
+    dependencies:
+      '@babel/runtime': 7.28.4
+      '@transistorsoft/background-geolocation-types': 5.2.0
+      tslib: 2.8.1
+
   react-native-bluetooth-escpos-printer@0.0.5(react-native@0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)):
     dependencies:
       react-native: 0.82.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.0(typescript@5.9.3))(@react-native/metro-config@0.82.1(@babel/core@7.28.5))(@types/react@19.2.6)(react@19.1.1)
@@ -8474,6 +8494,8 @@ snapshots:
   ts-api-utils@2.1.0(typescript@5.9.3):
     dependencies:
       typescript: 5.9.3
+
+  tslib@2.8.1: {}
 
   tunnel-agent@0.6.0:
     dependencies:
