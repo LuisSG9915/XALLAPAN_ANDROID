@@ -304,14 +304,17 @@ class LocationService {
    *
    * Corta antes de tiempo si alcanza la precisión objetivo (<= 15 m).
    *
-   * @param intentos  Solo se usa para el callback de progreso (total esperado)
-   * @param timeoutMs Presupuesto de escucha en ms; se respeta un mínimo de 12 s
-   * @param onProgreso Callback opcional para notificar cada fix recibido
+   * @param intentos      Solo se usa para el callback de progreso (total esperado)
+   * @param timeoutMs       Presupuesto de escucha en ms; se respeta un mínimo de 6 s
+   * @param onProgreso      Callback opcional para notificar cada fix recibido
+   * @param condicionExito  Si una lectura satisface esta condición, se devuelve
+   *                        inmediatamente sin esperar a mejorar la precisión.
    */
   async getBestLocation(
     intentos: number = 5,
     timeoutMs: number = 10000,
     onProgreso?: (intento: number, total: number, accuracy: number) => void,
+    condicionExito?: (coords: LocationCoordinates) => boolean,
   ): Promise<LocationCoordinates | null> {
     if (!this.hasPermission) {
       const granted = await this.checkPermission();
@@ -326,9 +329,9 @@ class LocationService {
     // Tiempo mínimo de calentamiento: ignoramos fixes muy imprecisos (típicos de
     // red celular/WiFi) durante los primeros segundos para dar tiempo al GPS.
     const WARMUP_MS = 4000;
-    // Presupuesto total de escucha. En ciudad el GPS puede tardar en dar un fix
-    // fino, así que damos al menos 12 s aunque el llamador pida menos.
-    const tiempoMaximoMs = Math.max(timeoutMs, 12000);
+    // Presupuesto total de escucha. Se limita a 6 s para no hacer esperar al usuario;
+    // si no hay fix aceptable en ese tiempo, se reporta como señal débil/fuera de rango.
+    const tiempoMaximoMs = Math.max(timeoutMs, 6000);
 
     return new Promise((resolve) => {
       let mejor: LocationCoordinates | null = null;
@@ -338,7 +341,7 @@ class LocationService {
       let watchId: number | null = null;
       const inicio = Date.now();
 
-      const finalizar = (motivo: string) => {
+      const aceptar = (coords: LocationCoordinates | null, motivo: string) => {
         if (settled) return;
         settled = true;
         if (watchId !== null) {
@@ -351,18 +354,20 @@ class LocationService {
           peorAccuracy,
           tiempoMs: Date.now() - inicio,
         };
-        if (mejor) {
+        if (coords) {
           console.log(
             `[LocationService] Mejor lectura (${motivo}) de ${lecturasRecibidas} fixes:` +
-              ` accuracy=±${Math.round(mejor.accuracy ?? 999)} m`,
+              ` accuracy=±${Math.round(coords.accuracy ?? 999)} m`,
           );
-          // Registramos SOLO el mejor fix (evita inflar la bitácora con cada lectura de watchPosition).
-          GpsBitacoraService.registrarUbicacion(mejor.latitude, mejor.longitude, mejor.accuracy);
+          // Registramos SOLO el fix aceptado (evita inflar la bitácora con cada lectura de watchPosition).
+          GpsBitacoraService.registrarUbicacion(coords.latitude, coords.longitude, coords.accuracy);
         } else {
           console.warn(`[LocationService] Sin lecturas GPS válidas (${motivo})`);
         }
-        resolve(mejor);
+        resolve(coords);
       };
+
+      const finalizar = (motivo: string) => aceptar(mejor, motivo);
 
       const temporizadorTotal = setTimeout(() => finalizar("timeout"), tiempoMaximoMs);
 
@@ -375,6 +380,13 @@ class LocationService {
           };
           const accuracy = coords.accuracy ?? 999;
           const transcurrido = Date.now() - inicio;
+
+          // Guarda contra timers JS aplazados cuando la app se suspende (fondo/pantalla apagada).
+          // Si ya se pasó el presupuesto total, cortamos inmediatamente con lo que tengamos.
+          if (transcurrido >= tiempoMaximoMs) {
+            finalizar("timeout");
+            return;
+          }
 
           console.log(
             `[LocationService] Fix GPS (+${transcurrido} ms): lat=${coords.latitude.toFixed(6)},` +
@@ -400,6 +412,13 @@ class LocationService {
           // Cortamos en cuanto el mejor fix alcanza la precisión objetivo.
           if ((mejor.accuracy ?? 999) <= PRECISION_OBJETIVO) {
             finalizar("precisión objetivo");
+            return;
+          }
+
+          // O si el llamador acepta este fix (p. ej. ya cae dentro del rango del cliente).
+          if (condicionExito?.(coords)) {
+            aceptar(coords, "condición de éxito");
+            return;
           }
         },
         (error: GeoError) => {
@@ -444,7 +463,13 @@ class LocationService {
       return { valido: false, motivo: "sin_permiso", metrosPermitidos };
     }
 
-    const ubicacion = await this.getBestLocation(5, 10000, onProgreso);
+    const ubicacion = await this.getBestLocation(5, 10000, onProgreso, (coords) => {
+      const accuracy = coords.accuracy ?? 999;
+      if (accuracy > PRECISION_ABSURDA) return false;
+      const distancia = calcularDistancia(coords.latitude, coords.longitude, clienteLat, clienteLng);
+      const buffer = Math.min(accuracy, BUFFER_MAXIMO);
+      return distancia <= metrosPermitidos + buffer;
+    });
     const diag = this.getUltimoDiagnosticoGps();
     if (!ubicacion) {
       return { valido: false, motivo: "sin_senal", metrosPermitidos, ...diag };
