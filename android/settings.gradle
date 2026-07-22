@@ -3,6 +3,4 @@ plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'Xallapan'
 include ':app'
-include ':react-native-background-geolocation'
-project(':react-native-background-geolocation').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-background-geolocation/android')
 includeBuild('../node_modules/@react-native/gradle-plugin')

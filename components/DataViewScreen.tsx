@@ -37,6 +37,7 @@ type EntityType =
   | "bitacoraSync"
   | "cumplimiento"
   | "bitacoraGps"
+  | "bitacoraValidacion"
   | "inventarioEnvase"
   | "inventarioEnvasesHistorial"
   | "reubicaciones"
@@ -74,6 +75,7 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "bitacoraSync", title: "Bitácora Sync", icon: "cloud-sync" },
   { key: "cumplimiento", title: "Cumplimiento", icon: "trending-up" },
   { key: "bitacoraGps", title: "Bitácora GPS", icon: "location-on" },
+  { key: "bitacoraValidacion", title: "Validación Ubicación", icon: "verified" },
   { key: "inventarioEnvase", title: "Inventario Envase", icon: "inventory-2" },
   { key: "inventarioEnvasesHistorial", title: "Historial Envases", icon: "history-toggle-off" },
   { key: "reubicaciones", title: "Reubicaciones", icon: "place" },
@@ -183,6 +185,9 @@ export default function DataViewScreen() {
           break;
         case "bitacoraGps":
           setData(FullSyncService.getBitacoraGpsPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "bitacoraValidacion":
+          setData(FullSyncService.getBitacoraValidacionPaginated(offset, ITEMS_PER_PAGE));
           break;
         case "inventarioEnvase":
           setData(FullSyncService.getInventarioEnvasePaginated(offset, ITEMS_PER_PAGE));
@@ -719,6 +724,8 @@ export default function DataViewScreen() {
         return data.length; // El cumplimiento es un solo objeto
       case "bitacoraGps":
         return stats.bitacoraGps || 0;
+      case "bitacoraValidacion":
+        return stats.bitacoraValidacion || 0;
       case "inventarioEnvase":
         return stats.inventarioEnvase || 0;
       case "inventarioEnvasesHistorial":

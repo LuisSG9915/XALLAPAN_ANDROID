@@ -214,6 +214,39 @@ class LocationService {
   }
 
   /**
+   * Solicita el permiso de notificaciones (POST_NOTIFICATIONS).
+   * Requerido en Android 13+ para mostrar la notificación del foreground service.
+   */
+  async requestNotificationPermission(): Promise<PermissionStatus> {
+    if (Platform.OS !== "android") return "granted";
+
+    const sdkVersion = typeof Platform.Version === "string" ? parseInt(Platform.Version, 10) : (Platform.Version || 0);
+    if (sdkVersion < 33) return "granted";
+
+    try {
+      const alreadyGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      if (alreadyGranted) return "granted";
+
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        {
+          title: "Permiso de notificaciones",
+          message: "Para mostrar el aviso de ruta en segundo plano, permite las notificaciones.",
+          buttonNegative: "Cancelar",
+          buttonPositive: "Aceptar",
+        },
+      );
+
+      if (result === PermissionsAndroid.RESULTS.GRANTED) return "granted";
+      if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) return "blocked";
+      return "denied";
+    } catch (error) {
+      console.error("[LocationService] Error al solicitar notificaciones:", error);
+      return "denied";
+    }
+  }
+
+  /**
    * Verifica si ya se tienen los permisos de ubicación.
    * IMPORTANTE: Este método solo VERIFICA, no solicita permisos.
    */

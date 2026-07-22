@@ -3932,6 +3932,16 @@ class FullSyncService {
     );
   }
 
+  getBitacoraValidacionPaginated(offset: number = 0, limit: number = 50): any[] {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
+    return Array.from(
+      this.realm
+        .objects("BitacoraValidacion")
+        .sorted("fecha", true)
+        .slice(offset, offset + limit),
+    );
+  }
+
   getInventarioEnvasePaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(this.realm.objects("InventarioEnvase").slice(offset, offset + limit));
@@ -4544,6 +4554,7 @@ class FullSyncService {
         bitacoraSync: 0,
         inventarioEnvase: 0,
         bitacoraGps: 0,
+        bitacoraValidacion: 0,
         inventarioEnvasesHistorial: 0,
         reubicaciones: 0,
         visitasRealizadas: 0,
@@ -4571,6 +4582,7 @@ class FullSyncService {
       bitacoraSync: this.realm.objects("BitacoraSync").length,
       inventarioEnvase: this.realm.objects("InventarioEnvase").length,
       bitacoraGps: this.realm.objects("BitacoraGps").length,
+      bitacoraValidacion: this.realm.objects("BitacoraValidacion").length,
       inventarioEnvasesHistorial: this.realm.objects("InventarioEnvasesHistorial").length,
       reubicaciones: this.realm.objects("Reubicacion").length,
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
