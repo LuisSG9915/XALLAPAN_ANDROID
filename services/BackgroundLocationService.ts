@@ -6,6 +6,7 @@ import NetInfo from "@react-native-community/netinfo";
 import FullSyncService from "./FullSyncService";
 import GpsBitacoraService from "./GpsBitacoraService";
 import LocationService from "./LocationService";
+import { getCurrentScreenState } from "./ScreenState";
 
 const TAG = "[BackgroundLocationService]";
 
@@ -97,7 +98,7 @@ class BackgroundLocationService {
       );
       console.log(TAG, `Punto GPS guardado en Realm: lat=${location.latitude}, lng=${location.longitude}, cobertura=${conCobertura}`);
 
-      const motivo = this.getMotivoRecorrido();
+      const motivo = await this.getMotivoRecorrido();
       await GpsBitacoraService.registrarValidacion({
         idCliente: null,
         motivo,
@@ -121,21 +122,23 @@ class BackgroundLocationService {
   }
 
   /**
-   * Determina el contexto de la captura según el estado de la app:
-   * - "recorrido_app": app en primer plano (usuario dentro, pantalla encendida).
-   * - "recorrido_2plano": app en segundo plano (pantalla apagada u otra app).
-   * - "recorrido_inactivo": estado transitorio (inactive).
+   * Determina el contexto de la captura combinando:
+   * - estado de la pantalla (nativo): encendida / apagada.
+   * - AppState (React Native): active / background / inactive.
    */
-  private getMotivoRecorrido(): string {
-    switch (AppState.currentState) {
-      case "active":
-        return "recorrido_app";
-      case "inactive":
-        return "recorrido_inactivo";
-      case "background":
-      default:
-        return "recorrido_2plano";
+  private async getMotivoRecorrido(): Promise<string> {
+    const screenState = await getCurrentScreenState();
+
+    if (screenState === "off") {
+      return "recorrido_pantalla_apagada";
     }
+
+    // screenState === "on" (pantalla encendida)
+    if (AppState.currentState === "active") {
+      return "recorrido_app";
+    }
+
+    return "recorrido_pantalla_encendida_2plano";
   }
 
   /**
