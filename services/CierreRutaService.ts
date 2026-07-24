@@ -31,6 +31,15 @@ class CierreRutaService {
   async setRutaCerrada(sucursal: number, vendedor: number, cerrada: boolean): Promise<void> {
     const realm = this.getRealm();
     const id = `${sucursal}-${vendedor}`;
+    const cierreRuta: any = realm.objectForPrimaryKey("CierreRuta", id);
+
+    if (!cerrada && cierreRuta?.rutaCerrada !== true) {
+      console.log(`Ruta ya abierta para sucursal ${sucursal}, vendedor ${vendedor}; no se registra otro cambio.`);
+      return;
+    }
+
+    const updatedAt = new Date();
+    const fechaCierre = cerrada ? updatedAt : cierreRuta?.fechaCierre ?? updatedAt;
 
     realm.write(() => {
       realm.create(
@@ -39,9 +48,9 @@ class CierreRutaService {
           id,
           sucursal,
           vendedor,
-          fechaCierre: cerrada ? new Date() : null,
+          fechaCierre,
           rutaCerrada: cerrada,
-          updatedAt: new Date(),
+          updatedAt,
           enviado: false, // Marcar como pendiente de sincronizar
         },
         Realm.UpdateMode.Modified

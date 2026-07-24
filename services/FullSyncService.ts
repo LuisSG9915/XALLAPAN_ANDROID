@@ -14,6 +14,7 @@ class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
+  private cierreRutaSendInFlight: Promise<{ success: boolean; sent: number; error?: string }> | null = null;
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -4087,13 +4088,33 @@ class FullSyncService {
     sucursal: number,
     idUsuario: number,
   ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (this.cierreRutaSendInFlight) {
+      return this.cierreRutaSendInFlight;
+    }
+
+    const sendPromise = this.sendPendingCierreRutaToServerInternal(sucursal, idUsuario);
+    this.cierreRutaSendInFlight = sendPromise;
+
+    try {
+      return await sendPromise;
+    } finally {
+      this.cierreRutaSendInFlight = null;
+    }
+  }
+
+  private async sendPendingCierreRutaToServerInternal(
+    sucursal: number,
+    idUsuario: number,
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
     if (!this.realm || this.realm.isClosed) {
       return { success: false, sent: 0, error: "Realm no inicializado" };
     }
 
     try {
       // Obtener cierres no sincronizados (enviado == false o null)
-      const cierresPendientes = this.realm.objects("CierreRuta").filtered("enviado == false || enviado == null");
+      const cierresPendientes = this.realm
+        .objects("CierreRuta")
+        .filtered("(enviado == false || enviado == null) AND sucursal == $0 AND vendedor == $1", sucursal, idUsuario);
       console.log("CIERRE EJECUTANDO");
       if (cierresPendientes.length === 0) {
         console.log("SIN CIERRE");
@@ -4114,7 +4135,7 @@ class FullSyncService {
       const payload = Array.from(cierresPendientes).map((c: any) => ({
         sucursal: c.sucursal ?? sucursal,
         vendedor: c.vendedor ?? idUsuario,
-        fechaCierre: formatDate(c.fechaCierre),
+        fechaCierre: formatDate(c.fechaCierre ?? c.updatedAt),
         rutaCerrada: c.rutaCerrada ?? false,
         updatedAt: formatDate(c.updatedAt) || formatDate(new Date()),
       }));
@@ -4189,12 +4210,15 @@ class FullSyncService {
 
       this.realm.write(() => {
         for (const cierre of cierres) {
+          const cierreSucursal = cierre.sucursal ?? sucursal;
+          const cierreVendedor = cierre.vendedor ?? vendedor;
+          const rutaCerrada = cierre.rutaCerrada === true || cierre.rutaCerrada === 1 || cierre.rutaCerrada === "1";
           const data = {
-            id: `${sucursal}-${vendedor}`,
-            sucursal: cierre.sucursal,
-            vendedor: cierre.vendedor,
-            fechaCierre: cierre.fechaCierre ? new Date(cierre.fechaCierre) : new Date(),
-            rutaCerrada: cierre.rutaCerrada ?? true,
+            id: `${cierreSucursal}-${cierreVendedor}`,
+            sucursal: cierreSucursal,
+            vendedor: cierreVendedor,
+            fechaCierre: cierre.fechaCierre ? new Date(cierre.fechaCierre) : null,
+            rutaCerrada,
             updatedAt: cierre.updatedAt ? new Date(cierre.updatedAt) : new Date(),
             enviado: true,
           };
