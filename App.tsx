@@ -45,6 +45,8 @@ import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
+import BackgroundActions from "react-native-background-actions";
+import BackgroundLocationService from "./services/BackgroundLocationService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
@@ -467,6 +469,20 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
       setRutaCerrada(rutaStatus);
       await syncRouteTracking(rutaStatus);
+
+      // Health check: si la ruta esta abierta pero el foreground service no corre, reiniciarlo
+      if (!rutaStatus) {
+        const servicioCorriendo = BackgroundActions.isRunning();
+        if (!servicioCorriendo) {
+          console.warn("[App] Foreground service detenido inesperadamente. Reiniciando...");
+          try {
+            await BackgroundLocationService.start();
+            console.log("[App] Foreground service reiniciado exitosamente");
+          } catch (e) {
+            console.error("[App] Error al reiniciar foreground service:", e);
+          }
+        }
+      }
     };
 
     verificarRuta();

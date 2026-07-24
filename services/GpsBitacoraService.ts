@@ -59,6 +59,95 @@ class GpsBitacoraService {
   }
 
   /**
+   * Registra una ubicación GPS y su validación de recorrido en una sola transacción Realm.
+   * Usado por BackgroundLocationService cada 30s para evitar dos write() separados.
+   */
+  async registrarCapturaTracking(
+    latitud: number,
+    longitud: number,
+    precision: number | undefined,
+    conCobertura: boolean | undefined,
+    motivoRecorrido: string,
+  ): Promise<void> {
+    try {
+      if (!this.realm || this.realm.isClosed) {
+        console.warn("[GpsBitacoraService] Realm no inicializado. Se omitirá registro de tracking.");
+        return;
+      }
+
+      const realm = this.getRealm();
+      const user = await AuthService.restoreSession();
+      if (!user) {
+        console.warn("[GpsBitacoraService] Usuario no logueado, omitiendo registro de tracking");
+        return;
+      }
+
+      const idUsuario = user.id || user.idUsuario || 0;
+      const sucursal = user.sucursal || user.sucursal_origen || 0;
+
+      let metros: number | null = null;
+      try {
+        const realmUser = realm.objectForPrimaryKey("Usuario", idUsuario) as any;
+        metros = realmUser?.metros ?? null;
+      } catch (e) {
+        metros = null;
+      }
+
+      const gpsId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const valId = `${Date.now()}-${Math.random().toString(36).substring(2, 12)}`;
+      const now = new Date();
+
+      realm.write(() => {
+        realm.create("BitacoraGps", {
+          id: gpsId,
+          idUsuario,
+          sucursal,
+          latitud,
+          longitud,
+          precision: precision ?? null,
+          bateria: metros ?? null,
+          conCobertura: conCobertura ?? null,
+          id_movil: null,
+          fecha: now,
+          enviado: false,
+        });
+
+        realm.create("BitacoraValidacion", {
+          id: valId,
+          idUsuario,
+          sucursal,
+          idCliente: null,
+          motivo: motivoRecorrido,
+          valido: true,
+          distancia: null,
+          accuracy: precision ?? null,
+          metrosPermitidos: null,
+          latitud,
+          longitud,
+          clienteLatitud: null,
+          clienteLongitud: null,
+          numFixes: 1,
+          peorAccuracy: precision ?? null,
+          tiempoMs: null,
+          conCobertura: conCobertura ?? null,
+          id_movil: null,
+          plataforma: Platform.OS,
+          versionApp: null,
+          fecha: now,
+          enviado: false,
+        });
+      });
+
+      console.log(
+        `[GpsBitacoraService] Tracking registrado: lat=${latitud}, lng=${longitud}, ` +
+          `precision=${precision}, cobertura=${conCobertura}, motivo=${motivoRecorrido}`,
+      );
+    } catch (error) {
+      console.warn("[GpsBitacoraService] Error al registrar captura de tracking:", error);
+    }
+  }
+
+  /**
    * Registra una ubicación GPS en la bitácora local (Realm).
    * Se llama automáticamente desde LocationService.getCurrentLocation()
    */
@@ -286,6 +375,38 @@ class GpsBitacoraService {
       }
     } catch (error) {
       console.error("[GpsBitacoraService] ❌ Error crítico enviando lote:", error);
+    }
+  }
+
+  /**
+   * Elimina registros ya enviados con más de `diasAntiguedad` días.
+   * Se llama después de cada sync exitoso para evitar que Realm crezca sin control.
+   */
+  limpiarRegistrosEnviados(diasAntiguedad: number = 7): void {
+    if (!this.realm || this.realm.isClosed) return;
+
+    const realm = this.getRealm();
+    const corte = new Date();
+    corte.setDate(corte.getDate() - diasAntiguedad);
+
+    try {
+      const gpsEnviados = realm.objects("BitacoraGps").filtered("enviado == true AND fecha < $0", corte);
+      const validacionesEnviadas = realm.objects("BitacoraValidacion").filtered("enviado == true AND fecha < $0", corte);
+      const totalGps = gpsEnviados.length;
+      const totalVal = validacionesEnviadas.length;
+
+      if (totalGps === 0 && totalVal === 0) return;
+
+      realm.write(() => {
+        realm.delete(gpsEnviados);
+        realm.delete(validacionesEnviadas);
+      });
+
+      console.log(
+        `[GpsBitacoraService] Limpieza: ${totalGps} BitacoraGps y ${totalVal} BitacoraValidacion eliminados (antigüedad > ${diasAntiguedad} días)`,
+      );
+    } catch (error) {
+      console.warn("[GpsBitacoraService] Error al limpiar registros enviados:", error);
     }
   }
 

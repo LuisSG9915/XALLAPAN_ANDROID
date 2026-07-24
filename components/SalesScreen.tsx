@@ -118,6 +118,9 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
 
+  // Cache de GPS obtenido durante validacion de visita/venta para reutilizar en processSale
+  const gpsCacheRef = useRef<{ latitude: number; longitude: number; ts: number } | null>(null);
+
   // Visitar flow (tipo visita modal, como CumplimientoScreen)
   const [tipoVisitaModalOpen, setTipoVisitaModalOpen] = useState(false);
   const [clienteParaVisitar, setClienteParaVisitar] = useState<Cliente | null>(null);
@@ -1190,6 +1193,16 @@ export default function SalesScreen({ route }: { route?: any }) {
           setVisitaConfirmModalOpen(false);
           return;
         }
+        // Cache GPS para reutilizar en processSale y evitar segunda ronda completa
+        try {
+          const coords = await LocationService.getCurrentLocation();
+          if (coords) {
+            gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now() };
+            console.log("[Sales] GPS cacheado para venta posterior");
+          }
+        } catch (cacheErr) {
+          console.warn("[Sales] No se pudo cachear GPS post-validacion:", cacheErr);
+        }
       } else {
         console.log("[Sales] Cliente sin ubicación, permitiendo venta sin validación GPS");
         // Si el cliente no tiene ubicación, permitir la venta sin validación
@@ -1853,26 +1866,6 @@ export default function SalesScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Verificar que la ubicación GPS esté activa antes de procesar la venta
-    try {
-      const locationAvailable = await LocationService.getBestLocation();
-      if (!locationAvailable) {
-        Alert.alert(
-          "Ubicación Requerida",
-          "No se puede procesar la venta sin acceso a la ubicación GPS. Por favor activa la ubicación en tu dispositivo e intenta de nuevo.",
-        );
-        setProcessingVenta(false);
-        return;
-      }
-    } catch (locationError) {
-      Alert.alert(
-        "Ubicación Requerida",
-        "No se puede procesar la venta sin acceso a la ubicación GPS. Por favor activa la ubicación en tu dispositivo e intenta de nuevo.",
-      );
-      setProcessingVenta(false);
-      return;
-    }
-
     // Procesar inputs pendientes antes de validar
     // (en caso de que el usuario no haya salido del campo de cantidad)
     const updatedCart = cart.filter((item) => {
@@ -2021,23 +2014,30 @@ export default function SalesScreen({ route }: { route?: any }) {
         return;
       }
 
-      // Obtener coordenadas GPS para la venta (mejor lectura de hasta 3 intentos)
-      console.log("[Sales] 📍 Obteniendo mejor ubicación GPS para venta...");
+      // Obtener coordenadas GPS para la venta, reutilizando cache de la visita si es reciente
+      console.log("[Sales] 📍 Obteniendo ubicación GPS para venta...");
       let coordinates: LocationCoordinates | null = null;
-      try {
-        coordinates = await LocationService.getBestLocation();
-        if (coordinates) {
-          console.log("[Sales] ✅ Ubicación obtenida para venta:", {
-            lat: coordinates.latitude,
-            lng: coordinates.longitude,
-            accuracy: Math.round(coordinates.accuracy ?? 999),
-            metrosValidacion: userMetros,
-          });
-        } else {
-          console.warn("[Sales] ⚠️ No se pudo obtener la ubicación GPS");
+      const cache = gpsCacheRef.current;
+      if (cache && Date.now() - cache.ts < 120_000) {
+        coordinates = { latitude: cache.latitude, longitude: cache.longitude };
+        console.log("[Sales] ✅ Usando GPS cacheado de la visita (antiguedad:", Math.round((Date.now() - cache.ts) / 1000), "s)");
+      }
+      if (!coordinates) {
+        try {
+          coordinates = await LocationService.getBestLocation();
+          if (coordinates) {
+            console.log("[Sales] ✅ Ubicación GPS fresca obtenida para venta:", {
+              lat: coordinates.latitude,
+              lng: coordinates.longitude,
+              accuracy: Math.round(coordinates.accuracy ?? 999),
+              metrosValidacion: userMetros,
+            });
+          } else {
+            console.warn("[Sales] ⚠️ No se pudo obtener la ubicación GPS");
+          }
+        } catch (locationError) {
+          console.error("[Sales] ⚠️ Error al obtener ubicación (no crítico):", locationError);
         }
-      } catch (locationError) {
-        console.error("[Sales] ⚠️ Error al obtener ubicación (no crítico):", locationError);
       }
 
       // Intentar imprimir ticket (no crítico si falla)

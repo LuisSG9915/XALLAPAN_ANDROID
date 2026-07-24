@@ -55,8 +55,9 @@ class BackgroundLocationService {
         },
         {
           enableHighAccuracy: true,
-          timeout: 20000,
+          timeout: 15000,
           maximumAge: 0,
+          distanceFilter: 5,
           showLocationDialog: false,
         } as any
       );
@@ -66,14 +67,22 @@ class BackgroundLocationService {
   /**
    * Bucle del foreground service. Corre en un contexto HeadlessJS,
    * captura la ubicación y la guarda en Realm cada intervalMs.
+   *
+   * El ciclo calcula el tiempo restante antes del proximo disparo
+   * para mantener una cadencia fija (ej. cada 30 s reales),
+   * evitando deriva acumulativa por el tiempo que tarda cada captura.
    */
   private async backgroundTask(): Promise<void> {
     await this.ensureReady();
-    console.log(TAG, "Tarea headless GPS iniciada. isTaskRunning:", this.isTaskRunning);
+    console.log(TAG, "Tarea headless GPS iniciada. isTaskRunning:", this.isTaskRunning, "intervalo:", this.intervalMs, "ms");
+    let nextFire = Date.now();
     do {
       await this.captureOnce();
-      if (this.isTaskRunning) {
-        await sleep(this.intervalMs);
+      if (!this.isTaskRunning) break;
+      nextFire += this.intervalMs;
+      const remaining = Math.max(0, nextFire - Date.now());
+      if (remaining > 0) {
+        await sleep(remaining);
       }
     } while (this.isTaskRunning);
     console.log(TAG, "Tarea headless GPS finalizada");
@@ -90,32 +99,15 @@ class BackgroundLocationService {
       console.log(TAG, `Fix obtenido: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}`);
       const netInfo = await NetInfo.fetch();
       const conCobertura = netInfo.isConnected === true;
-      await GpsBitacoraService.registrarUbicacion(
+      const motivo = await this.getMotivoRecorrido();
+      await GpsBitacoraService.registrarCapturaTracking(
         location.latitude,
         location.longitude,
         location.accuracy,
-        conCobertura
-      );
-      console.log(TAG, `Punto GPS guardado en Realm: lat=${location.latitude}, lng=${location.longitude}, cobertura=${conCobertura}`);
-
-      const motivo = await this.getMotivoRecorrido();
-      await GpsBitacoraService.registrarValidacion({
-        idCliente: null,
-        motivo,
-        valido: true,
-        distancia: null,
-        accuracy: location.accuracy ?? null,
-        metrosPermitidos: null,
-        latitud: location.latitude,
-        longitud: location.longitude,
-        clienteLatitud: null,
-        clienteLongitud: null,
-        numFixes: 1,
-        peorAccuracy: location.accuracy ?? null,
-        tiempoMs: null,
         conCobertura,
-      });
-      console.log(TAG, `Recorrido registrado en BitacoraValidacion (motivo=${motivo})`);
+        motivo,
+      );
+      console.log(TAG, `Tracking GPS registrado: lat=${location.latitude}, lng=${location.longitude}, cobertura=${conCobertura}, motivo=${motivo}`);
     } catch (error) {
       console.error(TAG, "Error en iteración de captura:", error);
     }
