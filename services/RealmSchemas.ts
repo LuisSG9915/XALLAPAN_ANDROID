@@ -407,7 +407,7 @@ export const BitacoraValidacionSchema = {
     idUsuario: "int",
     sucursal: "int",
     idCliente: "int?",
-    motivo: "string", // ok | sin_permiso | sin_senal | precision_baja | fuera_de_rango
+    motivo: "string", // ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango
     valido: "bool",
     distancia: "float?", // metros medidos al cliente
     accuracy: "float?", // precisión (±m) del mejor fix
@@ -421,6 +421,38 @@ export const BitacoraValidacionSchema = {
     tiempoMs: "int?", // ms que tardó en resolver la ubicación
     conCobertura: "bool?",
     id_movil: "int?",
+    plataforma: "string?", // android | ios
+    versionApp: "string?",
+    fecha: "date",
+    enviado: "bool", // true = ya sincronizado al servidor
+  },
+  primaryKey: "id",
+};
+
+/**
+ * Schema para bitácora de tiempos del cierre de venta.
+ * Guarda UNA fila por cada venta procesada (SalesScreen.processSale)
+ * para medir en el servidor cuánto tarda cada etapa del cierre
+ * (GPS, impresión, guardado local, post-venta) y detectar cuellos de botella.
+ */
+export const BitacoraTiemposVentaSchema = {
+  name: "BitacoraTiemposVenta",
+  properties: {
+    id: "string", // UUID único: timestamp-random
+    idUsuario: "int",
+    sucursal: "int",
+    idCliente: "int?",
+    idMovil: "int?", // id_movil de la venta generada
+    gpsFuente: "string?", // cache_visita | cache_prefetch | cache_venta | paralelo | sin_gps
+    gpsMs: "int?", // ms que el cierre se detuvo esperando el GPS (0 si vino de cache)
+    impresionMs: "int?", // ms del bloque de impresión de ticket (incluye reconexión BT)
+    guardadoVentaMs: "int?", // ms de createLocalVentas (escritura Realm)
+    postVentaMs: "int?", // ms de envases + inventario + marcar visita
+    totalMs: "int?", // ms totales del cierre (processSale completo)
+    items: "int?", // productos en el carrito
+    dobleTicket: "bool?",
+    ticketImpreso: "bool?",
+    conCobertura: "bool?",
     plataforma: "string?", // android | ios
     versionApp: "string?",
     fecha: "date",
@@ -612,6 +644,7 @@ export const allSchemas = [
   BitacoraSyncSchema,
   BitacoraGpsSchema,
   BitacoraValidacionSchema,
+  BitacoraTiemposVentaSchema,
   InventarioEnvaseSchema,
   InventarioEnvasesHistorialSchema,
   ReubicacionSchema,

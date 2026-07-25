@@ -134,9 +134,14 @@ function App() {
 
         isCheckingRef.current = true;
         try {
-          // Solicitar el estado del permiso
-          const status = await LocationService.requestPermission();
-          setPermissionStatus(status);
+          // Solo VERIFICAR, sin re-solicitar: al volver del diálogo del sistema
+          // o de Configuración, un request() automático reabre el diálogo en
+          // bucle aunque el usuario ya hubiera respondido.
+          const hasPermission = await LocationService.checkPermission();
+          setPermissionStatus((prev) => {
+            if (hasPermission) return "granted";
+            return prev === "blocked" ? "blocked" : "denied";
+          });
         } catch (error) {
         } finally {
           isCheckingRef.current = false;
@@ -916,7 +921,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.3</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.3.1</Text>
         </View>
       </ScrollView>
 

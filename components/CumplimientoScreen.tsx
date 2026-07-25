@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
@@ -487,8 +487,23 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     );
   };
 
+  // Guardia síncrona contra doble tap: el state `validandoUbicacion` tarda un
+  // frame en deshabilitar el botón; dos taps rápidos lanzaban dos validaciones
+  // concurrentes (y dos registros idénticos en la bitácora).
+  const visitandoRef = useRef(false);
+
   // Visitar cliente desde tabs Cercanos/Todos
   const handleVisitarCliente = async (cliente: ClienteLite) => {
+    if (visitandoRef.current) return;
+    visitandoRef.current = true;
+    try {
+      await handleVisitarClienteImpl(cliente);
+    } finally {
+      visitandoRef.current = false;
+    }
+  };
+
+  const handleVisitarClienteImpl = async (cliente: ClienteLite) => {
     // Función auxiliar para comparar fechas (mismo día)
     const isSameDay = (date1: Date, date2: Date): boolean => {
       return (

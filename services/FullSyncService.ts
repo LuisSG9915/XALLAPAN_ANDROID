@@ -25,8 +25,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 47,
+        schemaVersion: 48,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v48: Nueva tabla BitacoraTiemposVenta (medición de tiempos del cierre de venta)
+          if (oldRealm.schemaVersion < 48) {
+            console.log("[Migration v48] Creando tabla BitacoraTiemposVenta");
+          }
+
           // Migración v47: Nueva tabla BitacoraValidacion (diagnóstico de validaciones GPS)
           if (oldRealm.schemaVersion < 47) {
             console.log("[Migration v47] Creando tabla BitacoraValidacion");
@@ -672,6 +677,8 @@ class FullSyncService {
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");
+        await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
       } catch (error) {
         console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
       }
@@ -2193,6 +2200,8 @@ class FullSyncService {
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");
+        await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
       } catch (error) {
         console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
       }

@@ -18,7 +18,8 @@ import BluetoothPrinterService from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import BackgroundSyncService from "../services/BackgroundSyncService";
 import AuthService, { Usuario } from "../services/AuthService";
-import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
+import LocationService, { LocationCoordinates, calcularDistancia, estaDentroDeRango } from "../services/LocationService";
+import GpsBitacoraService from "../services/GpsBitacoraService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import ReubicacionService from "../services/ReubicacionService";
@@ -76,6 +77,16 @@ const generateMovilSaleId = (sucursal: number): number => {
   return MOVIL_ID_BASE + seconds * 1000 + (sucursal % 1000);
 };
 
+// TTL del cache de GPS para la venta. El vendedor permanece en el domicilio del
+// cliente durante toda la venta, así que 10 minutos es una antigüedad razonable
+// y evita una segunda lectura GPS bloqueante al presionar "Procesar Venta".
+const GPS_CACHE_TTL_MS = 600_000; // 10 minutos
+// Presupuesto máximo de espera residual del GPS antes de guardar la venta.
+// El GPS corre en paralelo con la impresión del ticket; si aún no resuelve al
+// momento de guardar, solo se espera este tiempo acotado (la venta nunca se
+// detiene 6-10 s por el GPS como antes).
+const GPS_ESPERA_RESIDUAL_MAX_MS = 3_000;
+
 export default function SalesScreen({ route }: { route?: any }) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -107,19 +118,28 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [clientesEntregaDia, setClientesEntregaDia] = useState<Cliente[]>([]);
   const [currentDetalleVisitaId, setCurrentDetalleVisitaId] = useState<string | null>(null);
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
+  // Precisión del fix GPS en curso, para mostrar progreso vivo mientras valida
+  // (p. ej. "±38 m") en vez de un spinner mudo que desespera al vendedor.
+  const [progresoGps, setProgresoGps] = useState<string | null>(null);
   const [userMetros, setUserMetros] = useState<number | null>(null);
 
   // Tabs del modal de clientes: 'agendados' | 'cercanos' | 'todos'
   const [clienteTabActivo, setClienteTabActivo] = useState<"agendados" | "cercanos" | "todos">("agendados");
-  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
   const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
   const [loadingAgendados, setLoadingAgendados] = useState(false);
   const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
 
-  // Cache de GPS obtenido durante validacion de visita/venta para reutilizar en processSale
-  const gpsCacheRef = useRef<{ latitude: number; longitude: number; ts: number } | null>(null);
+  // Cache de GPS obtenido durante validacion de visita/venta para reutilizar en processSale.
+  // `source` indica quién lo llenó (visita | prefetch | venta) para la bitácora de tiempos.
+  const gpsCacheRef = useRef<{ latitude: number; longitude: number; ts: number; source?: string } | null>(null);
+  // Guardia para no lanzar lecturas GPS de pre-fetch duplicadas
+  const gpsPrefetchingRef = useRef(false);
+  // Promesa del pre-fetch en curso: processSale la reutiliza si el vendedor
+  // cobra antes de que termine, en vez de iniciar una lectura GPS desde cero
+  const gpsPrefetchPromiseRef = useRef<Promise<LocationCoordinates | null> | null>(null);
 
   // Visitar flow (tipo visita modal, como CumplimientoScreen)
   const [tipoVisitaModalOpen, setTipoVisitaModalOpen] = useState(false);
@@ -971,7 +991,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     try {
       const ubicacion = await LocationService.getBestLocation();
       if (ubicacion) {
-        setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude });
+        setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude, accuracy: ubicacion.accuracy });
         // Calcular top 5 más cercanos
         const clientesConCoords = clientes.filter(
           (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
@@ -1002,41 +1022,55 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
   };
 
+  // Guardia síncrona contra doble tap: el state `validandoUbicacion` tarda un
+  // frame en deshabilitar el botón; dos taps rápidos lanzaban dos validaciones
+  // concurrentes (y dos registros idénticos en la bitácora).
+  const visitandoRef = useRef(false);
+
   // Iniciar flujo de "Visitar" (como CumplimientoScreen: validar ubicación → seleccionar tipo → marcar visitado)
   const handleVisitarCliente = async (cliente: Cliente) => {
-    console.log("[Sales] handleVisitarCliente:", cliente.nombre);
+    if (visitandoRef.current) return;
+    visitandoRef.current = true;
+    try {
+      console.log("[Sales] handleVisitarCliente:", cliente.nombre);
 
-    // Si el cliente fue reubicado, omitir validación de ubicación
-    const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
+      // Si el cliente fue reubicado, omitir validación de ubicación
+      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
 
-    // Verificar ubicación
-    if (omitirValidacionUbicacion) {
-      console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
-    } else if (cliente.latitud && cliente.longitud) {
-      setValidandoUbicacion(true);
-      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
-        cliente.latitud,
-        cliente.longitud,
-        userMetros ?? cliente.metros ?? 100,
-        undefined,
-        {
-          id: cliente.id,
-          nombre: cliente.nombre,
-          lat: cliente.latitud,
-          lng: cliente.longitud,
-        },
-      );
-      setValidandoUbicacion(false);
-      if (!ubicacionValida) return;
-    } else {
-      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
-      return;
+      // Verificar ubicación
+      if (omitirValidacionUbicacion) {
+        console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
+      } else if (cliente.latitud && cliente.longitud) {
+        setValidandoUbicacion(true);
+        setProgresoGps(null);
+        const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+          cliente.latitud,
+          cliente.longitud,
+          userMetros ?? cliente.metros ?? 100,
+          (_intento, _total, acc) => setProgresoGps(`±${Math.round(acc)} m`),
+          {
+            id: cliente.id,
+            nombre: cliente.nombre,
+            lat: cliente.latitud,
+            lng: cliente.longitud,
+          },
+        );
+        setValidandoUbicacion(false);
+        setProgresoGps(null);
+        if (!ubicacionValida) return;
+      } else {
+        Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
+        return;
+      }
+
+      // Abrir modal de tipo de visita
+      setClienteParaVisitar(cliente);
+      setTipoVisitaSeleccionado(null);
+      setTipoVisitaModalOpen(true);
+    } finally {
+      visitandoRef.current = false;
+      setProgresoGps(null);
     }
-
-    // Abrir modal de tipo de visita
-    setClienteParaVisitar(cliente);
-    setTipoVisitaSeleccionado(null);
-    setTipoVisitaModalOpen(true);
   };
 
   // Confirmar visita con tipo seleccionado (como CumplimientoScreen.confirmarMarcarVisitado)
@@ -1197,7 +1231,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         try {
           const coords = await LocationService.getCurrentLocation();
           if (coords) {
-            gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now() };
+            gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now(), source: "visita" };
             console.log("[Sales] GPS cacheado para venta posterior");
           }
         } catch (cacheErr) {
@@ -1595,7 +1629,39 @@ export default function SalesScreen({ route }: { route?: any }) {
     setProductoModalOpen(false);
   };
 
+  // Pre-fetch GPS en segundo plano: al agregar el primer producto al carrito se
+  // dispara una lectura GPS sin await. Para cuando el vendedor presione
+  // "Procesar Venta", el cache ya está fresco y el cierre no espera al GPS.
+  const prefetchGpsParaVenta = () => {
+    const cache = gpsCacheRef.current;
+    if (cache && Date.now() - cache.ts < GPS_CACHE_TTL_MS) return; // cache vigente
+    if (gpsPrefetchingRef.current) return; // ya hay una lectura en curso
+    gpsPrefetchingRef.current = true;
+    console.log("[Sales] 📍 Pre-fetch GPS en segundo plano (inicio de armado de pedido)...");
+    const prefetchPromise = LocationService.getBestLocation()
+      .then((coords) => {
+        if (coords) {
+          gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now(), source: "prefetch" };
+          console.log("[Sales] ✅ Pre-fetch GPS listo, cache actualizado para la venta");
+        }
+        return coords;
+      })
+      .catch((err) => {
+        console.warn("[Sales] Pre-fetch GPS falló (no crítico):", err);
+        return null;
+      })
+      .finally(() => {
+        gpsPrefetchingRef.current = false;
+        gpsPrefetchPromiseRef.current = null;
+      });
+    gpsPrefetchPromiseRef.current = prefetchPromise;
+  };
+
   const addToCart = (p: Producto) => {
+    // Primer producto del pedido: arrancar el GPS en segundo plano
+    if (cart.length === 0) {
+      prefetchGpsParaVenta();
+    }
     // Consultar kits del producto para detectar intercambio (recuperaEnvaseOtro) o prestamo (controlPresamo)
     const kitsDelProducto = FullSyncService.getKitsByProducto(p.id);
     const tieneRecuperaEnvaseOtro = kitsDelProducto.some((k: any) => k.recuperaEnvaseOtro);
@@ -1981,6 +2047,14 @@ export default function SalesScreen({ route }: { route?: any }) {
     let ventasCreadas = false;
     let inventarioActualizado = false;
 
+    // Instrumentación de tiempos del cierre (bitácora BitacoraTiemposVenta)
+    const ventaT0 = Date.now();
+    let gpsFuente = "sin_gps";
+    let gpsEsperaMs = 0;
+    let impresionMs: number | null = null;
+    let guardadoVentaMs: number | null = null;
+    let dobleTicketUsado = false;
+
     try {
       const sucursal = currentSucursal || 1;
       const saleIdMovil = buildMovilSaleId(sucursal);
@@ -2014,33 +2088,57 @@ export default function SalesScreen({ route }: { route?: any }) {
         return;
       }
 
-      // Obtener coordenadas GPS para la venta, reutilizando cache de la visita si es reciente
+      // Obtener coordenadas GPS para la venta, reutilizando cache si es reciente.
+      // El vendedor permanece en el domicilio del cliente durante toda la venta,
+      // por lo que el cache (visita o pre-fetch) es válido hasta GPS_CACHE_TTL_MS.
       console.log("[Sales] 📍 Obteniendo ubicación GPS para venta...");
       let coordinates: LocationCoordinates | null = null;
+      let gpsPromise: Promise<LocationCoordinates | null> | null = null;
       const cache = gpsCacheRef.current;
-      if (cache && Date.now() - cache.ts < 120_000) {
+      if (cache && Date.now() - cache.ts < GPS_CACHE_TTL_MS) {
         coordinates = { latitude: cache.latitude, longitude: cache.longitude };
-        console.log("[Sales] ✅ Usando GPS cacheado de la visita (antiguedad:", Math.round((Date.now() - cache.ts) / 1000), "s)");
-      }
-      if (!coordinates) {
-        try {
-          coordinates = await LocationService.getBestLocation();
-          if (coordinates) {
-            console.log("[Sales] ✅ Ubicación GPS fresca obtenida para venta:", {
-              lat: coordinates.latitude,
-              lng: coordinates.longitude,
-              accuracy: Math.round(coordinates.accuracy ?? 999),
-              metrosValidacion: userMetros,
-            });
-          } else {
-            console.warn("[Sales] ⚠️ No se pudo obtener la ubicación GPS");
-          }
-        } catch (locationError) {
-          console.error("[Sales] ⚠️ Error al obtener ubicación (no crítico):", locationError);
-        }
+        gpsFuente = `cache_${cache.source || "visita"}`;
+        console.log(
+          "[Sales] ✅ Usando GPS cacheado (fuente:",
+          cache.source || "visita",
+          ", antiguedad:",
+          Math.round((Date.now() - cache.ts) / 1000),
+          "s)",
+        );
+      } else if (gpsPrefetchPromiseRef.current) {
+        // El pre-fetch (disparado al agregar el primer producto) sigue en curso:
+        // se reutiliza esa lectura ya caliente en vez de iniciar otra desde cero.
+        // Solo se espera el presupuesto residual acotado antes de guardar.
+        gpsFuente = "paralelo_prefetch";
+        console.log("[Sales] ⏱️ Reutilizando lectura GPS del pre-fetch en curso...");
+        gpsPromise = gpsPrefetchPromiseRef.current;
+      } else {
+        // Sin cache válido: el GPS corre EN PARALELO con la impresión del ticket
+        // (que normalmente tarda varios segundos). No se hace await aquí; solo se
+        // espera un presupuesto residual acotado justo antes de guardar la venta.
+        gpsFuente = "paralelo";
+        console.log("[Sales] ⏱️ Sin cache GPS vigente: lectura GPS en paralelo con la impresión...");
+        gpsPromise = LocationService.getBestLocation()
+          .then((coords) => {
+            if (coords) {
+              gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now(), source: "venta" };
+              console.log("[Sales] ✅ Ubicación GPS fresca obtenida en paralelo:", {
+                lat: coords.latitude,
+                lng: coords.longitude,
+                accuracy: Math.round(coords.accuracy ?? 999),
+                metrosValidacion: userMetros,
+              });
+            }
+            return coords;
+          })
+          .catch((locationError) => {
+            console.error("[Sales] ⚠️ Error al obtener ubicación (no crítico):", locationError);
+            return null;
+          });
       }
 
       // Intentar imprimir ticket (no crítico si falla)
+      const tImpresion0 = Date.now();
       let ticketImpreso = false;
       try {
         // Obtener datos del usuario desde Realm (tabla Usuario) para el ticket
@@ -2239,6 +2337,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
         const dobleTicketValue = usuarioTicketData.dobleTicket as any;
         const esDobleTicket = dobleTicketValue === true || dobleTicketValue === 1 || dobleTicketValue === "1";
+        dobleTicketUsado = esDobleTicket;
         console.log("[Sales] dobleTicket raw:", usuarioTicketData.dobleTicket, "evaluado:", esDobleTicket);
 
         if (esDobleTicket) {
@@ -2254,9 +2353,31 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.error("[Sales] ⚠️ Error al imprimir ticket (no crítico):", printError);
         // Continuar con la venta aunque falle la impresión
       }
+      impresionMs = Date.now() - tImpresion0;
+      console.log(`[Sales] ⏱️ Bloque de impresión tomó ${impresionMs}ms`);
+
+      // Si el GPS quedó corriendo en paralelo con la impresión, esperarlo solo un
+      // presupuesto residual acotado: la venta nunca se detiene 6-10 s por el GPS.
+      if (gpsPromise) {
+        const tGpsWait0 = Date.now();
+        coordinates = await Promise.race([
+          gpsPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), GPS_ESPERA_RESIDUAL_MAX_MS)),
+        ]);
+        gpsEsperaMs = Date.now() - tGpsWait0;
+        if (coordinates) {
+          console.log(`[Sales] ✅ GPS paralelo resolvió (espera residual: ${gpsEsperaMs}ms)`);
+        } else {
+          gpsFuente = "sin_gps";
+          console.warn(
+            `[Sales] ⚠️ GPS no resolvió en ${GPS_ESPERA_RESIDUAL_MAX_MS}ms de espera residual; la venta se guarda sin coordenadas`,
+          );
+        }
+      }
 
       // Crear ventas locales (operación crítica)
       console.log("[Sales] 💾 Guardando ventas en base de datos local...");
+      const tGuardado0 = Date.now();
 
       // Construir observación desde los modales (solo el texto de observación)
       const currentIntercambioData = intercambioData || intercambioDataRef.current;
@@ -2303,9 +2424,11 @@ export default function SalesScreen({ route }: { route?: any }) {
         }),
       );
       ventasCreadas = true;
-      console.log("[Sales] ✅ Ventas locales creadas exitosamente");
+      guardadoVentaMs = Date.now() - tGuardado0;
+      console.log(`[Sales] ✅ Ventas locales creadas exitosamente (${guardadoVentaMs}ms)`);
 
       // Crear registros de InventarioEnvase si hay datos de intercambio o préstamo
+      const tPostVenta0 = Date.now();
       try {
         const envaseItems: {
           sucursal: number;
@@ -2474,6 +2597,29 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.error("[Sales] ⚠️ Error al marcar visita como visitada (no crítico):", visitaError);
         // No interrumpir el flujo de venta si hay error al marcar visita
       }
+
+      // Bitácora de tiempos del cierre (no crítico): mide GPS, impresión,
+      // guardado y post-venta para detectar cuellos de botella en el servidor.
+      const postVentaMs = Date.now() - tPostVenta0;
+      const totalMs = Date.now() - ventaT0;
+      console.log(
+        `[Sales] ⏱️ Cierre de venta en ${totalMs}ms ` +
+          `(gps: ${gpsEsperaMs}ms[${gpsFuente}], impresión: ${impresionMs}ms, ` +
+          `guardado: ${guardadoVentaMs}ms, post-venta: ${postVentaMs}ms)`,
+      );
+      GpsBitacoraService.registrarTiemposVenta({
+        idCliente: client.id,
+        idMovil: saleIdMovil,
+        gpsFuente,
+        gpsMs: gpsEsperaMs,
+        impresionMs,
+        guardadoVentaMs,
+        postVentaMs,
+        totalMs,
+        items: validCart.length,
+        dobleTicket: dobleTicketUsado,
+        ticketImpreso,
+      }).catch((err) => console.warn("[Sales] No se pudo registrar bitácora de tiempos:", err));
 
       // Actualizar estado de impresora
       const status = BluetoothPrinterService.getStatus();
@@ -2940,7 +3086,10 @@ export default function SalesScreen({ route }: { route?: any }) {
                       });
                     }
 
-                    // Calcular si el usuario está fuera del rango del cliente
+                    // Calcular si el usuario está fuera del rango del cliente.
+                    // Se usa la MISMA regla que la validación real (estaDentroDeRango,
+                    // con buffer de accuracy) para que el botón "Lejos" nunca
+                    // contradiga el resultado de validarUbicacionCliente.
                     let fueraDeRango = false;
                     let distanciaActual: number | null = null;
                     if (userCoords && item.latitud && item.longitud) {
@@ -2950,8 +3099,8 @@ export default function SalesScreen({ route }: { route?: any }) {
                         item.latitud,
                         item.longitud,
                       );
-                      const metrosPermitidos = userMetros || item.metros || 100;
-                      fueraDeRango = distanciaActual > metrosPermitidos;
+                      const metrosPermitidos = userMetros ?? item.metros ?? 100;
+                      fueraDeRango = !estaDentroDeRango(distanciaActual, userCoords.accuracy, metrosPermitidos);
                     }
 
                     const btnDisabled = yaVisitado || validandoUbicacion || fueraDeRango;
@@ -2972,7 +3121,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                             </Text>
                             {fueraDeRango && distanciaActual !== null && (
                               <Text style={styles.fueraDeRangoText}>
-                                ⚠️ A {Math.round(distanciaActual)} m (máx. {userMetros || item.metros || 100} m)
+                                ⚠️ A {Math.round(distanciaActual)} m (máx. {userMetros ?? item.metros ?? 100} m)
                               </Text>
                             )}
                           </View>
@@ -3005,7 +3154,13 @@ export default function SalesScreen({ route }: { route?: any }) {
                             />
                           )}
                           <Text style={styles.visitarBtnText}>
-                            {yaVisitado ? "Listo" : fueraDeRango ? "Lejos" : "Visitar"}
+                            {validandoUbicacion
+                              ? (progresoGps ?? "GPS…")
+                              : yaVisitado
+                                ? "Listo"
+                                : fueraDeRango
+                                  ? "Lejos"
+                                  : "Visitar"}
                           </Text>
                         </TouchableOpacity>
                         {usuarioPermisoReubicacion && (

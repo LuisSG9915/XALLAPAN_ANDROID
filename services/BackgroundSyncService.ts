@@ -445,6 +445,8 @@ class BackgroundSyncService {
           await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Enviando bitácoras de validación de ubicación pendientes al finalizar...");
           await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
+          console.log("[BackgroundSync] Enviando bitácoras de tiempos de venta pendientes al finalizar...");
+          await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Limpiando registros GPS enviados antiguos...");
           GpsBitacoraService.limpiarRegistrosEnviados(7);
         } catch (bitacoraError) {
@@ -490,6 +492,52 @@ class BackgroundSyncService {
         const nextSync = new Date(Date.now() + this.SYNC_INTERVAL_MS);
         this.updateState({ nextSyncTime: nextSync });
       }
+    }
+  }
+
+  /**
+   * Ejecuta una sincronización desde un contexto headless (BackgroundFetch).
+   * Inicializa servicios y ejecuta sync completa.
+   * Debe llamarse desde el HeadlessTask registrado en index.js.
+   */
+  async performHeadlessSync(taskId: string): Promise<void> {
+    const TAG = "[BackgroundSync:Headless]";
+    console.log(TAG, "Iniciando sincronización headless, taskId:", taskId);
+
+    try {
+      await FullSyncService.initialize();
+
+      const user = await AuthService.restoreSession();
+      if (!user) {
+        console.log(TAG, "No hay usuario logueado, omitiendo");
+        BackgroundFetch.finish(taskId);
+        return;
+      }
+
+      const sucursal = user.sucursal_origen || user.sucursal || 1;
+      const idUsuario: number = Number(user.id ?? user.idUsuario ?? 1);
+
+      const result = await FullSyncService.syncIncremental(
+        sucursal,
+        () => {},
+        idUsuario,
+        () => false,
+      );
+
+      if (result.success) {
+        await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
+        await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
+        GpsBitacoraService.limpiarRegistrosEnviados(7);
+        console.log(TAG, "Sincronización headless completada exitosamente");
+      } else {
+        console.warn(TAG, "Sincronización headless con errores:", result.error);
+      }
+    } catch (error: any) {
+      console.error(TAG, "Error en sincronización headless:", error?.message || error);
+    } finally {
+      BackgroundFetch.finish(taskId);
     }
   }
 

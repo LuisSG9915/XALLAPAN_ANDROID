@@ -1,5 +1,11 @@
 CREATE TABLE [dbo].[BitacoraGpsMovil] (
     id INT IDENTITY(1,1) PRIMARY KEY,
+
+    -- Idempotencia: identificador único generado en el dispositivo (timestamp-random).
+    -- El índice único filtrado con IGNORE_DUP_KEY hace que los reenvíos del móvil
+    -- (reintentos por red o syncs concurrentes) se ignoren sin duplicar filas.
+    idLocal NVARCHAR(64) NULL,
+
     idUsuario INT NOT NULL,
     sucursal INT NOT NULL,
     latitud FLOAT NOT NULL,
@@ -10,6 +16,13 @@ CREATE TABLE [dbo].[BitacoraGpsMovil] (
     fecha DATETIME NOT NULL,
     fechaRegistroServidor DATETIME DEFAULT GETDATE()
 );
+GO
+
+-- Clave de idempotencia: ignora silenciosamente los inserts con idLocal repetido.
+CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraGps_IdLocal
+    ON [dbo].[BitacoraGpsMovil] (idLocal)
+    WITH (IGNORE_DUP_KEY = ON)
+    WHERE idLocal IS NOT NULL;
 GO
 
 CREATE PROCEDURE [dbo].[sp_MovilesBitacoraGpsArrastreJSON]
@@ -29,6 +42,7 @@ BEGIN
         END
 
         INSERT INTO [dbo].[BitacoraGpsMovil] (
+            idLocal,
             idUsuario,
             sucursal,
             latitud,
@@ -38,7 +52,8 @@ BEGIN
             id_movil,
             fecha
         )
-        SELECT 
+        SELECT
+            j.id,
             j.idUsuario,
             j.sucursal,
             j.latitud,
@@ -49,6 +64,7 @@ BEGIN
             j.fecha
         FROM OPENJSON(@json)
         WITH (
+            id NVARCHAR(64),
             idUsuario INT,
             sucursal INT,
             latitud FLOAT,
@@ -70,3 +86,19 @@ BEGIN
     END CATCH
 END
 GO
+
+-- =============================================================================
+-- MIGRACIÓN para bases de datos donde la tabla YA EXISTE (ejecutar una sola vez):
+--
+--   1) Agregar la columna:
+--      ALTER TABLE [dbo].[BitacoraGpsMovil] ADD idLocal NVARCHAR(64) NULL;
+--
+--   2) Crear el índice de idempotencia:
+--      CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraGps_IdLocal
+--          ON [dbo].[BitacoraGpsMovil] (idLocal)
+--          WITH (IGNORE_DUP_KEY = ON)
+--          WHERE idLocal IS NOT NULL;
+--
+--   3) Recrear el stored procedure con el CREATE PROCEDURE de arriba
+--      (cambiar CREATE por ALTER).
+-- =============================================================================

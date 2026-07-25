@@ -1,6 +1,7 @@
 package com.awesomeproject
 
 import android.app.Application
+import com.asterinet.react.bgactions.BackgroundActionsPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -14,6 +15,7 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
+          add(BackgroundActionsPackage())
           add(ScreenStatePackage())
         },
     )

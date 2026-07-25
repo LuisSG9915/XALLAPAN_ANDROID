@@ -1,5 +1,6 @@
-import { Platform, PermissionsAndroid, Alert, Linking } from "react-native";
+import { Platform, PermissionsAndroid, Alert, Linking, AppState } from "react-native";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
+import NetInfo from "@react-native-community/netinfo";
 import GpsBitacoraService from "./GpsBitacoraService";
 
 export type PermissionStatus = "granted" | "denied" | "blocked";
@@ -10,7 +11,7 @@ export type LocationCoordinates = {
   accuracy?: number; // precisión en metros (cuanto menor, mejor)
 };
 
-export type MotivoValidacion = "ok" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango";
+export type MotivoValidacion = "ok" | "ok_cache" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango";
 
 export type ValidacionUbicacionResultado = {
   valido: boolean;
@@ -46,6 +47,30 @@ export const PRECISION_ABSURDA = 150; // metros
 // desde muy lejos cuando el GPS es impreciso.
 export const BUFFER_MAXIMO = 20; // metros
 
+// Ventana de validez de una confirmación de ubicación exitosa. Dentro de ella,
+// validaciones posteriores contra el MISMO punto se aprueban al instante, sin
+// nueva lectura GPS: el flujo "entrar a ventas → confirmar iniciar visita"
+// hacía esperar 3-6 s dos veces seguidas al vendedor, y la bitácora mostraba
+// el mismo cliente validado hasta 7 veces en 2.5 min. La ventana es corta a
+// propósito (anti-trampa: en 3 min el vendedor no puede alejarse mucho).
+export const TTL_VALIDACION_CACHE_MS = 3 * 60 * 1000; // 3 minutos
+
+/**
+ * Regla ÚNICA de rango, compartida por la validación real y por las pantallas
+ * que muestran al vendedor si está "Lejos" (p. ej. lista de Cercanos en
+ * SalesScreen). Una distancia se considera DENTRO del rango si no supera el
+ * límite más un buffer acotado por el accuracy del fix (máx. BUFFER_MAXIMO).
+ * Usar siempre esta función para que la UI y la validación nunca se contradigan.
+ */
+export function estaDentroDeRango(
+  distancia: number,
+  accuracy: number | null | undefined,
+  metrosPermitidos: number,
+): boolean {
+  const buffer = Math.min(accuracy ?? 0, BUFFER_MAXIMO);
+  return distancia <= metrosPermitidos + buffer;
+}
+
 /**
  * Calcula la distancia en metros entre dos coordenadas usando la fórmula de Haversine.
  */
@@ -64,9 +89,30 @@ export function calcularDistancia(lat1: number, lon1: number, lat2: number, lon2
 
 class LocationService {
   private hasPermission: boolean = false;
+  // Guardas por sesión: el servicio de ruta se reinicia periódicamente
+  // (health check cada 60 s, AppState, etc.) y sin ellas los diálogos de
+  // permisos saltaban una y otra vez aunque el usuario ya hubiera respondido.
+  private backgroundPromptShown: boolean = false;
+  private notificationPromptShown: boolean = false;
   // Diagnóstico de la última ejecución de getBestLocation. Se lee justo después
   // de llamar a getBestLocation (JS es de un solo hilo, así que no hay carrera).
   private ultimoDiagnosticoGps: DiagnosticoGps = { numFixes: 0, peorAccuracy: 0, tiempoMs: 0 };
+  // Última validación exitosa, para aprobar al instante revalidaciones del mismo
+  // punto dentro de TTL_VALIDACION_CACHE_MS (ver validarUbicacionCliente).
+  private ultimaValidacionOk: {
+    clienteLat: number;
+    clienteLng: number;
+    metrosPermitidos: number;
+    distancia: number;
+    accuracy: number;
+    timestamp: number;
+  } | null = null;
+
+  /** Versión del SDK de Android (0 si no es Android). */
+  private getAndroidSdk(): number {
+    if (Platform.OS !== "android") return 0;
+    return typeof Platform.Version === "string" ? parseInt(Platform.Version, 10) : (Platform.Version || 0);
+  }
 
   /** Devuelve el diagnóstico de la última lectura de getBestLocation. */
   getUltimoDiagnosticoGps(): DiagnosticoGps {
@@ -121,6 +167,29 @@ class LocationService {
         if (granted === PermissionsAndroid.RESULTS.GRANTED) {
           this.hasPermission = true;
           return "granted";
+        }
+
+        // Android 12+: el diálogo de ubicación ofrece "Precisa" / "Aproximada".
+        // Si el usuario eligió "Aproximada", COARSE queda concedido pero FINE
+        // no — y volver a pedir solo repite el ciclo ("le doy y me la vuelve a
+        // pedir"). Se explica el problema y se abre Configuración.
+        const coarseGranted = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+        );
+        if (coarseGranted) {
+          this.hasPermission = false;
+          Alert.alert(
+            "Ubicación precisa requerida",
+            "Concediste la ubicación APROXIMADA, pero la app necesita la ubicación " +
+              "PRECISA para validar visitas.\n\n" +
+              "En Configuración > Ubicación activa 'Usar ubicación precisa' " +
+              "(o vuelve a intentarlo y elige 'Precisa' en el diálogo).",
+            [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Abrir configuración", onPress: () => this.openSettings() },
+            ],
+          );
+          return "blocked";
         }
 
         if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
@@ -179,6 +248,30 @@ class LocationService {
       return "granted";
     }
 
+    // Android 11+ (API 30+): el sistema YA NO muestra diálogo para
+    // ACCESS_BACKGROUND_LOCATION en runtime; la petición se resuelve como
+    // denegada al instante. Hay que dirigir al usuario a Configuración
+    // ("Permitir todo el tiempo"). Se avisa solo una vez por sesión para no
+    // interrumpir continuamente (health check cada 60 s, AppState, etc.).
+    const sdkVersion = this.getAndroidSdk();
+    if (sdkVersion >= 30) {
+      if (!this.backgroundPromptShown) {
+        this.backgroundPromptShown = true;
+        Alert.alert(
+          "Permiso de ubicación en segundo plano",
+          "Para registrar el recorrido con la pantalla apagada o la app cerrada, " +
+            "debes permitir el acceso a la ubicación 'Todo el tiempo'.\n\n" +
+            "Ve a Configuración > Aplicaciones > Xallapan > Permisos > Ubicación " +
+            "y selecciona 'Permitir todo el tiempo'.",
+          [
+            { text: "Ahora no", style: "cancel" },
+            { text: "Abrir configuración", onPress: () => this.openSettings() },
+          ],
+        );
+      }
+      return "denied";
+    }
+
     try {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
@@ -220,12 +313,20 @@ class LocationService {
   async requestNotificationPermission(): Promise<PermissionStatus> {
     if (Platform.OS !== "android") return "granted";
 
-    const sdkVersion = typeof Platform.Version === "string" ? parseInt(Platform.Version, 10) : (Platform.Version || 0);
+    const sdkVersion = this.getAndroidSdk();
     if (sdkVersion < 33) return "granted";
 
     try {
       const alreadyGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
       if (alreadyGranted) return "granted";
+
+      // Solo se muestra el diálogo una vez por sesión: el servicio de ruta se
+      // reinicia periódicamente y sin esta guarda el diálogo saltaba "en
+      // cualquier momento" una y otra vez.
+      if (this.notificationPromptShown) {
+        return "denied";
+      }
+      this.notificationPromptShown = true;
 
       const result = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
@@ -337,17 +438,23 @@ class LocationService {
    *
    * Corta antes de tiempo si alcanza la precisión objetivo (<= 15 m).
    *
-   * @param intentos      Solo se usa para el callback de progreso (total esperado)
+   * @param intentos        Solo se usa para el callback de progreso (total esperado)
    * @param timeoutMs       Presupuesto de escucha en ms; se respeta un mínimo de 6 s
    * @param onProgreso      Callback opcional para notificar cada fix recibido
    * @param condicionExito  Si una lectura satisface esta condición, se devuelve
    *                        inmediatamente sin esperar a mejorar la precisión.
+   * @param condicionFracaso Si una lectura satisface esta condición, se devuelve
+   *                        inmediatamente: el resultado ya es definitivo aunque
+   *                        el GPS refinara (p. ej. fuera de rango imposible de
+   *                        revertir). Evita hacer esperar al usuario los 10 s
+   *                        completos para dar un veredicto ya conocido.
    */
   async getBestLocation(
     intentos: number = 5,
     timeoutMs: number = 10000,
     onProgreso?: (intento: number, total: number, accuracy: number) => void,
     condicionExito?: (coords: LocationCoordinates) => boolean,
+    condicionFracaso?: (coords: LocationCoordinates) => boolean,
   ): Promise<LocationCoordinates | null> {
     if (!this.hasPermission) {
       const granted = await this.checkPermission();
@@ -372,6 +479,8 @@ class LocationService {
       let peorAccuracy = 0;
       let settled = false;
       let watchId: number | null = null;
+      let watchdog: ReturnType<typeof setInterval> | null = null;
+      let appStateSub: { remove: () => void } | null = null;
       const inicio = Date.now();
 
       const aceptar = (coords: LocationCoordinates | null, motivo: string) => {
@@ -381,6 +490,12 @@ class LocationService {
           Geolocation.clearWatch(watchId);
           watchId = null;
         }
+        if (watchdog !== null) {
+          clearInterval(watchdog);
+          watchdog = null;
+        }
+        appStateSub?.remove();
+        appStateSub = null;
         clearTimeout(temporizadorTotal);
         this.ultimoDiagnosticoGps = {
           numFixes: lecturasRecibidas,
@@ -403,6 +518,25 @@ class LocationService {
       const finalizar = (motivo: string) => aceptar(mejor, motivo);
 
       const temporizadorTotal = setTimeout(() => finalizar("timeout"), tiempoMaximoMs);
+
+      // Watchdog de reloj real: los timers de JS se aplazan si la app va a fondo
+      // (pantalla apagada) o el hilo JS está saturado, y la guardia contra timers
+      // aplazados solo corre CUANDO LLEGA un fix. Si no llegan fixes, la promesa
+      // quedaba colgada (caso real: vendedor esperando 82 s). Este intervalo
+      // corta en cuanto el SO reanuda el hilo, aunque nunca haya llegado un fix.
+      watchdog = setInterval(() => {
+        if (Date.now() - inicio >= tiempoMaximoMs) {
+          finalizar("timeout (watchdog)");
+        }
+      }, 500);
+
+      // Si la app se va a fondo, cortamos de inmediato con lo que haya: el SO no
+      // entrega fixes en background y los timers quedan congelados.
+      appStateSub = AppState.addEventListener("change", (state) => {
+        if (state !== "active") {
+          finalizar("app_en_fondo");
+        }
+      });
 
       watchId = Geolocation.watchPosition(
         (position: GeoPosition) => {
@@ -453,6 +587,14 @@ class LocationService {
             aceptar(coords, "condición de éxito");
             return;
           }
+
+          // O si el llamador determina que con este fix el resultado ya es
+          // definitivamente negativo (fuera de rango imposible de revertir
+          // aunque el GPS refinara): no tiene caso seguir esperando.
+          if (condicionFracaso?.(coords)) {
+            aceptar(coords, "condición de fracaso");
+            return;
+          }
         },
         (error: GeoError) => {
           console.warn("[LocationService] Error en watchPosition:", error.message);
@@ -477,13 +619,19 @@ class LocationService {
   /**
    * Valida si el vendedor está dentro del rango permitido de un cliente.
    *
-   * Estrategia de "umbral relativo al rango":
+   * Estrategia de "umbral relativo al rango" con cortes tempranos:
    *  1. Si la distancia medida cae dentro del rango permitido (+ buffer acotado),
    *     se acepta aunque el accuracy sea alto, salvo precisión absurda.
    *  2. Si parece estar fuera de rango pero el accuracy es peor que
    *     PRECISION_MAXIMA_ACEPTABLE, no se puede afirmar que esté fuera: se pide
    *     reintentar (precision_baja).
    *  3. Si el accuracy es confiable y aun así está fuera, se marca fuera_de_rango.
+   *
+   *  Velocidad: se corta la escucha en cuanto el veredicto es definitivo —
+   *  tanto al acertar (dentro de rango) como al fallar sin remedio (aun
+   *  descontando 2 sigmas de error GPS no entraría al rango). Caso real de la
+   *  bitácora: vendedor a 4.3 km del cliente esperaba los 10 s completos solo
+   *  para escuchar "fuera de rango"; ahora se resuelve en ~2 s.
    */
   async validarUbicacionCliente(
     clienteLat: number,
@@ -496,13 +644,56 @@ class LocationService {
       return { valido: false, motivo: "sin_permiso", metrosPermitidos };
     }
 
-    const ubicacion = await this.getBestLocation(5, 10000, onProgreso, (coords) => {
-      const accuracy = coords.accuracy ?? 999;
-      if (accuracy > PRECISION_ABSURDA) return false;
-      const distancia = calcularDistancia(coords.latitude, coords.longitude, clienteLat, clienteLng);
-      const buffer = Math.min(accuracy, BUFFER_MAXIMO);
-      return distancia <= metrosPermitidos + buffer;
-    });
+    // Atajo de flujo: si ESTE MISMO punto validó "ok" hace instantes (p. ej.
+    // "entrar a ventas" y luego confirmar "iniciar visita" segundos después),
+    // se aprueba sin nueva lectura GPS: el vendedor sigue físicamente ahí y
+    // re-leer solo le haría esperar otros 3-6 s. Se reporta como "ok_cache"
+    // (tiempoMs=0, numFixes=0) para que la bitácora distinga estos atajos de
+    // lecturas GPS reales.
+    const cache = this.ultimaValidacionOk;
+    if (
+      cache &&
+      Date.now() - cache.timestamp <= TTL_VALIDACION_CACHE_MS &&
+      Math.abs(cache.clienteLat - clienteLat) < 1e-7 &&
+      Math.abs(cache.clienteLng - clienteLng) < 1e-7 &&
+      metrosPermitidos >= cache.metrosPermitidos
+    ) {
+      console.log(
+        `[LocationService] Validación OK por caché (hace ${Math.round((Date.now() - cache.timestamp) / 1000)} s, sin nueva lectura GPS)`,
+      );
+      return {
+        valido: true,
+        motivo: "ok_cache",
+        distancia: cache.distancia,
+        accuracy: cache.accuracy,
+        metrosPermitidos,
+        numFixes: 0,
+        peorAccuracy: 0,
+        tiempoMs: 0,
+      };
+    }
+
+    const ubicacion = await this.getBestLocation(
+      5,
+      10000,
+      onProgreso,
+      (coords) => {
+        const accuracy = coords.accuracy ?? 999;
+        if (accuracy > PRECISION_ABSURDA) return false;
+        const distancia = calcularDistancia(coords.latitude, coords.longitude, clienteLat, clienteLng);
+        return estaDentroDeRango(distancia, accuracy, metrosPermitidos);
+      },
+      (coords) => {
+        const accuracy = coords.accuracy ?? 999;
+        // Solo se puede fallar temprano con un GPS ya confiable; con precisión
+        // mala todavía cabe que el fix refine y cambie el veredicto.
+        if (accuracy > PRECISION_MAXIMA_ACEPTABLE) return false;
+        const distancia = calcularDistancia(coords.latitude, coords.longitude, clienteLat, clienteLng);
+        // Fuera de rango imposible de revertir: ni descontando 2 sigmas de
+        // error entraría al rango. Refinar más daría el mismo veredicto.
+        return distancia - 2 * accuracy > metrosPermitidos + BUFFER_MAXIMO;
+      },
+    );
     const diag = this.getUltimoDiagnosticoGps();
     if (!ubicacion) {
       return { valido: false, motivo: "sin_senal", metrosPermitidos, ...diag };
@@ -511,7 +702,7 @@ class LocationService {
     const accuracy = ubicacion.accuracy ?? 999;
     const distancia = calcularDistancia(ubicacion.latitude, ubicacion.longitude, clienteLat, clienteLng);
     const buffer = Math.min(accuracy, BUFFER_MAXIMO);
-    const dentroDeRango = distancia <= metrosPermitidos + buffer;
+    const dentroDeRango = estaDentroDeRango(distancia, accuracy, metrosPermitidos);
 
     // 1) Si la posición medida cae dentro del rango permitido, es válida aunque
     //    el accuracy sea alto, salvo que la lectura sea absurdamente imprecisa.
@@ -520,6 +711,9 @@ class LocationService {
         `[LocationService] Validación VÁLIDO: distancia=${Math.round(distancia)} m, ` +
           `permitido=${metrosPermitidos} m, buffer=${Math.round(buffer)} m, accuracy=±${Math.round(accuracy)} m`,
       );
+      // Guardamos la validación exitosa: revalidaciones de este mismo punto
+      // dentro de TTL_VALIDACION_CACHE_MS se aprueban al instante (ok_cache).
+      this.ultimaValidacionOk = { clienteLat, clienteLng, metrosPermitidos, distancia, accuracy, timestamp: Date.now() };
       return { valido: true, motivo: "ok", distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
     }
 
@@ -565,6 +759,7 @@ class LocationService {
 
     // Registrar el diagnóstico de la validación para trazabilidad en campo.
     // No bloquea el flujo si falla.
+    const net = await NetInfo.fetch().catch(() => null);
     GpsBitacoraService.registrarValidacion({
       idCliente: clienteInfo?.id ?? null,
       motivo: r.motivo,
@@ -579,10 +774,12 @@ class LocationService {
       numFixes: r.numFixes ?? null,
       peorAccuracy: r.peorAccuracy ?? null,
       tiempoMs: r.tiempoMs ?? null,
+      conCobertura: net ? net.isConnected === true : null,
     });
 
     switch (r.motivo) {
       case "ok":
+      case "ok_cache":
         return true;
       case "sin_permiso":
         Alert.alert(

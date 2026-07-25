@@ -1,4 +1,4 @@
-import { AppState } from "react-native";
+import { AppState, Alert, Platform } from "react-native";
 import BackgroundActions from "react-native-background-actions";
 import Geolocation from "react-native-geolocation-service";
 import { GeoPosition } from "react-native-geolocation-service";
@@ -19,6 +19,9 @@ class BackgroundLocationService {
   private isReady = false;
   private intervalMs = 30000;
   private isTaskRunning = false;
+  // Evita que el Alert de notificaciones salte en cada reintento del servicio
+  // (health check cada 60 s, etc.).
+  private notificationAlertShown = false;
 
   private constructor() {}
 
@@ -58,7 +61,7 @@ class BackgroundLocationService {
           timeout: 15000,
           maximumAge: 0,
           distanceFilter: 5,
-          showLocationDialog: false,
+          showLocationDialog: true,
         } as any
       );
     });
@@ -94,6 +97,7 @@ class BackgroundLocationService {
       const location = await this.getLocationOnce();
       if (!location) {
         console.warn(TAG, "No se obtuvo ubicación en esta iteración");
+        this.updateNotificationText("Sin señal GPS - reintentando...");
         return;
       }
       console.log(TAG, `Fix obtenido: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}`);
@@ -107,9 +111,29 @@ class BackgroundLocationService {
         conCobertura,
         motivo,
       );
+      const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      this.updateNotificationText(`Ultima captura: ${hora} (±${Math.round(location.accuracy ?? 0)}m)`);
       console.log(TAG, `Tracking GPS registrado: lat=${location.latitude}, lng=${location.longitude}, cobertura=${conCobertura}, motivo=${motivo}`);
     } catch (error) {
       console.error(TAG, "Error en iteración de captura:", error);
+    }
+  }
+
+  /**
+   * Actualiza el texto de la notificación del foreground service.
+   */
+  private async updateNotificationText(desc: string): Promise<void> {
+    try {
+      if (BackgroundActions.isRunning()) {
+        await BackgroundActions.updateNotification({
+          taskTitle: "Xallapan",
+          taskDesc: desc,
+          taskIcon: { name: "ic_launcher", type: "mipmap" },
+          color: "#007AFF",
+        });
+      }
+    } catch (e) {
+      // updateNotification puede fallar si el servicio se detuvo; es no crítico
     }
   }
 
@@ -162,7 +186,31 @@ class BackgroundLocationService {
     const notificationPermission = await LocationService.requestNotificationPermission();
     console.log(TAG, "Permiso notificaciones:", notificationPermission);
     if (notificationPermission !== "granted") {
-      console.warn(TAG, "Permiso de notificaciones no concedido. En Android 13+ la notificación puede no mostrarse:", notificationPermission);
+      const sdkVersion = typeof Platform.Version === "string" ? parseInt(Platform.Version, 10) : (Platform.Version || 0);
+      if (sdkVersion >= 33 && !this.notificationAlertShown) {
+        this.notificationAlertShown = true;
+        console.warn(TAG, "Permiso de notificaciones no concedido en Android 13+. La notificación del servicio en segundo plano no se mostrará.");
+        Alert.alert(
+          "Permiso de notificaciones requerido",
+          "Para mostrar el estado del rastreo GPS en la barra de notificaciones, debes conceder el permiso de notificaciones.\n\nSin este permiso, Android puede cerrar el rastreo en segundo plano.",
+          [
+            { text: "Entendido" },
+            {
+              text: "Abrir Configuración",
+              onPress: () => LocationService.openSettings(),
+            },
+          ],
+        );
+      }
+    }
+
+    if (!BackgroundActions || typeof BackgroundActions.start !== "function") {
+      console.error(TAG, "BackgroundActions no está disponible. El módulo nativo react-native-background-actions no se cargó correctamente. Reconstruye la app.");
+      Alert.alert(
+        "Error del servicio GPS",
+        "El módulo de rastreo en segundo plano no está disponible. La app necesita ser reconstruida (npm run android).\n\nEl rastreo GPS manual seguirá funcionando.",
+      );
+      return this.getState();
     }
 
     this.isTaskRunning = true;

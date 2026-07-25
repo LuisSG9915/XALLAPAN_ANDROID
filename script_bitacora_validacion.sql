@@ -6,13 +6,18 @@
 CREATE TABLE [dbo].[BitacoraValidacionUbicacionMovil] (
     id                    INT IDENTITY(1,1) PRIMARY KEY,
 
+    -- Idempotencia: identificador único generado en el dispositivo (timestamp-random).
+    -- El índice único filtrado con IGNORE_DUP_KEY hace que los reenvíos del móvil
+    -- (reintentos por red o syncs concurrentes) se ignoren sin duplicar filas.
+    idLocal               NVARCHAR(64)  NULL,
+
     -- Identidad
     idUsuario             INT           NOT NULL,
     sucursal              INT           NOT NULL,
     idCliente             INT           NULL,        -- cliente contra el que se validó
 
     -- Resultado de la validación
-    motivo                VARCHAR(20)   NOT NULL,     -- ok | sin_permiso | sin_senal | precision_baja | fuera_de_rango
+    motivo                VARCHAR(20)   NOT NULL,     -- ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango
     valido                BIT           NOT NULL,     -- 1 = visita permitida, 0 = rechazada
     distancia             FLOAT         NULL,         -- metros medidos entre vendedor y cliente
     accuracy              FLOAT         NULL,         -- precisión (±m) del MEJOR fix usado
@@ -52,6 +57,13 @@ CREATE INDEX IX_BitacoraValidacion_Motivo
     ON [dbo].[BitacoraValidacionUbicacionMovil] (motivo);
 GO
 
+-- Clave de idempotencia: ignora silenciosamente los inserts con idLocal repetido.
+CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraValidacion_IdLocal
+    ON [dbo].[BitacoraValidacionUbicacionMovil] (idLocal)
+    WITH (IGNORE_DUP_KEY = ON)
+    WHERE idLocal IS NOT NULL;
+GO
+
 -- =============================================================================
 -- Inserción por lotes desde el móvil (mismo patrón que sp_MovilesBitacoraGpsArrastreJSON)
 -- =============================================================================
@@ -72,6 +84,7 @@ BEGIN
         END
 
         INSERT INTO [dbo].[BitacoraValidacionUbicacionMovil] (
+            idLocal,
             idUsuario, sucursal, idCliente,
             motivo, valido, distancia, accuracy, metrosPermitidos,
             latitud, longitud, clienteLatitud, clienteLongitud,
@@ -79,6 +92,7 @@ BEGIN
             id_movil, plataforma, versionApp, fecha
         )
         SELECT
+            j.id,
             j.idUsuario, j.sucursal, j.idCliente,
             j.motivo, j.valido, j.distancia, j.accuracy, j.metrosPermitidos,
             j.latitud, j.longitud, j.clienteLatitud, j.clienteLongitud,
@@ -86,6 +100,7 @@ BEGIN
             j.id_movil, j.plataforma, j.versionApp, j.fecha
         FROM OPENJSON(@json)
         WITH (
+            id               NVARCHAR(64),
             idUsuario        INT,
             sucursal         INT,
             idCliente        INT,
@@ -119,3 +134,31 @@ BEGIN
     END CATCH
 END
 GO
+
+-- =============================================================================
+-- MIGRACIÓN para bases de datos donde la tabla YA EXISTE (ejecutar una sola vez):
+--
+--   1) Agregar la columna:
+--      ALTER TABLE [dbo].[BitacoraValidacionUbicacionMovil] ADD idLocal NVARCHAR(64) NULL;
+--
+--   2) (Opcional) Eliminar duplicados históricos —mismo evento insertado más de
+--      una vez por los reenvíos— conservando la fila de menor id:
+--      ;WITH d AS (
+--          SELECT id,
+--                 ROW_NUMBER() OVER (
+--                     PARTITION BY idUsuario, idCliente, fecha, distancia, tiempoMs
+--                     ORDER BY id
+--                 ) AS rn
+--          FROM [dbo].[BitacoraValidacionUbicacionMovil]
+--      )
+--      DELETE FROM d WHERE rn > 1;
+--
+--   3) Crear el índice de idempotencia:
+--      CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraValidacion_IdLocal
+--          ON [dbo].[BitacoraValidacionUbicacionMovil] (idLocal)
+--          WITH (IGNORE_DUP_KEY = ON)
+--          WHERE idLocal IS NOT NULL;
+--
+--   4) Recrear el stored procedure con el CREATE PROCEDURE de arriba
+--      (cambiar CREATE por ALTER).
+-- =============================================================================
