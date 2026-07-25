@@ -187,9 +187,6 @@ class ReubicacionService {
       // Actualizar coordenadas del cliente en ClienteFull
       this.actualizarCoordenadasClienteLocal(idCliente, latitud, longitud);
 
-      // Marcar el permiso como usado después del registro exitoso
-      this.marcarPermisoReubicacionUsado(idUsuario);
-
       return id;
     } catch (error) {
       console.error("[ReubicacionService] ❌ Error registrando reubicación:", error);

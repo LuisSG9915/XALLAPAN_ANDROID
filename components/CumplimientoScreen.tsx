@@ -468,10 +468,39 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               );
 
               if (reubicacionId) {
-                // Recargar clientes y visitas para reflejar las nuevas coordenadas
+                // Actualizar estado local inmediatamente para que Ventas/Visitar usen las nuevas coordenadas
+                setVisitas((prev) =>
+                  prev.map((v) =>
+                    v.idCliente === cliente.id
+                      ? { ...v, latitud: ubicacion.latitude, longitud: ubicacion.longitude }
+                      : v,
+                  ),
+                );
+                setClientes((prev) =>
+                  prev.map((c) =>
+                    c.id === cliente.id
+                      ? { ...c, latitud: ubicacion.latitude, longitud: ubicacion.longitude }
+                      : c,
+                  ),
+                );
+                setNearestClientes((prev) => {
+                  const idx = prev.findIndex((c) => c.id === cliente.id);
+                  if (idx === -1) return prev;
+                  const actualizado = {
+                    ...prev[idx],
+                    latitud: ubicacion.latitude,
+                    longitud: ubicacion.longitude,
+                    distanciaMetros: 0,
+                  };
+                  const nuevos = [...prev];
+                  nuevos[idx] = actualizado;
+                  return nuevos.sort((a, b) => a.distanciaMetros - b.distanciaMetros);
+                });
+
+                // Recargar clientes y visitas en segundo plano (sin pantalla de carga)
                 cargarClientes();
-                cargarDatos(fechaSeleccionada, currentSucursal);
-                Alert.alert("Éxito", "La ubicación del cliente ha sido actualizada.");
+                cargarDatos(fechaSeleccionada, currentSucursal, false);
+                Alert.alert("Éxito", "La ubicación del cliente ha sido actualizada. Ya puedes vender o visitar.");
               } else {
                 Alert.alert("Error", "No se pudo registrar la reubicación.");
               }
