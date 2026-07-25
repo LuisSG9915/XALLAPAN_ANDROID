@@ -53,7 +53,7 @@ BEGIN
             fecha
         )
         SELECT
-            j.id,
+            j.idLocal,
             j.idUsuario,
             j.sucursal,
             j.latitud,
@@ -64,15 +64,15 @@ BEGIN
             j.fecha
         FROM OPENJSON(@json)
         WITH (
-            id NVARCHAR(64),
+            idLocal   NVARCHAR(64)  '$.id',
             idUsuario INT,
-            sucursal INT,
-            latitud FLOAT,
-            longitud FLOAT,
+            sucursal  INT,
+            latitud   FLOAT,
+            longitud  FLOAT,
             precision FLOAT,
-            bateria FLOAT,
-            id_movil BIGINT,
-            fecha DATETIME
+            bateria   FLOAT,
+            id_movil  BIGINT,
+            fecha     DATETIME
         ) j;
 
         COMMIT TRANSACTION;
@@ -100,5 +100,19 @@ GO
 --          WHERE idLocal IS NOT NULL;
 --
 --   3) Recrear el stored procedure con el CREATE PROCEDURE de arriba
---      (cambiar CREATE por ALTER).
+--      (cambiar CREATE por ALTER). Asegúrate de declarar idLocal como:
+--        idLocal NVARCHAR(64) '$.id'
+--      en el WITH de OPENJSON para que el path JSON case-sensitive 'id' se
+--      mapee correctamente a la columna idLocal.
+--
+--   4) Limpiar duplicados históricos de recorrido (mismo usuario/fecha/posición):
+--      ;WITH d AS (
+--          SELECT id,
+--                 ROW_NUMBER() OVER (
+--                     PARTITION BY idUsuario, fecha, latitud, longitud
+--                     ORDER BY id
+--                 ) AS rn
+--          FROM [dbo].[BitacoraGpsMovil]
+--      )
+--      DELETE FROM d WHERE rn > 1;
 -- =============================================================================

@@ -1,4 +1,4 @@
-import { Platform, PermissionsAndroid, Alert, Linking, AppState } from "react-native";
+import { Platform, PermissionsAndroid, Alert, Linking, AppState, NativeModules } from "react-native";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
 import NetInfo from "@react-native-community/netinfo";
 import GpsBitacoraService from "./GpsBitacoraService";
@@ -97,6 +97,9 @@ class LocationService {
   // Diagnóstico de la última ejecución de getBestLocation. Se lee justo después
   // de llamar a getBestLocation (JS es de un solo hilo, así que no hay carrera).
   private ultimoDiagnosticoGps: DiagnosticoGps = { numFixes: 0, peorAccuracy: 0, tiempoMs: 0 };
+  // Callback registrado por BackgroundLocationService para re-suscribir su
+  // watch de ruta cuando getBestLocation termina (ver forzarIntervaloNativo).
+  private watchRestoreHandler: (() => void) | null = null;
   // Última validación exitosa, para aprobar al instante revalidaciones del mismo
   // punto dentro de TTL_VALIDACION_CACHE_MS (ver validarUbicacionCliente).
   private ultimaValidacionOk: {
@@ -117,6 +120,48 @@ class LocationService {
   /** Devuelve el diagnóstico de la última lectura de getBestLocation. */
   getUltimoDiagnosticoGps(): DiagnosticoGps {
     return this.ultimoDiagnosticoGps;
+  }
+
+  /**
+   * Registra cómo restaurar la suscripción GPS de fondo (tracking de ruta)
+   * después de que getBestLocation fuerce el intervalo rápido.
+   * Lo llama BackgroundLocationService al arrancar/detener el servicio.
+   */
+  setWatchRestoreHandler(handler: (() => void) | null): void {
+    this.watchRestoreHandler = handler;
+  }
+
+  /**
+   * `react-native-geolocation-service` comparte UNA sola suscripción nativa
+   * (`continuousLocationProvider`) entre todos los `watchPosition`: si ya hay
+   * un watch activo, `updatesEnabled` es true y el módulo JS NO vuelve a
+   * llamar a `startObserving`, así que el nuevo watch hereda el intervalo del
+   * anterior. Con el tracking de ruta activo (interval=30 s) eso dejaba a la
+   * validación de venta sin fixes dentro de su presupuesto de 10 s
+   * (`numFixes=0` → `sin_senal`). Forzamos aquí el `startObserving` con el
+   * intervalo rápido; el `LocationRequest` nativo se reemplaza al reusar el
+   * mismo `LocationCallback`.
+   */
+  private forzarIntervaloNativo(opciones: Record<string, unknown>): void {
+    if (Platform.OS !== "android") return;
+    const nativo = (NativeModules as any)?.RNFusedLocation;
+    if (!nativo || typeof nativo.startObserving !== "function") return;
+    try {
+      nativo.startObserving(opciones);
+    } catch (e) {
+      console.warn("[LocationService] No se pudo forzar el intervalo GPS nativo:", e);
+    }
+  }
+
+  /** Devuelve el watch de fondo a su intervalo normal tras una lectura rápida. */
+  private restaurarWatchDeFondo(): void {
+    const handler = this.watchRestoreHandler;
+    if (!handler) return;
+    try {
+      handler();
+    } catch (e) {
+      console.warn("[LocationService] Error restaurando el watch de fondo:", e);
+    }
   }
 
   /**
@@ -497,6 +542,8 @@ class LocationService {
         appStateSub?.remove();
         appStateSub = null;
         clearTimeout(temporizadorTotal);
+        // Devolver el GPS al intervalo del tracking de ruta (si está activo).
+        this.restaurarWatchDeFondo();
         this.ultimoDiagnosticoGps = {
           numFixes: lecturasRecibidas,
           peorAccuracy,
@@ -537,6 +584,15 @@ class LocationService {
           finalizar("app_en_fondo");
         }
       });
+
+      const opcionesWatch = {
+        enableHighAccuracy: true,
+        distanceFilter: 0,
+        interval: 1000,
+        fastestInterval: 500,
+        forceRequestLocation: true,
+        showLocationDialog: true,
+      };
 
       watchId = Geolocation.watchPosition(
         (position: GeoPosition) => {
@@ -604,15 +660,11 @@ class LocationService {
             finalizar(`error ${error.code}`);
           }
         },
-        {
-          enableHighAccuracy: true,
-          distanceFilter: 0,
-          interval: 1000,
-          fastestInterval: 500,
-          forceRequestLocation: true,
-          showLocationDialog: true,
-        } as any,
+        opcionesWatch as any,
       );
+
+      // Imprescindible si el tracking de ruta ya tiene un watch a 30 s.
+      this.forzarIntervaloNativo(opcionesWatch);
     });
   }
 

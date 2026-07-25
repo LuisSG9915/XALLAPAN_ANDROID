@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import Realm from "realm";
+import Realm, { UpdateMode } from "realm";
 import NetInfo from "@react-native-community/netinfo";
 import DeviceInfo from "react-native-device-info";
 import AuthService from "./AuthService";
@@ -83,7 +83,12 @@ class GpsBitacoraService {
 
   /**
    * Registra una ubicación GPS y su validación de recorrido en una sola transacción Realm.
-   * Usado por BackgroundLocationService cada 30s para evitar dos write() separados.
+   * Usado por BackgroundLocationService cada intervaloMs para evitar dos write() separados.
+   *
+   * El id se genera de forma determinista por ventana de tiempo:
+   * `${idUsuario}-${Math.floor(ts / intervalMs)}`. Esto colapsa a una sola fila
+   * las capturas duplicadas producidas por ráfagas o loops concurrentes, y el
+   * índice único `UX_Bitacora*_IdLocal` en el servidor evita reenvíos.
    */
   async registrarCapturaTracking(
     latitud: number,
@@ -91,6 +96,7 @@ class GpsBitacoraService {
     precision: number | undefined,
     conCobertura: boolean | undefined,
     motivoRecorrido: string,
+    intervalMs: number = 30000,
   ): Promise<void> {
     try {
       if (!this.realm || this.realm.isClosed) {
@@ -116,53 +122,61 @@ class GpsBitacoraService {
         metros = null;
       }
 
-      const gpsId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const valId = `${Date.now()}-${Math.random().toString(36).substring(2, 12)}`;
       const now = new Date();
+      const windowMs = Math.max(1000, intervalMs);
+      const idLocal = `${idUsuario}-${Math.floor(now.getTime() / windowMs)}`;
 
       realm.write(() => {
-        realm.create("BitacoraGps", {
-          id: gpsId,
-          idUsuario,
-          sucursal,
-          latitud,
-          longitud,
-          precision: precision ?? null,
-          bateria: metros ?? null,
-          conCobertura: conCobertura ?? null,
-          id_movil: null,
-          fecha: now,
-          enviado: false,
-        });
+        realm.create(
+          "BitacoraGps",
+          {
+            id: idLocal,
+            idUsuario,
+            sucursal,
+            latitud,
+            longitud,
+            precision: precision ?? null,
+            bateria: metros ?? null,
+            conCobertura: conCobertura ?? null,
+            id_movil: null,
+            fecha: now,
+            enviado: false,
+          },
+          UpdateMode.Modified,
+        );
 
-        realm.create("BitacoraValidacion", {
-          id: valId,
-          idUsuario,
-          sucursal,
-          idCliente: null,
-          motivo: motivoRecorrido,
-          valido: true,
-          distancia: null,
-          accuracy: precision ?? null,
-          metrosPermitidos: null,
-          latitud,
-          longitud,
-          clienteLatitud: null,
-          clienteLongitud: null,
-          numFixes: 1,
-          peorAccuracy: precision ?? null,
-          tiempoMs: null,
-          conCobertura: conCobertura ?? null,
-          id_movil: null,
-          plataforma: Platform.OS,
-          versionApp: DeviceInfo.getVersion(),
-          fecha: now,
-          enviado: false,
-        });
+        realm.create(
+          "BitacoraValidacion",
+          {
+            id: idLocal,
+            idUsuario,
+            sucursal,
+            idCliente: null,
+            motivo: motivoRecorrido,
+            valido: true,
+            distancia: null,
+            accuracy: precision ?? null,
+            metrosPermitidos: null,
+            latitud,
+            longitud,
+            clienteLatitud: null,
+            clienteLongitud: null,
+            numFixes: 1,
+            peorAccuracy: precision ?? null,
+            tiempoMs: null,
+            conCobertura: conCobertura ?? null,
+            id_movil: null,
+            plataforma: Platform.OS,
+            versionApp: DeviceInfo.getVersion(),
+            fecha: now,
+            enviado: false,
+          },
+          UpdateMode.Modified,
+        );
       });
 
       console.log(
-        `[GpsBitacoraService] Tracking registrado: lat=${latitud}, lng=${longitud}, ` +
+        `[GpsBitacoraService] Tracking registrado: idLocal=${idLocal}, lat=${latitud}, lng=${longitud}, ` +
           `precision=${precision}, cobertura=${conCobertura}, motivo=${motivoRecorrido}`,
       );
     } catch (error) {

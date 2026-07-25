@@ -367,6 +367,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const [userName, setUserName] = useState<string>("");
   const [hasPendingTraspasos, setHasPendingTraspasos] = useState(false);
   const [rutaCerrada, setRutaCerrada] = useState(false);
+  const prevRutaCerradaRef = useRef<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const pollingIntervalRef = useRef<any>(null);
   const [pressingCierre, setPressingCierre] = useState(false);
@@ -475,11 +476,13 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       setRutaCerrada(rutaStatus);
       await syncRouteTracking(rutaStatus);
 
-      // Health check: si la ruta esta abierta pero el foreground service no corre, reiniciarlo
-      if (!rutaStatus) {
+      // Health check por TRANSICIÓN: solo intentar reiniciar el foreground service
+      // cuando la ruta pasa de cerrada (prev=true) a abierta (rutaStatus=false).
+      // Así se evita llamar start() repetidamente cada 60 s.
+      if (prevRutaCerradaRef.current === true && !rutaStatus) {
         const servicioCorriendo = BackgroundActions.isRunning();
         if (!servicioCorriendo) {
-          console.warn("[App] Foreground service detenido inesperadamente. Reiniciando...");
+          console.warn("[App] Ruta recién abierta y foreground service detenido. Reiniciando...");
           try {
             await BackgroundLocationService.start();
             console.log("[App] Foreground service reiniciado exitosamente");
@@ -488,6 +491,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           }
         }
       }
+      prevRutaCerradaRef.current = rutaStatus;
     };
 
     verificarRuta();

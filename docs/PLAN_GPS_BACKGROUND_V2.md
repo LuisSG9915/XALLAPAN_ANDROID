@@ -340,3 +340,281 @@ pnpm exec react-native start
 |---|---|
 | `services/LocationService.ts` | + `requestNotificationPermission()` (POST_NOTIFICATIONS, Android 13+) |
 | `services/BackgroundLocationService.ts` | flag interno de loop, primer fix inmediato, logs, manejo de error real, llamada al permiso de notificación |
+
+---
+
+# FASE 7 — Duplicados en la bitácora de recorrido y cadencia real con pantalla apagada (2026-07-25)
+
+> **Estado: IMPLEMENTADA (Fase 7.1). Ver `services/BackgroundLocationService.ts`,
+> `services/GpsBitacoraService.ts`, `App.tsx`, `AndroidManifest.xml` y scripts SQL.**
+
+## Síntoma reportado
+
+`dbo.BitacoraValidacionUbicacionMovil` (SP `sp_MovilesBitacoraValidacionArrastreJSON`) recibe
+filas repetidas de `motivo = recorrido_app`: mismo `idUsuario`, misma `fecha`, misma
+`latitud/longitud`, misma `accuracy`.
+
+## Evidencia recolectada (usuario 1013, 2026-07-24)
+
+| fecha | filas | lotes (`COUNT(DISTINCT fechaRegistroServidor)`) |
+|---|---|---|
+| 18:42:04 | 7 | 1 |
+| 18:53:49 / 18:53:52 | 2 / 4 | 1 |
+| 19:04:10 | 2 | 1 |
+| 19:22:12 / :13 / :14 | 3 / **19** / 11 | 1 |
+| 19:30:07 / :08 / :09 | 6 / **18** / 5 | 1 |
+| 19:37:20 / :21 / :22 | 4 / **21** / 3 | 1 |
+| 19:50:05 / :06 | 12 / 14 | 1 |
+
+Lecturas clave:
+
+- **`lotes = 1` siempre** → cada grupo entró en **un solo POST / un solo `INSERT`**
+  (`fechaRegistroServidor` con `GETDATE()` es constante dentro de una sentencia set-based).
+  **No son reenvíos**: el JSON ya venía con N elementos repetidos.
+- **Ráfagas de 2-3 segundos separadas por huecos de 7-18 minutos**, y
+  `filas ≈ minutos_de_hueco ÷ 30 s`:
+  - `19:04:10 → 19:22:12` = 18 min ≈ 36 slots → ráfaga de **33 filas**
+  - `19:30:09 → 19:37:22` = 7.2 min ≈ 14 slots → ráfaga de **28 filas** (≈ 2 loops × 14)
+  - `19:37:22 → 19:50:06` = 12.7 min ≈ 25 slots → ráfaga de **26 filas**
+- `6767 de 6767` filas con `idLocal IS NULL` (antes de la corrección del SP).
+
+## Causa raíz A (servidor) — mapeo de `idLocal` [CORREGIDO]
+
+El SP desplegado declaraba en `OPENJSON ... WITH` la columna `idlocal`, pero el móvil envía la
+propiedad **`id`** (`GpsBitacoraService.enviarValidacionesPendientes`). En `OPENJSON` con esquema
+explícito el nombre de la columna se usa como **path JSON, y los paths JSON son case-sensitive**,
+por lo que nunca hacía match → `idLocal` siempre `NULL`.
+
+Forma robusta (independiente del nombre de columna):
+
+```sql
+-- dentro del WITH:
+    fecha    DATETIME,
+    idLocal  NVARCHAR(64) '$.id'
+) j;
+-- y en el SELECT: ..., j.fecha, j.idLocal
+```
+
+### Pendiente A.1 — el índice de idempotencia NO existe
+
+`sys.indexes` sobre `BitacoraValidacionUbicacionMovil` sólo devuelve `PK__Bitacora__…`,
+`IX_BitacoraValidacion_Usuario_Fecha`, `IX_BitacoraValidacion_Cliente` y
+`IX_BitacoraValidacion_Motivo`. **Falta** el índice único filtrado, así que hoy `idLocal` se
+guarda pero **no deduplica nada**:
+
+```sql
+CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraValidacion_IdLocal
+    ON [dbo].[BitacoraValidacionUbicacionMovil] (idLocal)
+    WITH (IGNORE_DUP_KEY = ON)
+    WHERE idLocal IS NOT NULL;
+```
+
+### Pendiente A.2 — misma revisión en la tabla GPS
+
+`registrarCapturaTracking` escribe `BitacoraGps` y `BitacoraValidacion` en la **misma
+transacción**, así que la duplicación aparece en ambas. Revisar el mapeo `'$.id'` y el índice
+único en `sp_MovilesBitacoraGpsArrastreJSON` / `BitacoraGpsMovil`.
+
+### Límite importante de `idLocal`
+
+`idLocal` **sólo protege contra reenvíos** (mismo registro enviado dos veces). **No arregla las
+ráfagas**: cada fila de la ráfaga es un registro distinto de Realm con `id` distinto
+(`Date.now()-random`), y el índice único las aceptaría todas.
+
+## Causa raíz B (cliente) — la ráfaga: compensación de deriva sin tope
+
+```ts
+// services/BackgroundLocationService.ts (bucle actual)
+let nextFire = Date.now();
+do {
+  await this.captureOnce();
+  if (!this.isTaskRunning) break;
+  nextFire += this.intervalMs;                          // <-- recupera TODOS los slots perdidos
+  const remaining = Math.max(0, nextFire - Date.now()); // <-- queda en 0 tras una suspensión
+  if (remaining > 0) await sleep(remaining);
+} while (this.isTaskRunning);
+```
+
+Si el proceso estuvo suspendido 10 minutos, `nextFire` quedó 10 minutos **en el pasado**:
+`remaining = 0` en cada iteración y el bucle **dispara de golpe todos los slots perdidos**, sin
+dormir, hasta alcanzar el reloj. Cada iteración escribe una fila con el **mismo fix cacheado**
+(mismas coordenadas y `accuracy`, `fecha` = instante del despertar). Eso produce exactamente las
+ráfagas de 19-21 filas por segundo observadas.
+
+### Por qué se suspende el bucle
+
+- `react-native-background-actions` **no adquiere WakeLock** (verificado: no hay `PowerManager`
+  ni `WakeLock` en `node_modules/react-native-background-actions/android/src/main/java/...`).
+- `setTimeout` en React Native es `Handler.postDelayed`, que **no despierta la CPU**. Con
+  pantalla apagada el timer no corre; se libera cuando el dispositivo despierta.
+- El foreground service mantiene el **proceso vivo** (y el acceso legal a FGS `location`),
+  pero **no garantiza que los timers JS corran**.
+
+### Causa secundaria — múltiples loops concurrentes
+
+El factor ×2 en algunas ráfagas se explica por loops simultáneos:
+
+- `BackgroundActions.start()` **no tiene guardia**: incrementa `_runnedTasks`, registra un
+  headless task con **nombre nuevo** (`XallapanRuta1`, `XallapanRuta2`, …) y arranca el servicio
+  (`src/index.js:78-91`) → pueden convivir N tareas.
+- El servicio nativo usa `HeadlessJsTaskConfig(taskName, …, 0, true)` y `HeadlessJsTaskService`
+  devuelve `START_REDELIVER_INTENT`: si Android mata y recrea el servicio, **re-ejecuta la tarea
+  JS**; si el contexto JS sobrevivió, el loop viejo sigue vivo.
+- `backgroundTask()` **no tiene guardia de reentrada**.
+- `start()` tiene ventana de carrera: la guardia está en la línea 173 pero
+  `isTaskRunning = true` se asigna en la 216, después de 3 `await` (Realm + 2 permisos).
+- `stop()` pone `isTaskRunning = false`, pero un loop dormido en `sleep(30s)` **resucita** si
+  `start()` ocurre antes de que despierte. El `stop()` de la librería sólo resuelve `_stopTask`,
+  no aborta la tarea del usuario.
+- Disparadores: `verificarRuta` cada 60 s en `App.tsx:468-496` (health check basado en
+  `BackgroundActions.isRunning()`, que es **sólo un flag JS**), `handleIniciarRuta` en
+  `MapaClientesScreen`, `TraspasoRecepcionScreen` y `RouteTrackingService.iniciarRuta`.
+
+## Respuesta a "¿sirve la bitácora GPS en segundo plano / pantalla apagada?"
+
+- **El proceso sí sobrevive** (foreground service) y **se registran puntos**, pero la **cadencia
+  de 30 s no se cumple con pantalla apagada**: hay huecos reales de 7-18 minutos sin cobertura y
+  luego una ráfaga de 20-30 puntos falsos (el mismo fix repetido, con la hora del despertar).
+- Es decir: hoy la funcionalidad **no es confiable para auditar recorrido**, pero **el problema
+  es de implementación, no una limitación de Android**. Se corrige con la Fase 7.1.
+
+## FASE 7.1 — Reloj nativo en vez de timer JS (recomendada, sin código nativo nuevo)
+
+Dejar de usar `setTimeout` como reloj y suscribirse a las actualizaciones del
+`FusedLocationProviderClient`, que **es quien despierta la CPU** para entregar cada fix:
+
+- `services/BackgroundLocationService.ts`:
+  - Usar `Geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, interval: 30000, fastestInterval: 30000, distanceFilter: 0, forceRequestLocation: true, showLocationDialog: false })`.
+    La API expone `interval` / `fastestInterval` (`react-native-geolocation-service/index.d.ts:39-40`)
+    y el patch local ya construye el `LocationRequest` con
+    `setMinUpdateIntervalMillis` (`patches/react-native-geolocation-service+5.3.1.patch`).
+  - `onFix` hace lo que hoy hace `captureOnce()` (NetInfo + motivo + `registrarCapturaTracking`).
+  - El bucle del foreground service queda **sólo como watchdog** (cada 2-5 min: si no llegó
+    ningún fix desde el último chequeo, `clearWatch` + re-suscribir y actualizar la notificación).
+  - `stop()` debe hacer `clearWatch` además de `BackgroundActions.stop()`.
+- **Tope de deriva** (aplica también si se conserva el bucle): nunca recuperar slots perdidos →
+  `nextFire = Math.max(nextFire + this.intervalMs, Date.now() + this.intervalMs)`.
+- **Guardia de loop único**: token de generación (`this.generation`) capturado al entrar a
+  `backgroundTask()`, verificado en cada iteración, incrementado en `stop()`; y marcar
+  `isTaskRunning` **antes** del primer `await` de `start()` reusando una `startPromise` en vuelo.
+- **Idempotencia extremo a extremo**: en `GpsBitacoraService.registrarCapturaTracking`, usar id
+  determinista por ventana de tiempo, p. ej.
+  `id = ${idUsuario}-${Math.floor(ts / intervalMs)}` con `Realm.UpdateMode.Modified`.
+  Así, aunque haya 2 loops o 2 callbacks en la misma ventana, se colapsa a **una fila**; y con
+  `UX_..._IdLocal` el servidor también deduplica.
+- **Exclusión de optimización de batería**: en Doze profundo el fused provider puede **diferir**
+  los updates. Solicitar `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` y documentar el ajuste manual en
+  Xiaomi / Huawei / Samsung.
+- **Un solo emisor de envíos**: `enviandoGps` / `enviandoValidaciones` / `enviandoTiempos` son
+  locks **por instancia de módulo**; el headless de `react-native-background-fetch`
+  (`index.js:21-34`) corre en **otro contexto JS** con sus propios locks. Mover el lock a Realm
+  (`SyncLock` con dueño + expiración) o no enviar bitácoras desde el headless si el foreground
+  service de ruta está activo.
+
+## FASE 7.2 (opcional) — Servicio nativo Kotlin
+
+Si se requiere sobrevivir a **app cerrada por swipe** o garantía dura de 30 s: retomar la
+**Fase 5** de este documento (ForegroundService propio + `FusedLocationProviderClient`, con
+`AlarmManager.setExactAndAllowWhileIdle` como respaldo). Alternativa "bruta" sin Kotlin:
+WakeLock parcial mientras la ruta está activa (mayor consumo de batería).
+
+## Limpieza del histórico
+
+```sql
+;WITH d AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY idUsuario, motivo, fecha, latitud, longitud
+               ORDER BY id
+           ) AS rn
+    FROM [dbo].[BitacoraValidacionUbicacionMovil]
+    WHERE motivo LIKE 'recorrido%'
+)
+DELETE FROM d WHERE rn > 1;
+```
+
+> Particionar por datos, **no** por `idLocal` (el histórico lo tiene `NULL`).
+> Aplicar el equivalente en la tabla GPS.
+
+## Verificación
+
+Consulta de control (debe quedar sin resultados):
+
+```sql
+SELECT idUsuario, fecha, COUNT(*) filas, COUNT(DISTINCT fechaRegistroServidor) lotes
+FROM dbo.BitacoraValidacionUbicacionMovil
+WHERE fecha >= CAST(GETDATE() AS DATE) AND motivo LIKE 'recorrido%'
+GROUP BY idUsuario, fecha HAVING COUNT(*) > 1;
+```
+
+Checklist en dispositivo físico:
+
+- [ ] Logcat 10 min con **pantalla apagada**: 1 captura cada ~30 s, un solo `loopId`.
+- [ ] Sin huecos > 2 min ni ráfagas en `fecha` (comparar `fecha` consecutivas).
+- [ ] Realm: `BitacoraValidacion` con `motivo LIKE 'recorrido%'` ≈ 2 filas/minuto.
+- [ ] Matar el foreground service desde ajustes → al reiniciarse **no** quedan 2 loops.
+- [ ] Cortar la red a mitad del POST → el servidor **no** duplica (índice `UX_..._IdLocal`).
+- [ ] `idLocal` poblado en todas las filas nuevas.
+
+## Archivos a modificar (Fase 7, cuando se implemente)
+
+| Archivo | Acción |
+|---|---|
+| `services/BackgroundLocationService.ts` | `watchPosition` con `interval`, bucle como watchdog, tope de deriva, token de generación, `startPromise`, `clearWatch` en `stop()` |
+| `services/GpsBitacoraService.ts` | id determinista por ventana + `UpdateMode.Modified`; lock de envío compartido |
+| `App.tsx` | health check por **transición** de estado de ruta, no cada 60 s |
+| `script_bitacora_validacion.sql` | reflejar `idLocal NVARCHAR(64) '$.id'` y el índice único |
+| `script_bitacora_gps.sql` | misma revisión de mapeo `'$.id'` + índice único |
+| SQL producción | crear `UX_BitacoraValidacion_IdLocal`, limpiar histórico |
+
+---
+
+# FASE 8 — Regresión: la validación de venta se quedó sin fixes (`sin_senal`) (2026-07-25)
+
+## Síntoma
+
+Tras la Fase 7.1, al validar ubicación para vender aparece *"Ubicación no disponible…"*.
+En `BitacoraValidacionUbicacionMovil`: `motivo = sin_senal`, `numFixes = 0`,
+`tiempoMs ≈ 10003` (presupuesto completo agotado sin una sola lectura), mientras el
+recorrido (`recorrido_app`) sí registra puntos con buena precisión.
+
+## Causa raíz
+
+`react-native-geolocation-service` mantiene **una sola suscripción nativa** compartida:
+
+- `js/Geolocation.native.js:42-45` → `watchPosition` solo llama a `RNFusedLocation.startObserving`
+  **si `updatesEnabled` es false**; ese flag es global al módulo.
+- `RNFusedLocationModule.startObserving` reutiliza el mismo `continuousLocationProvider`
+  y `FusedLocationProvider.requestLocationUpdates` reemplaza el `LocationRequest` con el
+  del **último** `startObserving`.
+
+Con el tracking de ruta activo, `BackgroundLocationService.startWatch()` ya dejó el
+`LocationRequest` en `interval = 30 s`. Cuando `LocationService.getBestLocation()` abre su
+watch a 1 s, `updatesEnabled` ya es `true` → **no se re-emite `startObserving`** → la
+validación hereda el intervalo de 30 s y sus 10 s de presupuesto terminan sin fixes.
+
+Prueba en la bitácora: la fila `24384` (`fuera_de_rango`, `numFixes=1`) tiene **exactamente el
+mismo `accuracy = 8.198`** que la fila `24385` de `recorrido_app` del mismo segundo: el único
+fix que recibió la validación fue el tick del stream de 30 s del recorrido.
+
+## Fix implementado
+
+- `services/LocationService.ts`:
+  - `forzarIntervaloNativo(opciones)`: tras `watchPosition`, llama directo a
+    `NativeModules.RNFusedLocation.startObserving(opciones)` para imponer `interval=1000 /
+    fastestInterval=500` sobre la suscripción compartida.
+  - `setWatchRestoreHandler(handler)` + `restaurarWatchDeFondo()`: al cerrar la lectura
+    (`aceptar()`), devuelve el GPS al intervalo del recorrido.
+- `services/BackgroundLocationService.ts`:
+  - Registra el handler de restauración en `start()` (re-suscribe su watch a `intervalMs`) y
+    lo limpia en `stop()`.
+  - `onLocationFix` ignora los fixes de la ráfaga de 1 s (`lastCaptureAt`, umbral
+    `intervalMs * 0.8`) para no escribir en Realm varias veces por segundo; `lastFixAt` sigue
+    marcando actividad para el watchdog.
+
+## Verificación en dispositivo
+
+- Con la ruta activa, validar un cliente: la bitácora debe mostrar `numFixes ≥ 3` y
+  `tiempoMs < 10000`, con `motivo = ok` / `fuera_de_rango` (ya no `sin_senal`).
+- Tras la validación, logcat debe mostrar `watchPosition suscrito (… intervalo=30000ms)`.
+- El recorrido debe mantener ~2 filas/minuto (sin ráfagas durante la validación).

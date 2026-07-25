@@ -380,7 +380,7 @@ export const BitacoraSyncSchema = {
 export const BitacoraGpsSchema = {
   name: "BitacoraGps",
   properties: {
-    id: "string", // UUID único: timestamp-random
+    id: "string", // idLocal determinista por ventana: `${idUsuario}-${Math.floor(ts / intervalMs)}`
     idUsuario: "int",
     sucursal: "int",
     latitud: "float",
@@ -403,7 +403,7 @@ export const BitacoraGpsSchema = {
 export const BitacoraValidacionSchema = {
   name: "BitacoraValidacion",
   properties: {
-    id: "string", // UUID único: timestamp-random
+    id: "string", // idLocal determinista por ventana para recorrido; timestamp-random para validaciones de cliente
     idUsuario: "int",
     sucursal: "int",
     idCliente: "int?",
