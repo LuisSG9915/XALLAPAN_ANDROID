@@ -21,6 +21,7 @@ import AuthService from "./AuthService";
 import BackgroundFetch from "react-native-background-fetch";
 import BitacoraService from "./BitacoraService";
 import GpsBitacoraService from "./GpsBitacoraService";
+import BackgroundActions from "react-native-background-actions";
 
 export type SyncStatus =
   | "idle" // No sincronizando
@@ -452,6 +453,9 @@ class BackgroundSyncService {
         } catch (bitacoraError) {
           console.warn("[BackgroundSync] Error enviando bitácoras, no es crítico:", bitacoraError);
         }
+
+        // Verificar si el GPS en segundo plano sigue vivo y reiniciarlo si es necesario
+        this.checkAndRestartGpsTracking(sucursal, idUsuario);
       } else {
         const errorMessage = this.cancelRequested
           ? "Sincronización cancelada: superó 1 minuto por inestabilidad de red o conexión muy lenta"
@@ -538,6 +542,35 @@ class BackgroundSyncService {
       console.error(TAG, "Error en sincronización headless:", error?.message || error);
     } finally {
       BackgroundFetch.finish(taskId);
+    }
+  }
+
+  /**
+   * Si el servicio de tracking GPS en segundo plano se detuvo (por Doze
+   * o por ser matado por el sistema), intenta reiniciarlo. Se invoca
+   * desde el heartbeat de background-fetch (cada ~3 min) como red de
+   * seguridad adicional al WakeLock.
+   */
+  private async checkAndRestartGpsTracking(sucursal: number, idUsuario: number): Promise<void> {
+    try {
+      const CierreRutaService = require("./CierreRutaService").default;
+      const vendedor = idUsuario || 0;
+      const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
+
+      if (rutaStatus) {
+        return;
+      }
+
+      if (BackgroundActions.isRunning()) {
+        return;
+      }
+
+      console.log("[BackgroundSync] GPS tracking detenido con ruta abierta, reintentando...");
+      const BackgroundLocationService = require("./BackgroundLocationService").default;
+      await BackgroundLocationService.start();
+      console.log("[BackgroundSync] GPS tracking reiniciado por heartbeat");
+    } catch (e) {
+      console.warn("[BackgroundSync] No se pudo reiniciar GPS tracking:", e);
     }
   }
 

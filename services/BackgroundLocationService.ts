@@ -298,6 +298,9 @@ class BackgroundLocationService {
         foregroundServiceType: ["location"] as const,
       });
       console.log(TAG, `Servicio iniciado (gen=${currentGen})`);
+
+      // Adquirir WakeLock parcial para evitar que Doze difiera las entregas de GPS
+      await this.acquireWakeLock();
     } catch (error) {
       this.isTaskRunning = false;
       console.error(TAG, "Error iniciando BackgroundActions:", error);
@@ -346,6 +349,35 @@ class BackgroundLocationService {
   }
 
   /**
+   * Adquiere un WakeLock parcial para evitar que el dispositivo entre en
+   * Doze profundo mientras se está haciendo tracking GPS.
+   */
+  private async acquireWakeLock(): Promise<void> {
+    if (Platform.OS !== "android") return;
+    try {
+      const { WakeLockModule } = NativeModules as any;
+      await WakeLockModule.acquire();
+      console.log(TAG, "WakeLock adquirido");
+    } catch (e) {
+      console.warn(TAG, "No se pudo adquirir WakeLock:", e);
+    }
+  }
+
+  /**
+   * Libera el WakeLock cuando el tracking GPS se detiene.
+   */
+  private async releaseWakeLock(): Promise<void> {
+    if (Platform.OS !== "android") return;
+    try {
+      const { WakeLockModule } = NativeModules as any;
+      await WakeLockModule.release();
+      console.log(TAG, "WakeLock liberado");
+    } catch (e) {
+      console.warn(TAG, "No se pudo liberar WakeLock:", e);
+    }
+  }
+
+  /**
    * Detiene el seguimiento de la ruta.
    */
   async stop(): Promise<State> {
@@ -359,6 +391,8 @@ class BackgroundLocationService {
     } catch (error) {
       console.error(TAG, "Error deteniendo BackgroundActions:", error);
     }
+    // Liberar WakeLock
+    await this.releaseWakeLock();
     return this.getState();
   }
 

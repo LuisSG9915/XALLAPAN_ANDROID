@@ -1,5 +1,6 @@
 package com.awesomeproject
 
+import android.content.Context
 import android.os.PowerManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -14,7 +15,7 @@ class BatteryOptimizationModule(reactContext: ReactApplicationContext) : ReactCo
     fun isIgnoringBatteryOptimizations(promise: Promise) {
         try {
             val powerManager = reactApplicationContext.getSystemService(
-                ReactApplicationContext.POWER_SERVICE
+                Context.POWER_SERVICE
             ) as PowerManager
             promise.resolve(powerManager.isIgnoringBatteryOptimizations(reactApplicationContext.packageName))
         } catch (e: Exception) {

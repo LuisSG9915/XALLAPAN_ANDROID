@@ -55,6 +55,7 @@ import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
 import SyncStatusPanel from "./components/SyncStatusPanel";
+import SucursalBadge from "./components/SucursalBadge";
 
 declare const global: any;
 
@@ -296,7 +297,7 @@ function App() {
       <NavigationContainer>
         <Stack.Navigator
           initialRouteName="Login"
-          screenOptions={{
+          screenOptions={({ route }) => ({
             headerStyle: {
               backgroundColor: COLORS.primary,
             },
@@ -304,7 +305,11 @@ function App() {
             headerTitleStyle: {
               fontWeight: "bold",
             },
-          }}
+            headerRight:
+              route.name !== "Login" && route.name !== "Home"
+                ? () => <SucursalBadge />
+                : undefined,
+          })}
         >
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <Stack.Screen
