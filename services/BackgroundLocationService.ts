@@ -1,4 +1,4 @@
-import { AppState, Alert, Linking, Platform } from "react-native";
+import { AppState, Alert, Linking, NativeModules, Platform } from "react-native";
 import BackgroundActions from "react-native-background-actions";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
 import NetInfo from "@react-native-community/netinfo";
@@ -322,13 +322,21 @@ class BackgroundLocationService {
     const sdkVersion = typeof Platform.Version === "string" ? parseInt(Platform.Version, 10) : (Platform.Version || 0);
     if (sdkVersion < 23) return;
 
+    try {
+      const { BatteryOptimizationModule } = NativeModules as any;
+      const alreadyExempted = await BatteryOptimizationModule.isIgnoringBatteryOptimizations();
+      if (alreadyExempted) {
+        console.log(TAG, "App ya está exenta de optimización de batería");
+        return;
+      }
+    } catch (e) {
+      console.warn(TAG, "No se pudo verificar estado de optimización de batería:", e);
+    }
+
     if (this.batteryOptimizationAlertShown) return;
     this.batteryOptimizationAlertShown = true;
 
     try {
-      // Intenta abrir la lista de apps con optimización de batería.
-      // No requiere código nativo nuevo; si no está disponible, cae a
-      // configuración de la app.
       await Linking.sendIntent("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS", []);
       console.log(TAG, "Solicitada exclusión de optimización de batería (settings)");
     } catch (e) {
