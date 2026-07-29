@@ -435,6 +435,7 @@ export const BitacoraValidacionSchema = {
  * para medir en el servidor cuánto tarda cada etapa del cierre
  * (GPS, impresión, guardado local, post-venta) y detectar cuellos de botella.
  */
+
 export const BitacoraTiemposVentaSchema = {
   name: "BitacoraTiemposVenta",
   properties: {

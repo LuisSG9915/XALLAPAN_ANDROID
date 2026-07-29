@@ -22,6 +22,7 @@ class BackgroundLocationService {
   private static instance: BackgroundLocationService;
   private isReady = false;
   private intervalMs = 30000;
+  private intervaloNativo = 5000;
   private isTaskRunning = false;
   private watchId: number | null = null;
   private lastFixAt = 0;
@@ -36,6 +37,13 @@ class BackgroundLocationService {
   private notificationAlertShown = false;
   private batteryOptimizationAlertShown = false;
 
+  private ultimoFixTracking: {
+    latitud: number;
+    longitud: number;
+    accuracy: number;
+    timestamp: number;
+  } | null = null;
+
   private constructor() {}
 
   static getInstance(): BackgroundLocationService {
@@ -43,6 +51,10 @@ class BackgroundLocationService {
       BackgroundLocationService.instance = new BackgroundLocationService();
     }
     return BackgroundLocationService.instance;
+  }
+
+  getUltimoFixTracking(): { latitud: number; longitud: number; accuracy: number; timestamp: number } | null {
+    return this.ultimoFixTracking;
   }
 
   /**
@@ -65,14 +77,14 @@ class BackgroundLocationService {
         (error: GeoError) => this.onLocationError(error, generation),
         {
           enableHighAccuracy: true,
-          interval: this.intervalMs,
-          fastestInterval: this.intervalMs,
+          interval: this.intervaloNativo,
+          fastestInterval: this.intervaloNativo,
           distanceFilter: 0,
           forceRequestLocation: true,
           showLocationDialog: false,
         } as any,
       );
-      console.log(TAG, `watchPosition suscrito (gen=${generation}, watchId=${this.watchId}, intervalo=${this.intervalMs}ms)`);
+      console.log(TAG, `watchPosition suscrito (gen=${generation}, watchId=${this.watchId}, nativo=${this.intervaloNativo}ms, escritura=${this.intervalMs}ms)`);
     } catch (e) {
       console.error(TAG, "Error suscribiendo watchPosition:", e);
     }
@@ -98,6 +110,12 @@ class BackgroundLocationService {
     // escribir en Realm varias veces por segundo.
     const ahora = Date.now();
     this.lastFixAt = ahora;
+    this.ultimoFixTracking = {
+      latitud: position.coords.latitude,
+      longitud: position.coords.longitude,
+      accuracy: position.coords.accuracy ?? 999,
+      timestamp: position.timestamp ?? ahora,
+    };
     if (this.lastCaptureAt > 0 && ahora - this.lastCaptureAt < this.intervalMs * 0.8) {
       return;
     }

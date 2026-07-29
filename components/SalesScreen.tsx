@@ -602,19 +602,33 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   useEffect(() => {
     const init = async () => {
-      setInitializingPrinter(true);
+      const tGlobal0 = Date.now();
+      console.log(`[Sales][INIT] ===== useEffect init DISPARADO (t=0ms) =====`);
+
+      // Conectar impresora en segundo plano (no bloquea la carga de la pantalla)
+      const connectPrinterBg = async () => {
+        const tPrinter = Date.now();
+        try {
+          console.log(`[Sales][INIT][BG] Intentando conectar impresora en segundo plano... (t=${Date.now() - tGlobal0}ms)`);
+          let status = BluetoothPrinterService.getStatus();
+          if (!status.connected) {
+            await BluetoothPrinterService.connectToSavedPrinter();
+          }
+          status = BluetoothPrinterService.getStatus();
+          setPrinterConnected(status.connected);
+          setPrinterName(status.printer?.name || "");
+          console.log(`[Sales][INIT][BG] Impresora lista en ${Date.now() - tPrinter}ms: connected=${status.connected} (t=${Date.now() - tGlobal0}ms)`);
+        } catch (e) {
+          console.warn(`[Sales][INIT][BG] Error conectando impresora (no crítico):`, e);
+        }
+      };
+      // Disparar conexión de impresora en segundo plano (no esperamos a que termine)
+      connectPrinterBg();
 
       try {
-        let status = BluetoothPrinterService.getStatus();
-        if (!status.connected) {
-          await BluetoothPrinterService.connectToSavedPrinter();
-        }
-
-        status = BluetoothPrinterService.getStatus();
-        setPrinterConnected(status.connected);
-        setPrinterName(status.printer?.name || "");
-
+        console.log(`[Sales][INIT] Restaurando sesión usuario... (t=${Date.now() - tGlobal0}ms)`);
         const user = await AuthService.restoreSession();
+        console.log(`[Sales][INIT] Sesión restaurada en ${Date.now() - tGlobal0}ms, user=${user?.nombre}`);
         if (user) {
           console.log(
             `[Sales][USER] envaseRuta=${String((user as any)?.envaseRuta)} ` +
@@ -658,10 +672,14 @@ export default function SalesScreen({ route }: { route?: any }) {
           }
 
           // Cargar datos después de establecer la sucursal
+          console.log(`[Sales][INIT] Llamando loadDataFromRealm... (t=${Date.now() - tGlobal0}ms)`);
+          const tLoad = Date.now();
           await loadDataFromRealm(sucursal, skipNetworkSync);
+          console.log(`[Sales][INIT] loadDataFromRealm terminó en ${Date.now() - tLoad}ms (t=${Date.now() - tGlobal0}ms)`);
         }
       } finally {
         setInitializingPrinter(false);
+        console.log(`[Sales][INIT] initializingPrinter=false, init COMPLETO en ${Date.now() - tGlobal0}ms =====`);
       }
     };
 
@@ -670,6 +688,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   useEffect(() => {
     // Solo procesar el cliente de route.params UNA VEZ
+    console.log(`[Sales][ROUTE] useEffect disparado: clienteId=${route?.params?.clienteId}, clientes.length=${clientes.length}, selectedClient=${selectedClient?.id}, yaProcesado=${clienteParamsProcessed.current}`);
     if (route?.params?.clienteId && clientes.length > 0 && !selectedClient && !clienteParamsProcessed.current) {
       const cliente = clientes.find((c) => c.id === route.params.clienteId);
       if (cliente) {
@@ -793,8 +812,11 @@ export default function SalesScreen({ route }: { route?: any }) {
   );
 
   const loadDataFromRealm = async (sucursal: number, skipNetworkSync = false): Promise<Cliente[]> => {
+    const t0 = Date.now();
+    console.log(`[Sales][loadData] INICIO (t=0ms) sucursal=${sucursal}, skipNetworkSync=${skipNetworkSync}`);
     try {
       await FullSyncService.initialize();
+      console.log(`[Sales][loadData] FullSyncService.initialize OK (t=${Date.now() - t0}ms)`);
 
       // Cargar clientes
       const clientesData = FullSyncService.getClientesFull(10000);
@@ -933,6 +955,7 @@ export default function SalesScreen({ route }: { route?: any }) {
       });
       setFilteredProductos(sortedProducts);
 
+      console.log(`[Sales][loadData] FIN en ${Date.now() - t0}ms, clientes=${clientesFormateados.length}, productos=${baseProducts.length}`);
       return clientesFormateados;
     } catch (error) {
       console.error("Error al cargar datos de Realm:", error);
@@ -1504,15 +1527,34 @@ export default function SalesScreen({ route }: { route?: any }) {
             setReubicandoCliente(true);
             try {
               console.log("[Sales] Obteniendo ubicación GPS para reubicación...");
-              const ubicacion = await LocationService.getBestLocation();
+              const ubicacion = await LocationService.getBestLocation(5, 10000);
 
               if (!ubicacion) {
-                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado y estés a cielo abierto.");
                 setReubicandoCliente(false);
                 return;
               }
 
-              console.log("[Sales] Ubicación obtenida:", ubicacion);
+              const diagnostico = LocationService.getUltimoDiagnosticoGps();
+              const accuracy = ubicacion.accuracy ?? 999;
+              const numFixes = diagnostico.numFixes;
+
+              console.log("[Sales] Ubicación obtenida:", ubicacion, "Diagnóstico:", diagnostico);
+
+              if (accuracy > 25 || numFixes < 3) {
+                Alert.alert(
+                  "Precisión GPS insuficiente",
+                  `No se puede reubicar el cliente con la precisión actual:\n\n` +
+                  `• Precisión: ±${Math.round(accuracy)} m (se requiere ±25 m o mejor)\n` +
+                  `• Lecturas GPS: ${numFixes} (se requieren al menos 3)\n\n` +
+                  `Por favor:\n` +
+                  `• Sal a cielo abierto\n` +
+                  `• Espera 1-2 minutos sin moverte\n` +
+                  `• Intenta de nuevo`,
+                );
+                setReubicandoCliente(false);
+                return;
+              }
 
               const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
                 clienteAUbicar.id,
@@ -2708,7 +2750,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Preparando conexión con la impresora...</Text>
+            <Text style={styles.loadingText}>Cargando punto de venta...</Text>
           </View>
         </ScrollView>
       </View>

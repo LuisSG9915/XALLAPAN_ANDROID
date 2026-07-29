@@ -142,21 +142,41 @@ class BluetoothPrinterService {
    * Conecta a una impresora específica
    */
   async connectToPrinter(printer: PrinterDevice, options?: { silent?: boolean }): Promise<boolean> {
+    const t0 = Date.now();
+    console.log(`[BTPrinter] connectToPrinter INICIO (t=0ms) -> ${printer.name} (${printer.address}), silent=${options?.silent ?? false}`);
     try {
+      console.log(`[BTPrinter] connectToPrinter habilitando Bluetooth... (t=${Date.now() - t0}ms)`);
       const isEnabled = await this.enableBluetooth();
+      console.log(`[BTPrinter] enableBluetooth=${isEnabled} (t=${Date.now() - t0}ms)`);
       if (!isEnabled) {
         Alert.alert("Bluetooth", "Por favor activa el Bluetooth");
         return false;
       }
 
       // Intentar limpiar cualquier conexión previa que haya quedado colgada
-      try {
-        await BluetoothManager.disconnect();
-      } catch (disconnectError) {
-        console.warn("Error intentando resetear la conexión Bluetooth antes de conectar:", disconnectError);
+      const anyMgr = BluetoothManager as any;
+      if (typeof anyMgr.disconnect === "function") {
+        console.log(`[BTPrinter] disconnect() disponible, reseteando conexión previa... (t=${Date.now() - t0}ms)`);
+        try {
+          await anyMgr.disconnect();
+          console.log(`[BTPrinter] disconnect() completado (t=${Date.now() - t0}ms)`);
+        } catch (disconnectError) {
+          console.warn("Error intentando resetear la conexión Bluetooth antes de conectar:", disconnectError);
+        }
+      } else {
+        // Si disconnect no existe, verificar si ya está conectada a esta misma impresora
+        try {
+          const nativeConnected = await anyMgr.isConnected();
+          if (nativeConnected && this.currentPrinter?.address === printer.address) {
+            console.log("[Printer] Ya está conectada a esta impresora, no se requiere reconexión");
+            return true;
+          }
+        } catch {}
       }
 
+      console.log(`[BTPrinter] Llamando BluetoothManager.connect(${printer.address})... (t=${Date.now() - t0}ms)`);
       await BluetoothManager.connect(printer.address);
+      console.log(`[BTPrinter] BluetoothManager.connect OK (t=${Date.now() - t0}ms)`);
       this.currentPrinter = printer;
       this.isConnected = true;
 
@@ -165,7 +185,7 @@ class BluetoothPrinterService {
 
       return true;
     } catch (error: any) {
-      console.error("Error connecting to printer:", error);
+      console.error(`[BTPrinter] Error connecting to printer (t=${Date.now() - t0}ms):`, error?.message || error);
       this.currentPrinter = null;
       this.isConnected = false;
 
@@ -188,7 +208,10 @@ class BluetoothPrinterService {
   async disconnect(): Promise<void> {
     try {
       if (this.isConnected && this.currentPrinter) {
-        await BluetoothManager.disconnect();
+        const anyMgr = BluetoothManager as any;
+        if (typeof anyMgr.disconnect === "function") {
+          await anyMgr.disconnect();
+        }
         this.isConnected = false;
       }
     } catch (error) {
@@ -227,10 +250,16 @@ class BluetoothPrinterService {
    * Conecta automáticamente a la última impresora usada
    */
   async connectToSavedPrinter(): Promise<boolean> {
+    const t0 = Date.now();
+    console.log("[BTPrinter] connectToSavedPrinter INICIO (t=0ms)");
     const savedPrinter = await this.loadSavedPrinter();
+    console.log(`[BTPrinter] loadSavedPrinter terminó en ${Date.now() - t0}ms, savedPrinter=${savedPrinter ? `${savedPrinter.name} (${savedPrinter.address})` : 'null'}`);
     if (savedPrinter) {
-      return await this.connectToPrinter(savedPrinter, { silent: true });
+      const result = await this.connectToPrinter(savedPrinter, { silent: true });
+      console.log(`[BTPrinter] connectToSavedPrinter FIN en ${Date.now() - t0}ms, resultado=${result}`);
+      return result;
     }
+    console.log(`[BTPrinter] connectToSavedPrinter FIN en ${Date.now() - t0}ms (sin impresora guardada)`);
     return false;
   }
 
@@ -288,7 +317,10 @@ class BluetoothPrinterService {
    */
   private async forceReconnect(): Promise<boolean> {
     try {
-      await BluetoothManager.disconnect();
+      const anyMgr = BluetoothManager as any;
+      if (typeof anyMgr.disconnect === "function") {
+        await anyMgr.disconnect();
+      }
     } catch (e) {
       // ignorar errores al desconectar
     }

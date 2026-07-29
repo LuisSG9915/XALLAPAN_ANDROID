@@ -370,8 +370,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   };
 
   const handleIrAVentas = async (visita: VisitaConCliente) => {
+    const t0 = Date.now();
+    console.log(`[Cumplimiento] handleIrAVentas INICIO (t=0ms) -> cliente: ${visita.idCliente} ${visita.nombreCliente}`);
+
     if (visita.latitud && visita.longitud) {
       setValidandoUbicacion(true);
+      console.log(`[Cumplimiento] handleIrAVentas validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await LocationService.validarUbicacionConAlerta(
         visita.latitud,
         visita.longitud,
@@ -385,20 +389,27 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         },
       );
       setValidandoUbicacion(false);
+      console.log(`[Cumplimiento] handleIrAVentas ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
 
+    console.log(`[Cumplimiento] handleIrAVentas navegando a Sales... (t=${Date.now() - t0}ms)`);
     navigation.navigate("Sales", {
       clienteId: visita.idCliente,
       nombreCliente: visita.nombreCliente,
       desdeVisita: true,
     });
+    console.log(`[Cumplimiento] handleIrAVentas FIN navigate llamado (t=${Date.now() - t0}ms)`);
   };
 
   // Navegar a Punto de Venta para un cliente seleccionado (Cercanos / Todos)
   const handleIrAVentasCliente = async (cliente: ClienteLite) => {
+    const t0 = Date.now();
+    console.log(`[Cumplimiento] handleIrAVentasCliente INICIO (t=0ms) -> cliente: ${cliente.id} ${cliente.nombre}`);
+
     if (cliente.latitud && cliente.longitud) {
       setValidandoUbicacion(true);
+      console.log(`[Cumplimiento] handleIrAVentasCliente validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await LocationService.validarUbicacionConAlerta(
         cliente.latitud,
         cliente.longitud,
@@ -412,14 +423,17 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         },
       );
       setValidandoUbicacion(false);
+      console.log(`[Cumplimiento] handleIrAVentasCliente ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
 
+    console.log(`[Cumplimiento] handleIrAVentasCliente navegando a Sales... (t=${Date.now() - t0}ms)`);
     navigation.navigate("Sales", {
       clienteId: cliente.id,
       nombreCliente: cliente.nombre,
       desdeVisita: true,
     });
+    console.log(`[Cumplimiento] handleIrAVentasCliente FIN navigate llamado (t=${Date.now() - t0}ms)`);
   };
 
   // Reubicar cliente
@@ -558,6 +572,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             userMetros ?? cliente.metros ?? 100,
             undefined,
             {
+              id: cliente.id,
               nombre: cliente.nombre,
               lat: cliente.latitud,
               lng: cliente.longitud,

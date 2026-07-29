@@ -520,6 +520,7 @@ class LocationService {
 
     return new Promise((resolve) => {
       let mejor: LocationCoordinates | null = null;
+      let segundoMejor: LocationCoordinates | null = null;
       let lecturasRecibidas = 0;
       let peorAccuracy = 0;
       let settled = false;
@@ -527,10 +528,14 @@ class LocationService {
       let watchdog: ReturnType<typeof setInterval> | null = null;
       let appStateSub: { remove: () => void } | null = null;
       const inicio = Date.now();
+      const EDAD_MAXIMA_FIX_MS = 3000;
 
       const aceptar = (coords: LocationCoordinates | null, motivo: string) => {
         if (settled) return;
         settled = true;
+        // Restaurar el watch de fondo ANTES de liberar el rápido: así el contador
+        // de suscriptores nativos nunca llega a 0 y GMS no apaga el motor GNSS.
+        this.restaurarWatchDeFondo();
         if (watchId !== null) {
           Geolocation.clearWatch(watchId);
           watchId = null;
@@ -542,8 +547,6 @@ class LocationService {
         appStateSub?.remove();
         appStateSub = null;
         clearTimeout(temporizadorTotal);
-        // Devolver el GPS al intervalo del tracking de ruta (si está activo).
-        this.restaurarWatchDeFondo();
         this.ultimoDiagnosticoGps = {
           numFixes: lecturasRecibidas,
           peorAccuracy,
@@ -601,6 +604,15 @@ class LocationService {
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
           };
+
+          const edadFix = Date.now() - (position.timestamp ?? Date.now());
+          if (edadFix > EDAD_MAXIMA_FIX_MS) {
+            console.log(
+              `[LocationService] Fix descartado por antigüedad: ${edadFix} ms (máx ${EDAD_MAXIMA_FIX_MS} ms)`,
+            );
+            return;
+          }
+
           const accuracy = coords.accuracy ?? 999;
           const transcurrido = Date.now() - inicio;
 
@@ -628,12 +640,30 @@ class LocationService {
             peorAccuracy = accuracy;
           }
           if (!mejor || accuracy < (mejor.accuracy ?? 999)) {
+            segundoMejor = mejor;
             mejor = coords;
+          } else if (!segundoMejor || accuracy < (segundoMejor.accuracy ?? 999)) {
+            segundoMejor = coords;
           }
           onProgreso?.(lecturasRecibidas, intentos, accuracy);
 
-          // Cortamos en cuanto el mejor fix alcanza la precisión objetivo.
-          if ((mejor.accuracy ?? 999) <= PRECISION_OBJETIVO) {
+          const fixesCoherentes = (): boolean => {
+            if (lecturasRecibidas < 2 || !mejor || !segundoMejor) return false;
+            const dist = calcularDistancia(
+              mejor.latitude, mejor.longitude,
+              segundoMejor.latitude, segundoMejor.longitude,
+            );
+            const tolerancia = 3 * (mejor.accuracy ?? 999);
+            if (dist > tolerancia) {
+              console.log(
+                `[LocationService] Fixes incoherentes: ${Math.round(dist)} m > tolerancia ${Math.round(tolerancia)} m`,
+              );
+              return false;
+            }
+            return true;
+          };
+
+          if ((mejor.accuracy ?? 999) <= PRECISION_OBJETIVO && fixesCoherentes()) {
             finalizar("precisión objetivo");
             return;
           }
@@ -727,7 +757,7 @@ class LocationService {
 
     const ubicacion = await this.getBestLocation(
       5,
-      10000,
+      6000,
       onProgreso,
       (coords) => {
         const accuracy = coords.accuracy ?? 999;
@@ -777,6 +807,43 @@ class LocationService {
           `accuracy=±${Math.round(accuracy)} m`,
       );
       return { valido: false, motivo: "precision_baja", distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
+    }
+
+    // 2.5) Contraste con tracking de fondo: si la velocidad implícita entre el
+    //      último fix del tracking y el de la validación es físicamente imposible,
+    //      el fix de validación es probablemente rancio/cacheado.
+    //      NUNCA convertir un fix incoherente en fuera_de_rango (Fase 4.4).
+    try {
+      const BGService = require("./BackgroundLocationService").default;
+      const ultimoTracking = BGService.getInstance().getUltimoFixTracking();
+      if (ultimoTracking) {
+        const edadTracking = (Date.now() - ultimoTracking.timestamp) / 1000;
+        if (edadTracking > 0 && edadTracking <= 30 && ultimoTracking.accuracy <= 50) {
+          const distTracking = calcularDistancia(
+            ubicacion.latitude, ubicacion.longitude,
+            ultimoTracking.latitud, ultimoTracking.longitud,
+          );
+          const velocidad = distTracking / edadTracking;
+          if (velocidad > 40) {
+            console.warn(
+              `[LocationService] Fix de validación incoherente con tracking: ` +
+                `${Math.round(distTracking)} m en ${edadTracking.toFixed(1)} s = ${Math.round(velocidad)} m/s ` +
+                `(máx 40 m/s). Fix probablemente cacheado.`,
+            );
+            return {
+              valido: false,
+              motivo: "precision_baja",
+              distancia,
+              accuracy,
+              metrosPermitidos,
+              ubicacion,
+              ...diag,
+            };
+          }
+        }
+      }
+    } catch (_) {
+      // BackgroundLocationService no disponible (no crítico)
     }
 
     // 3) Accuracy confiable y aun así fuera de rango: está realmente lejos.
