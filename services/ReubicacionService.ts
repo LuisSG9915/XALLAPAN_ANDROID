@@ -1,5 +1,6 @@
 import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { calcularDistancia } from "./LocationService";
 
 /**
  * Genera un ID único numérico basado en timestamp
@@ -116,6 +117,12 @@ class ReubicacionService {
     longitud: number,
     idUsuario: number,
     sucursal?: number,
+    gpsDiagnostico?: {
+      latitudAnterior?: number;
+      longitudAnterior?: number;
+      accuracy?: number;
+      numFixes?: number;
+    },
   ): Promise<number | null> {
     console.log("[ReubicacionService] 📍 Iniciando registro de reubicación...");
     console.log(`[ReubicacionService] Parámetros:`, {
@@ -154,6 +161,10 @@ class ReubicacionService {
       enviado: false,
     });
 
+    const metrosMovidos = gpsDiagnostico?.latitudAnterior != null && gpsDiagnostico?.longitudAnterior != null
+      ? calcularDistancia(gpsDiagnostico.latitudAnterior, gpsDiagnostico.longitudAnterior, latitud, longitud)
+      : null;
+
     try {
       this.realm.write(() => {
         this.realm!.create("Reubicacion", {
@@ -162,6 +173,11 @@ class ReubicacionService {
           sucursal: sucursal ?? null,
           latitud,
           longitud,
+          latitudAnterior: gpsDiagnostico?.latitudAnterior ?? null,
+          longitudAnterior: gpsDiagnostico?.longitudAnterior ?? null,
+          accuracy: gpsDiagnostico?.accuracy ?? null,
+          numFixes: gpsDiagnostico?.numFixes ?? null,
+          metrosMovidos,
           fecha,
           idUsuario,
           syncedAt,
@@ -242,6 +258,11 @@ class ReubicacionService {
         idCliente: r.idCliente,
         latitud: r.latitud,
         longitud: r.longitud,
+        latitudAnterior: r.latitudAnterior ?? null,
+        longitudAnterior: r.longitudAnterior ?? null,
+        accuracy: r.accuracy ?? null,
+        numFixes: r.numFixes ?? null,
+        metrosMovidos: r.metrosMovidos ?? null,
         fecha: r.fecha,
         idUsuario: r.idUsuario,
       }));
@@ -277,12 +298,16 @@ class ReubicacionService {
     try {
       const payload = {
         reubicaciones: pendientes.map((r) => ({
+          idLocal: `${r.id}-reubicacion`,
           sucursal: sucursal,
           cveCliente: r.idCliente,
-          latitudAnterior: 0,
-          longitudAnterior: 0,
+          latitudAnterior: r.latitudAnterior ?? 0,
+          longitudAnterior: r.longitudAnterior ?? 0,
           latitudNueva: r.latitud ?? 0,
           longitudNueva: r.longitud ?? 0,
+          accuracy: r.accuracy ?? null,
+          numFixes: r.numFixes ?? null,
+          metrosMovidos: r.metrosMovidos ?? null,
           fecha: (r.fecha ?? new Date()).toISOString(),
           usuario: r.idUsuario ?? idUsuario,
           idMovil: r.id,

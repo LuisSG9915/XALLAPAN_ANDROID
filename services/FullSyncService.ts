@@ -25,8 +25,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 48,
+        schemaVersion: 49,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v49: Agregar campos de auditoría a Reubicacion (latitudAnterior, longitudAnterior, accuracy, numFixes, metrosMovidos)
+          if (oldRealm.schemaVersion < 49) {
+            console.log("[Migration v49] Agregando campos de auditoría a Reubicacion");
+          }
+
           // Migración v48: Nueva tabla BitacoraTiemposVenta (medición de tiempos del cierre de venta)
           if (oldRealm.schemaVersion < 48) {
             console.log("[Migration v48] Creando tabla BitacoraTiemposVenta");

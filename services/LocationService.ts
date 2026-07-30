@@ -11,7 +11,7 @@ export type LocationCoordinates = {
   accuracy?: number; // precisión en metros (cuanto menor, mejor)
 };
 
-export type MotivoValidacion = "ok" | "ok_cache" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango";
+export type MotivoValidacion = "ok" | "ok_cache" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango" | "red_no_gnss";
 
 export type ValidacionUbicacionResultado = {
   valido: boolean;
@@ -669,7 +669,13 @@ class LocationService {
           }
 
           // O si el llamador acepta este fix (p. ej. ya cae dentro del rango del cliente).
-          if (condicionExito?.(coords)) {
+          // Protección contra falsos positivos con fix cacheado: exigir ≥2 fixes.
+          // Con GNSS enganchado el segundo fix llega en ~1 s; coste mínimo, seguridad máxima.
+          if (lecturasRecibidas >= 2 && condicionExito?.(coords)) {
+            console.log(
+              `[LocationService] Corte: condición de éxito, numFixes=${lecturasRecibidas}, ` +
+                `accuracy=${Math.round(accuracy)}m`,
+            );
             aceptar(coords, "condición de éxito");
             return;
           }
@@ -677,7 +683,13 @@ class LocationService {
           // O si el llamador determina que con este fix el resultado ya es
           // definitivamente negativo (fuera de rango imposible de revertir
           // aunque el GPS refinara): no tiene caso seguir esperando.
-          if (condicionFracaso?.(coords)) {
+          // Protección contra falsos negativos: SIEMPRE exigir ≥2 fixes.
+          // Un solo fix cacheado a 2.6 km no debe producir un fuera_de_rango firme.
+          if (lecturasRecibidas >= 2 && condicionFracaso?.(coords)) {
+            console.log(
+              `[LocationService] Corte: condición de fracaso, numFixes=${lecturasRecibidas}, ` +
+                `accuracy=${Math.round(accuracy)}m`,
+            );
             aceptar(coords, "condición de fracaso");
             return;
           }
@@ -802,11 +814,13 @@ class LocationService {
     // 2) La posición parece estar fuera de rango (o el accuracy es absurdo). Si la
     //    precisión es baja no podemos afirmar que esté fuera: pedimos reintentar.
     if (accuracy > PRECISION_MAXIMA_ACEPTABLE) {
+      const esRedCelular = accuracy >= 100 && accuracy % 50 === 0;
+      const motivo: MotivoValidacion = esRedCelular ? "red_no_gnss" : "precision_baja";
       console.warn(
-        `[LocationService] Precisión insuficiente para validar: distancia=${Math.round(distancia)} m, ` +
+        `[LocationService] ${esRedCelular ? "Fix de red celular" : "Precisión insuficiente"}: distancia=${Math.round(distancia)} m, ` +
           `accuracy=±${Math.round(accuracy)} m`,
       );
-      return { valido: false, motivo: "precision_baja", distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
+      return { valido: false, motivo, distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
     }
 
     // 2.5) Contraste con tracking de fondo: si la velocidad implícita entre el
@@ -906,20 +920,40 @@ class LocationService {
           "Necesitas conceder el permiso de ubicación para poder registrar la visita.",
         );
         return false;
-      case "sin_senal":
+      case "sin_senal": {
+        const segundos = Math.round((r.tiempoMs ?? 0) / 1000);
         Alert.alert(
-          "Ubicación no disponible",
-          "No se pudo obtener tu ubicación. Verifica que el GPS esté activado y que estés a cielo abierto.",
+          "GPS buscando satélites",
+          `El GPS lleva ${segundos}s sin encontrar satélites.\n\n` +
+            `• Sal a cielo abierto\n` +
+            `• Verifica que el GPS esté activado\n` +
+            `• Espera 1-2 minutos sin moverte\n` +
+            `• Asegúrate de tener "Precisión de ubicación de Google" activada en Ajustes > Ubicación`,
         );
         return false;
-      case "precision_baja":
-        Alert.alert(
-          "Señal GPS débil",
-          `La precisión del GPS es de ±${Math.round(
-            r.accuracy ?? 0,
-          )} m, demasiado baja para validar tu ubicación. Inténtalo de nuevo.`,
-        );
+      }
+      case "precision_baja": {
+        const acc = r.accuracy ?? 0;
+        const esRedCelular = acc >= 100 && acc % 50 === 0;
+        if (esRedCelular) {
+          Alert.alert(
+            "Ubicación por antena celular",
+            `El teléfono está usando antenas de celular en lugar de satélites GPS (precisión: ±${Math.round(acc)} m).\n\n` +
+              `• Verifica en Ajustes > Ubicación que "Precisión alta" esté activada\n` +
+              `• Activa la búsqueda de redes Wi-Fi en Ajustes > Ubicación\n` +
+              `• Sal a cielo abierto y espera 1-2 minutos`,
+          );
+        } else {
+          Alert.alert(
+            "Señal GPS débil",
+            `La precisión del GPS es de ±${Math.round(acc)} m. Se requiere ±50 m o mejor.\n\n` +
+              `• Sal a cielo abierto\n` +
+              `• Espera 1-2 minutos sin moverte para que el GPS mejore\n` +
+              `• Evita estar bajo techos metálicos o entre edificios altos`,
+          );
+        }
         return false;
+      }
       case "fuera_de_rango": {
         const nombreCliente = clienteInfo?.nombre ? `Cliente: ${clienteInfo.nombre}\n` : "";
         const tuUbicacion = r.ubicacion
@@ -933,6 +967,17 @@ class LocationService {
             `Estás a ${Math.round(r.distancia ?? 0)} metros del cliente. La distancia máxima permitida es de ` +
             `${metrosPermitidos} metros (precisión GPS: ±${Math.round(r.accuracy ?? 0)} m).\n\n` +
             `${tuUbicacion}${ubicacionCliente}`,
+        );
+        return false;
+      }
+      case "red_no_gnss": {
+        Alert.alert(
+          "GPS no disponible — usando antena celular",
+          `El teléfono está determinando tu ubicación por antenas de celular (precisión: ±${Math.round(r.accuracy ?? 0)} m), no por satélites GPS.\n\n` +
+            `• Verifica en Ajustes > Ubicación que "Precisión alta" esté activada\n` +
+            `• Activa la búsqueda de redes Wi-Fi en Ajustes > Ubicación > Servicios\n` +
+            `• Sal a cielo abierto y espera 1-2 minutos\n` +
+            `• Si el problema persiste, reinicia la app`,
         );
         return false;
       }

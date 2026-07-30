@@ -121,6 +121,8 @@ export default function SalesScreen({ route }: { route?: any }) {
   // Precisión del fix GPS en curso, para mostrar progreso vivo mientras valida
   // (p. ej. "±38 m") en vez de un spinner mudo que desespera al vendedor.
   const [progresoGps, setProgresoGps] = useState<string | null>(null);
+  // Detalle del progreso GPS para mostrar en el modal de validación
+  const [progresoValidacion, setProgresoValidacion] = useState<{ intento: number; total: number; accuracy: number } | null>(null);
   const [userMetros, setUserMetros] = useState<number | null>(null);
 
   // Tabs del modal de clientes: 'agendados' | 'cercanos' | 'todos'
@@ -1066,11 +1068,15 @@ export default function SalesScreen({ route }: { route?: any }) {
       } else if (cliente.latitud && cliente.longitud) {
         setValidandoUbicacion(true);
         setProgresoGps(null);
+        setProgresoValidacion(null);
         const ubicacionValida = await LocationService.validarUbicacionConAlerta(
           cliente.latitud,
           cliente.longitud,
           userMetros ?? cliente.metros ?? 100,
-          (_intento, _total, acc) => setProgresoGps(`±${Math.round(acc)} m`),
+          (intento, total, acc) => {
+            setProgresoGps(`±${Math.round(acc)} m`);
+            setProgresoValidacion({ intento, total, accuracy: acc });
+          },
           {
             id: cliente.id,
             nombre: cliente.nombre,
@@ -1080,6 +1086,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         );
         setValidandoUbicacion(false);
         setProgresoGps(null);
+        setProgresoValidacion(null);
         if (!ubicacionValida) return;
       } else {
         Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
@@ -1233,11 +1240,14 @@ export default function SalesScreen({ route }: { route?: any }) {
       } else if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
         console.log("[Sales] 📍 Validando ubicación del vendedor...");
         setValidandoUbicacion(true);
+        setProgresoValidacion(null);
         const ubicacionValida = await LocationService.validarUbicacionConAlerta(
           clientePendienteVisita.latitud,
           clientePendienteVisita.longitud,
           userMetros ?? clientePendienteVisita.metros ?? 100,
-          undefined,
+          (intento, total, acc) => {
+            setProgresoValidacion({ intento, total, accuracy: acc });
+          },
           {
             id: clientePendienteVisita.id,
             nombre: clientePendienteVisita.nombre,
@@ -1246,6 +1256,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           },
         );
         setValidandoUbicacion(false);
+        setProgresoValidacion(null);
         if (!ubicacionValida) {
           setVisitaConfirmModalOpen(false);
           return;
@@ -1562,6 +1573,12 @@ export default function SalesScreen({ route }: { route?: any }) {
                 ubicacion.longitude,
                 currentUser.id,
                 currentSucursal,
+                {
+                  latitudAnterior: clienteAUbicar.latitud ?? undefined,
+                  longitudAnterior: clienteAUbicar.longitud ?? undefined,
+                  accuracy: accuracy,
+                  numFixes: numFixes,
+                },
               );
 
               if (reubicacionId) {
@@ -3343,9 +3360,59 @@ export default function SalesScreen({ route }: { route?: any }) {
               <Text style={styles.confirmModalSubtitle}>Cliente: {clientePendienteVisita?.nombre}</Text>
 
               {validandoUbicacion ? (
-                <View style={{ paddingVertical: 20, alignItems: "center" }}>
-                  <ActivityIndicator size="large" color={COLORS.primary} />
-                  <Text style={{ marginTop: 12, color: COLORS.textSecondary }}>Validando ubicación...</Text>
+                <View style={styles.gpsValidacionContainer}>
+                  {(() => {
+                    const acc = progresoValidacion?.accuracy ?? 999;
+                    const intento = progresoValidacion?.intento ?? 0;
+                    const total = progresoValidacion?.total ?? 5;
+                    const precisionBuena = acc <= 30;
+                    const precisionMedia = acc > 30 && acc <= 50;
+                    const colorPrecision = precisionBuena ? "#4CAF50" : precisionMedia ? "#FF9800" : "#F44336";
+                    const textoPrecision = acc < 999 ? `±${Math.round(acc)} m` : "buscando...";
+                    const mostrarTipCalibracion = acc > 50;
+                    return (
+                      <>
+                        <View style={[styles.gpsPrecisionCircle, { borderColor: colorPrecision }]}>
+                          <Icon name="gps-fixed" type="material" size={32} color={colorPrecision} />
+                          <Text style={[styles.gpsPrecisionText, { color: colorPrecision }]}>{textoPrecision}</Text>
+                        </View>
+
+                        <View style={styles.gpsProgresoContainer}>
+                          <View style={styles.gpsProgresoBarra}>
+                            <View
+                              style={[
+                                styles.gpsProgresoFill,
+                                {
+                                  width: `${(intento / total) * 100}%`,
+                                  backgroundColor: colorPrecision,
+                                },
+                              ]}
+                            />
+                          </View>
+                          <Text style={styles.gpsProgresoTexto}>
+                            Buscando señal {intento}/{total}
+                          </Text>
+                        </View>
+
+                        {mostrarTipCalibracion && (
+                          <View style={styles.gpsTipContainer}>
+                            <Icon name="rotate-left" type="material" size={20} color="#FF9800" />
+                            <Text style={styles.gpsTipTexto}>
+                              Mueve el teléfono en forma de 8 para mejorar la precisión
+                            </Text>
+                          </View>
+                        )}
+
+                        <Text style={styles.gpsInstruccionesTexto}>
+                          {precisionBuena
+                            ? "Señal GPS excelente"
+                            : precisionMedia
+                              ? "Señal aceptable, espera un momento..."
+                              : "Mejorando precisión..."}
+                        </Text>
+                      </>
+                    );
+                  })()}
                 </View>
               ) : (
                 <View style={styles.confirmModalButtonsRow}>
@@ -4198,6 +4265,66 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 16,
     color: COLORS.textPrimary,
+  },
+  gpsValidacionContainer: {
+    paddingVertical: SPACING.l,
+    alignItems: "center",
+  },
+  gpsPrecisionCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: SPACING.m,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  },
+  gpsPrecisionText: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  gpsProgresoContainer: {
+    width: "100%",
+    marginBottom: SPACING.m,
+  },
+  gpsProgresoBarra: {
+    height: 6,
+    backgroundColor: COLORS.border,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: SPACING.s,
+  },
+  gpsProgresoFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  gpsProgresoTexto: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+  },
+  gpsTipContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 152, 0, 0.1)",
+    padding: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.m,
+    gap: SPACING.s,
+  },
+  gpsTipTexto: {
+    flex: 1,
+    fontSize: 13,
+    color: "#FF9800",
+    lineHeight: 18,
+  },
+  gpsInstruccionesTexto: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    fontStyle: "italic",
   },
   headerButtons: {
     flexDirection: "row",

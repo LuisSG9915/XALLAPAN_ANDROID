@@ -407,7 +407,7 @@ export const BitacoraValidacionSchema = {
     idUsuario: "int",
     sucursal: "int",
     idCliente: "int?",
-    motivo: "string", // ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango
+     motivo: "string", // ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango | red_no_gnss
     valido: "bool",
     distancia: "float?", // metros medidos al cliente
     accuracy: "float?", // precisión (±m) del mejor fix
@@ -509,6 +509,11 @@ export const ReubicacionSchema = {
     sucursal: "int?",
     latitud: "double?",
     longitud: "double?",
+    latitudAnterior: "double?",
+    longitudAnterior: "double?",
+    accuracy: "double?",
+    numFixes: "int?",
+    metrosMovidos: "double?",
     fecha: "date?",
     idUsuario: "int?",
     syncedAt: "date",

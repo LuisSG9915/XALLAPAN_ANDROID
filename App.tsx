@@ -56,6 +56,7 @@ import "react-native-devsettings";
 import "react-native-devsettings/withAsyncStorage";
 import SyncStatusPanel from "./components/SyncStatusPanel";
 import SucursalBadge from "./components/SucursalBadge";
+import ManualSyncScreen from "./components/ManualSyncScreen";
 
 declare const global: any;
 
@@ -357,6 +358,11 @@ function App() {
             component={MapaClientesScreen}
             options={{ title: "🗺️ Mapa de Clientes" }}
           />
+          <Stack.Screen
+            name="ManualSync"
+            component={ManualSyncScreen}
+            options={{ title: "Sincronización Manual" }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
@@ -379,6 +385,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const [pressProgress, setPressProgress] = useState(0);
   const pressTimerRef = useRef<any>(null);
   const pressStartTimeRef = useRef<number>(0);
+  const lastTapRef = useRef<number>(0);
 
   useEffect(() => {
     // Solo cargar info del usuario cuando los servicios estén listos
@@ -684,6 +691,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     navigation.navigate("Sales");
   }, [currentUser, navigation]);
 
+  const handleDoubleTapBusinessName = useCallback(() => {
+    const now = Date.now();
+    const DOUBLE_TAP_DELAY = 300;
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      navigation.navigate("ManualSync");
+    }
+    lastTapRef.current = now;
+  }, [navigation]);
+
   // Orden de prioridad: Punto de Venta, Agenda, Mapa, Cargas, Inventario, Corte, Impresora
   const priorityOrder = ["cumplimiento", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
@@ -835,7 +851,9 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
                 <Text style={styles.welcomeText}>Bienvenido {sucursalName}</Text>
                 {hasPendingTraspasos && <View style={styles.redIndicator} />}
               </View>
-              <Text style={styles.businessName}>{APP_NAME}</Text>
+              <TouchableOpacity activeOpacity={1} onPress={handleDoubleTapBusinessName}>
+                <Text style={styles.businessName}>{APP_NAME}</Text>
+              </TouchableOpacity>
               <View style={styles.userBadge}>
                 <Icon name="person" type="material" size={14} color={COLORS.primary} />
                 <Text style={styles.userName}>{userName}</Text>

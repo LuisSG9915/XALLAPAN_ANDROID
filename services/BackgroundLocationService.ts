@@ -24,6 +24,7 @@ class BackgroundLocationService {
   private intervalMs = 30000;
   private intervaloNativo = 5000;
   private isTaskRunning = false;
+  private gpsEnganchado = false;
   private watchId: number | null = null;
   private lastFixAt = 0;
   // Último fix efectivamente persistido (distinto de lastFixAt, que solo marca
@@ -138,7 +139,12 @@ class BackgroundLocationService {
       );
 
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      this.updateNotificationText(`Última captura: ${hora} (±${Math.round(accuracy ?? 0)}m)`);
+      const acc = Math.round(accuracy ?? 0);
+      this.gpsEnganchado = acc <= 30;
+      const estadoGps = this.gpsEnganchado
+        ? `GPS: enganchado ±${acc}m`
+        : `GPS: buscando satélites (±${acc}m)`;
+      this.updateNotificationText(`${estadoGps} — ${hora}`);
       console.log(TAG, `Tracking registrado: cobertura=${conCobertura}, motivo=${motivo}`);
     } catch (error) {
       console.error(TAG, "Error procesando fix GPS:", error);

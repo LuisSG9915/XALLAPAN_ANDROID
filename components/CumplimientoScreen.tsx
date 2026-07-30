@@ -113,6 +113,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [visitaSeleccionada, setVisitaSeleccionada] = useState<VisitaConCliente | null>(null);
   const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
+  const [progresoValidacion, setProgresoValidacion] = useState<{ intento: number; total: number; accuracy: number } | null>(null);
   const [userMetros, setUserMetros] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
@@ -216,11 +217,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     // Verificar ubicación del vendedor
     if (visita.latitud && visita.longitud) {
       setValidandoUbicacion(true);
+      setProgresoValidacion(null);
       const ubicacionValida = await LocationService.validarUbicacionConAlerta(
         visita.latitud,
         visita.longitud,
-        userMetros ?? visita.metros ?? 100, // Prioridad: Usuario > Cliente > Default (100)
-        undefined,
+        userMetros ?? visita.metros ?? 100,
+        (intento, total, acc) => {
+          setProgresoValidacion({ intento, total, accuracy: acc });
+        },
         {
           id: visita.idCliente,
           nombre: visita.nombreCliente,
@@ -229,6 +233,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         },
       );
       setValidandoUbicacion(false);
+      setProgresoValidacion(null);
       if (!ubicacionValida) return;
     } else {
       Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
@@ -375,12 +380,15 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     if (visita.latitud && visita.longitud) {
       setValidandoUbicacion(true);
+      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentas validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await LocationService.validarUbicacionConAlerta(
         visita.latitud,
         visita.longitud,
         userMetros ?? visita.metros ?? 100,
-        undefined,
+        (intento, total, acc) => {
+          setProgresoValidacion({ intento, total, accuracy: acc });
+        },
         {
           id: visita.idCliente,
           nombre: visita.nombreCliente,
@@ -389,6 +397,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         },
       );
       setValidandoUbicacion(false);
+      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentas ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
@@ -409,12 +418,15 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     if (cliente.latitud && cliente.longitud) {
       setValidandoUbicacion(true);
+      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentasCliente validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await LocationService.validarUbicacionConAlerta(
         cliente.latitud,
         cliente.longitud,
         userMetros ?? cliente.metros ?? 100,
-        undefined,
+        (intento, total, acc) => {
+          setProgresoValidacion({ intento, total, accuracy: acc });
+        },
         {
           id: cliente.id,
           nombre: cliente.nombre,
@@ -423,6 +435,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         },
       );
       setValidandoUbicacion(false);
+      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentasCliente ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
@@ -566,11 +579,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
       if (!omitirValidacionUbicacion) {
         if (cliente.latitud && cliente.longitud) {
           setValidandoUbicacion(true);
+          setProgresoValidacion(null);
           const ubicacionValida = await LocationService.validarUbicacionConAlerta(
             cliente.latitud,
             cliente.longitud,
             userMetros ?? cliente.metros ?? 100,
-            undefined,
+            (intento, total, acc) => {
+              setProgresoValidacion({ intento, total, accuracy: acc });
+            },
             {
               id: cliente.id,
               nombre: cliente.nombre,
@@ -579,6 +595,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             },
           );
           setValidandoUbicacion(false);
+          setProgresoValidacion(null);
           if (!ubicacionValida) return;
         } else {
           Alert.alert(
@@ -784,7 +801,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               {validandoUbicacion ? (
                 <>
                   <ActivityIndicator size="small" color="white" />
-                  <Text style={styles.botonVisitadoTexto}>Validando...</Text>
+                  <Text style={styles.botonVisitadoTexto}>
+                    {progresoValidacion ? `±${Math.round(progresoValidacion.accuracy)}m` : "GPS..."}
+                  </Text>
                 </>
               ) : (
                 <>
@@ -921,7 +940,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 {validandoUbicacion ? (
                   <>
                     <ActivityIndicator size="small" color="white" />
-                    <Text style={styles.botonVisitadoTexto}>Validando...</Text>
+                    <Text style={styles.botonVisitadoTexto}>
+                      {progresoValidacion ? `±${Math.round(progresoValidacion.accuracy)}m` : "GPS..."}
+                    </Text>
                   </>
                 ) : (
                   <>
@@ -1038,6 +1059,30 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           <Text style={[styles.tabItemText, clienteTab === "todos" && styles.tabItemTextActive]}>Todos</Text>
         </TouchableOpacity>
       </View>
+
+      {validandoUbicacion && progresoValidacion && progresoValidacion.accuracy > 50 && (
+        <View style={styles.gpsTipBanner}>
+          <Icon name="rotate-left" type="material" size={22} color="#FF9800" />
+          <View style={styles.gpsTipBannerContent}>
+            <Text style={styles.gpsTipBannerTitulo}>Mejorando precisión GPS</Text>
+            <Text style={styles.gpsTipBannerTexto}>
+              Mueve el teléfono en forma de 8 para calibrar ({Math.round(progresoValidacion.accuracy)}m, intento {progresoValidacion.intento}/{progresoValidacion.total})
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {validandoUbicacion && progresoValidacion && progresoValidacion.accuracy <= 50 && (
+        <View style={[styles.gpsTipBanner, styles.gpsTipBannerOk]}>
+          <Icon name="gps-fixed" type="material" size={22} color="#4CAF50" />
+          <View style={styles.gpsTipBannerContent}>
+            <Text style={[styles.gpsTipBannerTitulo, { color: "#4CAF50" }]}>Señal GPS aceptable</Text>
+            <Text style={styles.gpsTipBannerTexto}>
+              Precisión: ±{Math.round(progresoValidacion.accuracy)}m — Validando ubicación...
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Botón actualizar coordenadas (solo Cercanos) */}
       {clienteTab === "cercanos" && (
@@ -1452,6 +1497,36 @@ const styles = StyleSheet.create({
   },
   botonVisitadoTextoInactivo: {
     color: "white",
+  },
+  gpsTipBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 152, 0, 0.1)",
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    gap: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#FF9800",
+  },
+  gpsTipBannerOk: {
+    backgroundColor: "rgba(76, 175, 80, 0.1)",
+    borderLeftColor: "#4CAF50",
+  },
+  gpsTipBannerContent: {
+    flex: 1,
+  },
+  gpsTipBannerTitulo: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FF9800",
+    marginBottom: 2,
+  },
+  gpsTipBannerTexto: {
+    fontSize: 12,
+    color: "#666",
+    lineHeight: 16,
   },
   emptyContainer: {
     flex: 1,
