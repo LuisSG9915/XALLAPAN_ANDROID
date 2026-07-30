@@ -21,6 +21,7 @@ import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
 import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import ReubicacionService from "../services/ReubicacionService";
+import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
 
 interface Visita {
   id: string;
@@ -114,6 +115,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [tipoVisitaSeleccionado, setTipoVisitaSeleccionado] = useState<number | null>(null);
   const [validandoUbicacion, setValidandoUbicacion] = useState(false);
   const [progresoValidacion, setProgresoValidacion] = useState<{ intento: number; total: number; accuracy: number } | null>(null);
+  const [diagnosticoGps, setDiagnosticoGps] = useState<DiagnosticoGpsData | null>(null);
   const [userMetros, setUserMetros] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
@@ -187,6 +189,52 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     }, [fechaSeleccionada, currentSucursal, cargarDatos]),
   );
 
+  const validarUbicacionConModal = async (
+    clienteLat: number,
+    clienteLng: number,
+    metrosPermitidos: number,
+    clienteInfo: { id?: number; nombre?: string; lat?: number; lng?: number },
+  ): Promise<boolean> => {
+    setValidandoUbicacion(true);
+    setProgresoValidacion(null);
+    const resultado = await LocationService.validarUbicacionConDiagnostico(
+      clienteLat, clienteLng, metrosPermitidos,
+      (intento, total, acc) => {
+        setProgresoValidacion({ intento, total, accuracy: acc });
+      },
+      clienteInfo,
+    );
+    setValidandoUbicacion(false);
+    setProgresoValidacion(null);
+
+    if (resultado.valido) return true;
+
+    if (resultado.motivo === "sin_permiso") {
+      Alert.alert(
+        "Permiso de ubicación",
+        "Necesitas conceder el permiso de ubicación para poder registrar la visita.",
+      );
+      return false;
+    }
+
+    setDiagnosticoGps({
+      motivo: resultado.motivo,
+      valido: false,
+      distancia: resultado.distancia ?? null,
+      accuracy: resultado.accuracy ?? null,
+      metrosPermitidos: metrosPermitidos,
+      numFixes: resultado.numFixes ?? null,
+      peorAccuracy: resultado.peorAccuracy ?? null,
+      tiempoMs: resultado.tiempoMs ?? null,
+      vendedorLat: resultado.ubicacion?.latitude ?? null,
+      vendedorLng: resultado.ubicacion?.longitude ?? null,
+      clienteLat: clienteLat,
+      clienteLng: clienteLng,
+      clienteNombre: clienteInfo.nombre,
+    });
+    return false;
+  };
+
   const handleMarcarVisitado = async (idVisita: string) => {
     const visita = visitas.find((v) => v.id === idVisita);
 
@@ -216,15 +264,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     // Verificar ubicación del vendedor
     if (visita.latitud && visita.longitud) {
-      setValidandoUbicacion(true);
-      setProgresoValidacion(null);
-      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+      const ubicacionValida = await validarUbicacionConModal(
         visita.latitud,
         visita.longitud,
         userMetros ?? visita.metros ?? 100,
-        (intento, total, acc) => {
-          setProgresoValidacion({ intento, total, accuracy: acc });
-        },
         {
           id: visita.idCliente,
           nombre: visita.nombreCliente,
@@ -232,8 +275,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           lng: visita.longitud,
         },
       );
-      setValidandoUbicacion(false);
-      setProgresoValidacion(null);
       if (!ubicacionValida) return;
     } else {
       Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
@@ -379,16 +420,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     console.log(`[Cumplimiento] handleIrAVentas INICIO (t=0ms) -> cliente: ${visita.idCliente} ${visita.nombreCliente}`);
 
     if (visita.latitud && visita.longitud) {
-      setValidandoUbicacion(true);
-      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentas validando ubicación... (t=${Date.now() - t0}ms)`);
-      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+      const ubicacionValida = await validarUbicacionConModal(
         visita.latitud,
         visita.longitud,
         userMetros ?? visita.metros ?? 100,
-        (intento, total, acc) => {
-          setProgresoValidacion({ intento, total, accuracy: acc });
-        },
         {
           id: visita.idCliente,
           nombre: visita.nombreCliente,
@@ -396,8 +432,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           lng: visita.longitud,
         },
       );
-      setValidandoUbicacion(false);
-      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentas ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
@@ -417,16 +451,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     console.log(`[Cumplimiento] handleIrAVentasCliente INICIO (t=0ms) -> cliente: ${cliente.id} ${cliente.nombre}`);
 
     if (cliente.latitud && cliente.longitud) {
-      setValidandoUbicacion(true);
-      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentasCliente validando ubicación... (t=${Date.now() - t0}ms)`);
-      const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+      const ubicacionValida = await validarUbicacionConModal(
         cliente.latitud,
         cliente.longitud,
         userMetros ?? cliente.metros ?? 100,
-        (intento, total, acc) => {
-          setProgresoValidacion({ intento, total, accuracy: acc });
-        },
         {
           id: cliente.id,
           nombre: cliente.nombre,
@@ -434,8 +463,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           lng: cliente.longitud,
         },
       );
-      setValidandoUbicacion(false);
-      setProgresoValidacion(null);
       console.log(`[Cumplimiento] handleIrAVentasCliente ubicación validada: ${ubicacionValida} (t=${Date.now() - t0}ms)`);
       if (!ubicacionValida) return;
     }
@@ -578,15 +605,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
       if (!omitirValidacionUbicacion) {
         if (cliente.latitud && cliente.longitud) {
-          setValidandoUbicacion(true);
-          setProgresoValidacion(null);
-          const ubicacionValida = await LocationService.validarUbicacionConAlerta(
+          const ubicacionValida = await validarUbicacionConModal(
             cliente.latitud,
             cliente.longitud,
             userMetros ?? cliente.metros ?? 100,
-            (intento, total, acc) => {
-              setProgresoValidacion({ intento, total, accuracy: acc });
-            },
             {
               id: cliente.id,
               nombre: cliente.nombre,
@@ -594,8 +616,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               lng: cliente.longitud,
             },
           );
-          setValidandoUbicacion(false);
-          setProgresoValidacion(null);
           if (!ubicacionValida) return;
         } else {
           Alert.alert(
@@ -1240,6 +1260,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           </View>
         </View>
       </Modal>
+
+      <ModalDiagnosticoGps
+        visible={diagnosticoGps !== null}
+        data={diagnosticoGps}
+        onClose={() => setDiagnosticoGps(null)}
+      />
     </View>
   );
 }

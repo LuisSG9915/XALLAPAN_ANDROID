@@ -26,6 +26,7 @@ import ReubicacionService from "../services/ReubicacionService";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 import IntercambioEnvaseModal from "./IntercambioEnvaseModal";
 import PrestamoEnvaseModal from "./PrestamoEnvaseModal";
+import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
 
 type Cliente = {
   id: number;
@@ -123,6 +124,8 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [progresoGps, setProgresoGps] = useState<string | null>(null);
   // Detalle del progreso GPS para mostrar en el modal de validación
   const [progresoValidacion, setProgresoValidacion] = useState<{ intento: number; total: number; accuracy: number } | null>(null);
+  const [diagnosticoGps, setDiagnosticoGps] = useState<DiagnosticoGpsData | null>(null);
+  const [reintentarValidacion, setReintentarValidacion] = useState<(() => void) | null>(null);
   const [userMetros, setUserMetros] = useState<number | null>(null);
 
   // Tabs del modal de clientes: 'agendados' | 'cercanos' | 'todos'
@@ -1066,28 +1069,84 @@ export default function SalesScreen({ route }: { route?: any }) {
       if (omitirValidacionUbicacion) {
         console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
       } else if (cliente.latitud && cliente.longitud) {
-        setValidandoUbicacion(true);
-        setProgresoGps(null);
-        setProgresoValidacion(null);
-        const ubicacionValida = await LocationService.validarUbicacionConAlerta(
-          cliente.latitud,
-          cliente.longitud,
-          userMetros ?? cliente.metros ?? 100,
-          (intento, total, acc) => {
-            setProgresoGps(`±${Math.round(acc)} m`);
-            setProgresoValidacion({ intento, total, accuracy: acc });
-          },
-          {
-            id: cliente.id,
-            nombre: cliente.nombre,
-            lat: cliente.latitud,
-            lng: cliente.longitud,
-          },
-        );
-        setValidandoUbicacion(false);
-        setProgresoGps(null);
-        setProgresoValidacion(null);
-        if (!ubicacionValida) return;
+        const metrosPermitidos = userMetros ?? cliente.metros ?? 100;
+        const ejecutarValidacion = async () => {
+          setValidandoUbicacion(true);
+          setProgresoGps(null);
+          setProgresoValidacion(null);
+          const resultado = await LocationService.validarUbicacionConDiagnostico(
+            cliente.latitud!,
+            cliente.longitud!,
+            metrosPermitidos,
+            (intento, total, acc) => {
+              setProgresoGps(`±${Math.round(acc)} m`);
+              setProgresoValidacion({ intento, total, accuracy: acc });
+            },
+            {
+              id: cliente.id,
+              nombre: cliente.nombre,
+              lat: cliente.latitud,
+              lng: cliente.longitud,
+            },
+          );
+          setValidandoUbicacion(false);
+          setProgresoGps(null);
+          setProgresoValidacion(null);
+          return resultado;
+        };
+
+        const resultado = await ejecutarValidacion();
+        if (!resultado.valido) {
+          if (resultado.motivo === "sin_permiso") {
+            Alert.alert(
+              "Permiso de ubicación",
+              "Necesitas conceder el permiso de ubicación para poder registrar la visita.",
+            );
+          } else {
+            setDiagnosticoGps({
+              motivo: resultado.motivo,
+              valido: false,
+              distancia: resultado.distancia ?? null,
+              accuracy: resultado.accuracy ?? null,
+              metrosPermitidos: metrosPermitidos,
+              numFixes: resultado.numFixes ?? null,
+              peorAccuracy: resultado.peorAccuracy ?? null,
+              tiempoMs: resultado.tiempoMs ?? null,
+              vendedorLat: resultado.ubicacion?.latitude ?? null,
+              vendedorLng: resultado.ubicacion?.longitude ?? null,
+              clienteLat: cliente.latitud!,
+              clienteLng: cliente.longitud!,
+              clienteNombre: cliente.nombre,
+            });
+            setReintentarValidacion(() => async () => {
+              const r = await ejecutarValidacion();
+              if (r.valido) {
+                setDiagnosticoGps(null);
+                setReintentarValidacion(null);
+                setClienteParaVisitar(cliente);
+                setTipoVisitaSeleccionado(null);
+                setTipoVisitaModalOpen(true);
+              } else {
+                setDiagnosticoGps({
+                  motivo: r.motivo,
+                  valido: false,
+                  distancia: r.distancia ?? null,
+                  accuracy: r.accuracy ?? null,
+                  metrosPermitidos: metrosPermitidos,
+                  numFixes: r.numFixes ?? null,
+                  peorAccuracy: r.peorAccuracy ?? null,
+                  tiempoMs: r.tiempoMs ?? null,
+                  vendedorLat: r.ubicacion?.latitude ?? null,
+                  vendedorLng: r.ubicacion?.longitude ?? null,
+                  clienteLat: cliente.latitud!,
+                  clienteLng: cliente.longitud!,
+                  clienteNombre: cliente.nombre,
+                });
+              }
+            });
+          }
+          return;
+        }
       } else {
         Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
         return;
@@ -1239,26 +1298,84 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.log("[Sales] Cliente reubicado, se omite validación de ubicación");
       } else if (clientePendienteVisita.latitud && clientePendienteVisita.longitud) {
         console.log("[Sales] 📍 Validando ubicación del vendedor...");
-        setValidandoUbicacion(true);
-        setProgresoValidacion(null);
-        const ubicacionValida = await LocationService.validarUbicacionConAlerta(
-          clientePendienteVisita.latitud,
-          clientePendienteVisita.longitud,
-          userMetros ?? clientePendienteVisita.metros ?? 100,
-          (intento, total, acc) => {
-            setProgresoValidacion({ intento, total, accuracy: acc });
-          },
-          {
-            id: clientePendienteVisita.id,
-            nombre: clientePendienteVisita.nombre,
-            lat: clientePendienteVisita.latitud,
-            lng: clientePendienteVisita.longitud,
-          },
-        );
-        setValidandoUbicacion(false);
-        setProgresoValidacion(null);
-        if (!ubicacionValida) {
+        const metrosPermitidos = userMetros ?? clientePendienteVisita.metros ?? 100;
+        const ejecutarValidacion = async () => {
+          setValidandoUbicacion(true);
+          setProgresoValidacion(null);
+          const r = await LocationService.validarUbicacionConDiagnostico(
+            clientePendienteVisita.latitud!,
+            clientePendienteVisita.longitud!,
+            metrosPermitidos,
+            (intento, total, acc) => {
+              setProgresoValidacion({ intento, total, accuracy: acc });
+            },
+            {
+              id: clientePendienteVisita.id,
+              nombre: clientePendienteVisita.nombre,
+              lat: clientePendienteVisita.latitud,
+              lng: clientePendienteVisita.longitud,
+            },
+          );
+          setValidandoUbicacion(false);
+          setProgresoValidacion(null);
+          return r;
+        };
+
+        const resultado = await ejecutarValidacion();
+        if (!resultado.valido) {
           setVisitaConfirmModalOpen(false);
+          if (resultado.motivo === "sin_permiso") {
+            Alert.alert(
+              "Permiso de ubicación",
+              "Necesitas conceder el permiso de ubicación para poder registrar la visita.",
+            );
+          } else {
+            setDiagnosticoGps({
+              motivo: resultado.motivo,
+              valido: false,
+              distancia: resultado.distancia ?? null,
+              accuracy: resultado.accuracy ?? null,
+              metrosPermitidos: metrosPermitidos,
+              numFixes: resultado.numFixes ?? null,
+              peorAccuracy: resultado.peorAccuracy ?? null,
+              tiempoMs: resultado.tiempoMs ?? null,
+              vendedorLat: resultado.ubicacion?.latitude ?? null,
+              vendedorLng: resultado.ubicacion?.longitude ?? null,
+              clienteLat: clientePendienteVisita.latitud!,
+              clienteLng: clientePendienteVisita.longitud!,
+              clienteNombre: clientePendienteVisita.nombre,
+            });
+            setReintentarValidacion(() => async () => {
+              const r = await ejecutarValidacion();
+              if (r.valido) {
+                setDiagnosticoGps(null);
+                setReintentarValidacion(null);
+                try {
+                  const coords = await LocationService.getCurrentLocation();
+                  if (coords) {
+                    gpsCacheRef.current = { latitude: coords.latitude, longitude: coords.longitude, ts: Date.now(), source: "visita" };
+                  }
+                } catch (_) {}
+                setVisitaConfirmModalOpen(true);
+              } else {
+                setDiagnosticoGps({
+                  motivo: r.motivo,
+                  valido: false,
+                  distancia: r.distancia ?? null,
+                  accuracy: r.accuracy ?? null,
+                  metrosPermitidos: metrosPermitidos,
+                  numFixes: r.numFixes ?? null,
+                  peorAccuracy: r.peorAccuracy ?? null,
+                  tiempoMs: r.tiempoMs ?? null,
+                  vendedorLat: r.ubicacion?.latitude ?? null,
+                  vendedorLng: r.ubicacion?.longitude ?? null,
+                  clienteLat: clientePendienteVisita.latitud!,
+                  clienteLng: clientePendienteVisita.longitud!,
+                  clienteNombre: clientePendienteVisita.nombre,
+                });
+              }
+            });
+          }
           return;
         }
         // Cache GPS para reutilizar en processSale y evitar segunda ronda completa
@@ -3778,6 +3895,16 @@ export default function SalesScreen({ route }: { route?: any }) {
             setPrestamoModalOpen(false);
             setPendingPrestamoProducto(null);
           }}
+        />
+
+        <ModalDiagnosticoGps
+          visible={diagnosticoGps !== null}
+          data={diagnosticoGps}
+          onClose={() => {
+            setDiagnosticoGps(null);
+            setReintentarValidacion(null);
+          }}
+          onReintentar={reintentarValidacion ?? undefined}
         />
       </ScrollView>
     </View>

@@ -985,6 +985,36 @@ class LocationService {
         return false;
     }
   }
+
+  async validarUbicacionConDiagnostico(
+    clienteLat: number,
+    clienteLng: number,
+    metrosPermitidos: number,
+    onProgreso?: (intento: number, total: number, accuracy: number) => void,
+    clienteInfo?: { id?: number; nombre?: string; lat?: number; lng?: number },
+  ): Promise<ValidacionUbicacionResultado> {
+    const r = await this.validarUbicacionCliente(clienteLat, clienteLng, metrosPermitidos, onProgreso);
+
+    const net = await NetInfo.fetch().catch(() => null);
+    GpsBitacoraService.registrarValidacion({
+      idCliente: clienteInfo?.id ?? null,
+      motivo: r.motivo,
+      valido: r.valido,
+      distancia: r.distancia ?? null,
+      accuracy: r.accuracy ?? null,
+      metrosPermitidos: r.metrosPermitidos ?? metrosPermitidos,
+      latitud: r.ubicacion?.latitude ?? null,
+      longitud: r.ubicacion?.longitude ?? null,
+      clienteLatitud: clienteLat,
+      clienteLongitud: clienteLng,
+      numFixes: r.numFixes ?? null,
+      peorAccuracy: r.peorAccuracy ?? null,
+      tiempoMs: r.tiempoMs ?? null,
+      conCobertura: net ? net.isConnected === true : null,
+    });
+
+    return r;
+  }
 }
 
 export default new LocationService();
