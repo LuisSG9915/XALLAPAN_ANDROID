@@ -72,19 +72,25 @@ class BackgroundLocationService {
     if (generation !== this.generation) return;
     this.stopWatch();
 
+    const opcionesWatch = {
+      enableHighAccuracy: true,
+      interval: this.intervaloNativo,
+      fastestInterval: this.intervaloNativo,
+      distanceFilter: 0,
+      forceRequestLocation: true,
+      showLocationDialog: false,
+    };
+
     try {
       this.watchId = Geolocation.watchPosition(
         (position: GeoPosition) => this.onLocationFix(position, generation),
         (error: GeoError) => this.onLocationError(error, generation),
-        {
-          enableHighAccuracy: true,
-          interval: this.intervaloNativo,
-          fastestInterval: this.intervaloNativo,
-          distanceFilter: 0,
-          forceRequestLocation: true,
-          showLocationDialog: false,
-        } as any,
+        opcionesWatch as any,
       );
+      // Si la validación de venta dejó su watch rápido activo, watchPosition NO
+      // vuelve a llamar startObserving y el LocationRequest nativo se quedaría
+      // en 1 s indefinidamente. Forzamos el intervalo de tracking.
+      LocationService.forzarIntervaloNativo(opcionesWatch);
       console.log(TAG, `watchPosition suscrito (gen=${generation}, watchId=${this.watchId}, nativo=${this.intervaloNativo}ms, escritura=${this.intervalMs}ms)`);
     } catch (e) {
       console.error(TAG, "Error suscribiendo watchPosition:", e);

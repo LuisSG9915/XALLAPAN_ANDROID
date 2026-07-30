@@ -75,8 +75,8 @@ export class ReubicacionSyncTask extends SyncTask {
       const payload = Array.from(reubicacionesPendientes).map((r: any) => ({
         sucursal: r.sucursal ?? this.sucursal,
         cveCliente: r.idCliente,
-        latitudAnterior: 0,
-        longitudAnterior: 0,
+        latitudAnterior: r.latitudAnterior ?? 0,
+        longitudAnterior: r.longitudAnterior ?? 0,
         latitudNueva: r.latitud ?? 0,
         longitudNueva: r.longitud ?? 0,
         fecha: (r.fecha ?? new Date()).toISOString(),

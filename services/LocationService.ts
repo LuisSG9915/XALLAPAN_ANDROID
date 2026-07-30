@@ -142,7 +142,7 @@ class LocationService {
    * intervalo rápido; el `LocationRequest` nativo se reemplaza al reusar el
    * mismo `LocationCallback`.
    */
-  private forzarIntervaloNativo(opciones: Record<string, unknown>): void {
+  forzarIntervaloNativo(opciones: Record<string, unknown>): void {
     if (Platform.OS !== "android") return;
     const nativo = (NativeModules as any)?.RNFusedLocation;
     if (!nativo || typeof nativo.startObserving !== "function") return;
@@ -500,6 +500,7 @@ class LocationService {
     onProgreso?: (intento: number, total: number, accuracy: number) => void,
     condicionExito?: (coords: LocationCoordinates) => boolean,
     condicionFracaso?: (coords: LocationCoordinates) => boolean,
+    minFixes: number = 2,
   ): Promise<LocationCoordinates | null> {
     if (!this.hasPermission) {
       const granted = await this.checkPermission();
@@ -648,7 +649,7 @@ class LocationService {
           onProgreso?.(lecturasRecibidas, intentos, accuracy);
 
           const fixesCoherentes = (): boolean => {
-            if (lecturasRecibidas < 2 || !mejor || !segundoMejor) return false;
+            if (lecturasRecibidas < minFixes || !mejor || !segundoMejor) return false;
             const dist = calcularDistancia(
               mejor.latitude, mejor.longitude,
               segundoMejor.latitude, segundoMejor.longitude,
@@ -671,7 +672,7 @@ class LocationService {
           // O si el llamador acepta este fix (p. ej. ya cae dentro del rango del cliente).
           // Protección contra falsos positivos con fix cacheado: exigir ≥2 fixes.
           // Con GNSS enganchado el segundo fix llega en ~1 s; coste mínimo, seguridad máxima.
-          if (lecturasRecibidas >= 2 && condicionExito?.(coords)) {
+          if (lecturasRecibidas >= minFixes && condicionExito?.(coords)) {
             console.log(
               `[LocationService] Corte: condición de éxito, numFixes=${lecturasRecibidas}, ` +
                 `accuracy=${Math.round(accuracy)}m`,
@@ -685,7 +686,7 @@ class LocationService {
           // aunque el GPS refinara): no tiene caso seguir esperando.
           // Protección contra falsos negativos: SIEMPRE exigir ≥2 fixes.
           // Un solo fix cacheado a 2.6 km no debe producir un fuera_de_rango firme.
-          if (lecturasRecibidas >= 2 && condicionFracaso?.(coords)) {
+          if (lecturasRecibidas >= minFixes && condicionFracaso?.(coords)) {
             console.log(
               `[LocationService] Corte: condición de fracaso, numFixes=${lecturasRecibidas}, ` +
                 `accuracy=${Math.round(accuracy)}m`,
@@ -829,7 +830,7 @@ class LocationService {
     //      NUNCA convertir un fix incoherente en fuera_de_rango (Fase 4.4).
     try {
       const BGService = require("./BackgroundLocationService").default;
-      const ultimoTracking = BGService.getInstance().getUltimoFixTracking();
+      const ultimoTracking = BGService.getUltimoFixTracking();
       if (ultimoTracking) {
         const edadTracking = (Date.now() - ultimoTracking.timestamp) / 1000;
         if (edadTracking > 0 && edadTracking <= 30 && ultimoTracking.accuracy <= 50) {
@@ -856,8 +857,9 @@ class LocationService {
           }
         }
       }
-    } catch (_) {
+    } catch (e) {
       // BackgroundLocationService no disponible (no crítico)
+      console.warn("[LocationService] No se pudo contrastar con el tracking de fondo:", e);
     }
 
     // 3) Accuracy confiable y aun así fuera de rango: está realmente lejos.
