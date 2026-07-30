@@ -601,7 +601,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     if (!visitaHoy) {
       // Si no hay visita programada, validar ubicación antes de permitir crear visita manual
-      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
+      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteReubicadoRecientemente(cliente.id);
 
       if (!omitirValidacionUbicacion) {
         if (cliente.latitud && cliente.longitud) {

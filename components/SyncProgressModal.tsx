@@ -56,7 +56,7 @@ const SyncProgressModal: React.FC<SyncProgressModalProps> = ({
                 <View
                   style={[
                     styles.statusIndicator,
-                    item.status === 'completed' && styles.statusCompleted,
+                    item.status === 'success' && styles.statusCompleted,
                     item.status === 'error' && styles.statusError,
                     item.status === 'syncing' && styles.statusSyncing,
                   ]}
@@ -72,7 +72,7 @@ const SyncProgressModal: React.FC<SyncProgressModalProps> = ({
             ))}
           </ScrollView>
 
-          {currentProgress?.status === 'completed' && current === total && (
+          {currentProgress?.status === 'success' && current === total && (
             <View style={styles.completedContainer}>
               <Text style={styles.completedText}>
                 ✅ Sincronización completa

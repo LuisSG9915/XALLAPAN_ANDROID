@@ -23,8 +23,15 @@ class BackgroundLocationService {
   private isReady = false;
   private intervalMs = 30000;
   private intervaloNativo = 5000;
+  private readonly INTERVALO_ADQUISICION_MS = 1000;
+  private readonly INTERVALO_ENGANCHADO_MS = 5000;
+  private readonly UMBRAL_ENGANCHE_ACCURACY = 30;
+  private readonly FIXES_PARA_ENGANCHE = 2;
+  private readonly FIXES_PARA_PERDER_ENGANCHE = 3;
   private isTaskRunning = false;
   private gpsEnganchado = false;
+  private consecutiveGoodFixes = 0;
+  private consecutiveBadFixes = 0;
   private watchId: number | null = null;
   private lastFixAt = 0;
   // Último fix efectivamente persistido (distinto de lastFixAt, que solo marca
@@ -128,7 +135,8 @@ class BackgroundLocationService {
     }
     this.lastCaptureAt = ahora;
     const { latitude, longitude, accuracy } = position.coords;
-    console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}`);
+    this.evaluateGpsState(accuracy ?? 999);
+    console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}`);
 
     try {
       const netInfo = await NetInfo.fetch().catch(() => null);
@@ -146,7 +154,6 @@ class BackgroundLocationService {
 
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const acc = Math.round(accuracy ?? 0);
-      this.gpsEnganchado = acc <= 30;
       const estadoGps = this.gpsEnganchado
         ? `GPS: enganchado ±${acc}m`
         : `GPS: buscando satélites (±${acc}m)`;
@@ -163,6 +170,40 @@ class BackgroundLocationService {
   }
 
   /**
+   * Conmuta entre modo adquisición (1s) y modo enganchado (5s) usando histéresis:
+   * - Subir a enganchado: 2 fixes consecutivos con accuracy <= 30 m.
+   * - Bajar a adquisición: 3 fixes consecutivos con accuracy > 30 m.
+   */
+  private evaluateGpsState(accuracy: number): void {
+    const acc = accuracy ?? 999;
+    const good = acc <= this.UMBRAL_ENGANCHE_ACCURACY;
+
+    if (good) {
+      this.consecutiveBadFixes = 0;
+      this.consecutiveGoodFixes++;
+      if (!this.gpsEnganchado && this.consecutiveGoodFixes >= this.FIXES_PARA_ENGANCHE) {
+        this.gpsEnganchado = true;
+        if (this.intervaloNativo !== this.INTERVALO_ENGANCHADO_MS) {
+          this.intervaloNativo = this.INTERVALO_ENGANCHADO_MS;
+          console.log(TAG, `GNSS enganchado (${acc}m), bajando a intervalo ${this.intervaloNativo}ms`);
+          void this.startWatch(this.generation);
+        }
+      }
+    } else {
+      this.consecutiveGoodFixes = 0;
+      this.consecutiveBadFixes++;
+      if (this.gpsEnganchado && this.consecutiveBadFixes >= this.FIXES_PARA_PERDER_ENGANCHE) {
+        this.gpsEnganchado = false;
+        if (this.intervaloNativo !== this.INTERVALO_ADQUISICION_MS) {
+          this.intervaloNativo = this.INTERVALO_ADQUISICION_MS;
+          console.log(TAG, `GNSS perdido (${acc}m), subiendo a intervalo ${this.intervaloNativo}ms`);
+          void this.startWatch(this.generation);
+        }
+      }
+    }
+  }
+
+  /**
    * Bucle del foreground service. Ya NO usa setTimeout como reloj de captura;
    * el reloj real es FusedLocationProviderClient vía watchPosition.
    * Este bucle solo actúa como watchdog: cada ~2 minutos verifica que haya
@@ -172,6 +213,12 @@ class BackgroundLocationService {
     await this.ensureReady();
     const gen = this.generation;
     console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
+
+    // Arrancar en modo adquisición para calentar el GNSS desde frío
+    this.intervaloNativo = this.INTERVALO_ADQUISICION_MS;
+    this.gpsEnganchado = false;
+    this.consecutiveGoodFixes = 0;
+    this.consecutiveBadFixes = 0;
 
     await this.startWatch(gen);
     this.lastFixAt = Date.now();

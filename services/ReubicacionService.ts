@@ -1,6 +1,6 @@
 import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
-import { calcularDistancia } from "./LocationService";
+import { calcularDistancia, TTL_VALIDACION_CACHE_MS } from "./LocationService";
 
 /**
  * Genera un ID único numérico basado en timestamp
@@ -20,6 +20,10 @@ class ReubicacionService {
   private static instance: ReubicacionService;
   private realm: Realm | null = null;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
+
+  getApiBaseUrl(): string {
+    return this.apiBaseUrl;
+  }
 
   private constructor() {}
 
@@ -99,6 +103,32 @@ class ReubicacionService {
       return reubicaciones.length > 0;
     } catch (error) {
       console.error("[ReubicacionService] Error verificando reubicación:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Verifica si un cliente fue reubicado recientemente dentro de la ventana
+   * de validez de la validación GPS (3 min). Usado como bypass temporal tras
+   * reubicar: el vendedor acaba de fijar el punto y está físicamente ahí.
+   * @param idCliente ID del cliente
+   * @returns true si fue reubicado dentro de la ventana TTL
+   */
+  clienteReubicadoRecientemente(idCliente: number): boolean {
+    if (!this.realm || this.realm.isClosed) {
+      console.warn("[ReubicacionService] Realm no inicializado");
+      return false;
+    }
+
+    try {
+      const desde = new Date(Date.now() - TTL_VALIDACION_CACHE_MS);
+      const reubicaciones = this.realm
+        .objects("Reubicacion")
+        .filtered("idCliente == $0 AND fecha >= $1", idCliente, desde);
+
+      return reubicaciones.length > 0;
+    } catch (error) {
+      console.error("[ReubicacionService] Error verificando reubicación reciente:", error);
       return false;
     }
   }
@@ -273,12 +303,14 @@ class ReubicacionService {
   }
 
   /**
-   * Envía reubicaciones pendientes al servidor
+   * Envía las reubicaciones pendientes al endpoint sp_MovilesReubicacionesJSON.
+   * Este método es el único emisor vivo; lo usan FullSyncService y
+   * ReubicacionSyncTask para evitar duplicados por lógica divergente.
    * @param sucursal Sucursal del usuario
    * @param idUsuario ID del usuario
    * @returns Objeto con resultado de la sincronización
    */
-  async sincronizarReubicaciones(
+  async enviarReubicacionesPendientes(
     sucursal: number,
     idUsuario: number,
   ): Promise<{ success: boolean; sent: number; error?: string }> {
@@ -286,35 +318,29 @@ class ReubicacionService {
       return { success: false, sent: 0, error: "Realm no inicializado" };
     }
 
-    const pendientes = this.getReubicacionesPendientes();
+    const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
+    const registrosLeidos = reubicacionesPendientes.length;
 
-    if (pendientes.length === 0) {
-      console.log("[ReubicacionService] No hay reubicaciones pendientes");
+    if (registrosLeidos === 0) {
       return { success: true, sent: 0 };
     }
 
-    console.log(`[ReubicacionService] Enviando ${pendientes.length} reubicaciones al servidor`);
+    console.log(`[ReubicacionService] Enviando ${registrosLeidos} reubicaciones al servidor`);
+
+    const payloadList = Array.from(reubicacionesPendientes).map((r: any) => ({
+      sucursal: r.sucursal ?? sucursal,
+      cveCliente: r.idCliente,
+      latitudAnterior: r.latitudAnterior ?? 0,
+      longitudAnterior: r.longitudAnterior ?? 0,
+      latitudNueva: r.latitud ?? 0,
+      longitudNueva: r.longitud ?? 0,
+      fecha: (r.fecha ?? new Date()).toISOString(),
+      usuario: r.idUsuario ?? idUsuario,
+      idMovil: r.id,
+      fechaTransfer: new Date().toISOString(),
+    }));
 
     try {
-      const payload = {
-        reubicaciones: pendientes.map((r) => ({
-          idLocal: `${r.id}-reubicacion`,
-          sucursal: sucursal,
-          cveCliente: r.idCliente,
-          latitudAnterior: r.latitudAnterior ?? 0,
-          longitudAnterior: r.longitudAnterior ?? 0,
-          latitudNueva: r.latitud ?? 0,
-          longitudNueva: r.longitud ?? 0,
-          accuracy: r.accuracy ?? null,
-          numFixes: r.numFixes ?? null,
-          metrosMovidos: r.metrosMovidos ?? null,
-          fecha: (r.fecha ?? new Date()).toISOString(),
-          usuario: r.idUsuario ?? idUsuario,
-          idMovil: r.id,
-          fechaTransfer: new Date().toISOString(),
-        })),
-      };
-
       const response = await fetchWithTimeout(
         `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`,
         {
@@ -323,32 +349,25 @@ class ReubicacionService {
             "Content-Type": "application/json",
             Accept: "application/octet-stream",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ reubicaciones: payloadList }),
         },
       );
 
-      if (response.ok) {
-        // Marcar como enviadas (no eliminar para conservar historial)
-        this.realm.write(() => {
-          pendientes.forEach((r) => {
-            const reubicacion = this.realm!.objectForPrimaryKey("Reubicacion", r.id);
-            if (reubicacion) {
-              (reubicacion as any).enviado = true;
-            }
-          });
-        });
-
-        console.log(`[ReubicacionService] ✅ ${pendientes.length} reubicaciones enviadas y marcadas como enviado`);
-
-        return { success: true, sent: pendientes.length };
-      } else {
+      if (!response.ok) {
         const errorText = await response.text().catch(() => "");
-        return {
-          success: false,
-          sent: 0,
-          error: `Error HTTP ${response.status}: ${errorText}`,
-        };
+        return { success: false, sent: 0, error: `Error HTTP ${response.status}: ${errorText}` };
       }
+
+      // Marcar como enviadas (no eliminar para conservar historial local)
+      this.realm.write(() => {
+        Array.from(reubicacionesPendientes).forEach((r: any) => {
+          r.enviado = true;
+        });
+      });
+
+      console.log(`[ReubicacionService] ✅ ${registrosLeidos} reubicaciones enviadas y marcadas como enviado`);
+
+      return { success: true, sent: registrosLeidos };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
       console.error("[ReubicacionService] Error enviando reubicaciones:", error);
