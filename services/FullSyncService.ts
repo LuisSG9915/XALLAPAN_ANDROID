@@ -5,6 +5,7 @@ import { SyncOrchestrator } from "./sync/SyncOrchestrator";
 import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 import BitacoraService from "./BitacoraService";
 import GpsBitacoraService from "./GpsBitacoraService";
+import ReubicacionService from "./ReubicacionService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type { SyncProgress };
@@ -25,8 +26,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 49,
+        schemaVersion: 50,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v50: Nuevas tablas para módulo de Pedidos (Pedido, PedidoDetalle, PedidoBitacora, catálogos)
+          if (oldRealm.schemaVersion < 50) {
+            console.log("[Migration v50] Creando tablas de Pedidos y catálogos");
+          }
+
           // Migración v49: Agregar campos de auditoría a Reubicacion (latitudAnterior, longitudAnterior, accuracy, numFixes, metrosMovidos)
           if (oldRealm.schemaVersion < 49) {
             console.log("[Migration v49] Agregando campos de auditoría a Reubicacion");
@@ -587,87 +593,18 @@ class FullSyncService {
       }
     }
 
-    // PASO 2: Enviar reubicaciones pendientes (VentasArrastre depende de esta tabla)
+    // PASO 2: Enviar reubicaciones pendientes (delega en ReubicacionService)
     if (idUsuario) {
-      console.log("[FullSync-Reubicacion] 🔍 PASO 2 - Iniciando verificación de reubicaciones pendientes...");
+      console.log("[FullSync-Reubicacion] 🔍 PASO 2 - Delegando envío de reubicaciones...");
       try {
-        const todasReubicaciones = this.realm.objects("Reubicacion");
-        console.log(`[FullSync-Reubicacion] Total reubicaciones en BD: ${todasReubicaciones.length}`);
-
-        const reubicacionesPendientes = this.realm.objects("Reubicacion").filtered("enviado == false");
-        console.log(`[FullSync-Reubicacion] Reubicaciones con enviado=false: ${reubicacionesPendientes.length}`);
-
-        if (reubicacionesPendientes.length > 0) {
-          console.log(
-            `[FullSync-Reubicacion] 📤 Enviando ${reubicacionesPendientes.length} reubicaciones pendientes...`,
-          );
-          console.log(
-            `[FullSync-Reubicacion] Detalles de reubicaciones:`,
-            Array.from(reubicacionesPendientes).map((r: any) => ({
-              id: r.id,
-              idCliente: r.idCliente,
-              latitud: r.latitud,
-              longitud: r.longitud,
-              enviado: r.enviado,
-              fecha: r.fecha,
-            })),
-          );
-
-          const reubicacionesPayload = {
-            reubicaciones: Array.from(reubicacionesPendientes).map((r: any) => ({
-              sucursal: sucursal,
-              cveCliente: r.idCliente,
-              latitudAnterior: 0,
-              longitudAnterior: 0,
-              latitudNueva: r.latitud ?? 0,
-              longitudNueva: r.longitud ?? 0,
-              fecha: (r.fecha ?? this.getMexicoNow()).toISOString(),
-              usuario: r.idUsuario ?? idUsuario,
-              idMovil: r.id,
-              fechaTransfer: this.getMexicoNow().toISOString(),
-            })),
-          };
-
-          const reubicacionUrl = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesReubicacionesJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-          console.log(`[FullSync-Reubicacion] 🌐 URL: ${reubicacionUrl}`);
-          console.log(`[FullSync-Reubicacion] 📦 Payload:`, JSON.stringify(reubicacionesPayload, null, 2));
-
-          const reubicacionResp = await fetchWithTimeout(reubicacionUrl, {
-            method: "POST",
-            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
-            body: JSON.stringify(reubicacionesPayload),
-          });
-
-          console.log(
-            `[FullSync-Reubicacion] 📡 Respuesta HTTP: ${reubicacionResp.status} ${reubicacionResp.statusText}`,
-          );
-
-          if (reubicacionResp.ok) {
-            const responseText = await reubicacionResp.text();
-            console.log(`[FullSync-Reubicacion] 📥 Respuesta del servidor:`, responseText);
-
-            this.realm.write(() => {
-              Array.from(reubicacionesPendientes).forEach((r: any) => {
-                r.enviado = true;
-              });
-            });
-            console.log(
-              `[FullSync-Reubicacion] ✅ ${reubicacionesPayload.reubicaciones.length} reubicaciones enviadas y marcadas como enviado`,
-            );
-          } else {
-            const errorText = await reubicacionResp.text().catch(() => "No se pudo leer el error");
-            console.warn(`[FullSync-Reubicacion] ⚠️ Error HTTP ${reubicacionResp.status} enviando reubicaciones`);
-            console.warn(`[FullSync-Reubicacion] ⚠️ Detalle del error:`, errorText);
-          }
-        } else {
-          console.log("[FullSync-Reubicacion] ℹ️ No hay reubicaciones pendientes de envío");
+        const resultado = await ReubicacionService.getInstance().enviarReubicacionesPendientes(sucursal, idUsuario);
+        if (resultado.success && resultado.sent > 0) {
+          console.log(`[FullSync-Reubicacion] ✅ ${resultado.sent} reubicaciones enviadas`);
+        } else if (resultado.error) {
+          console.warn(`[FullSync-Reubicacion] ⚠️ ${resultado.error}`);
         }
       } catch (reubicacionError) {
         console.error("[FullSync-Reubicacion] ❌ Error enviando reubicaciones:", reubicacionError);
-        console.error(
-          "[FullSync-Reubicacion] ❌ Stack:",
-          reubicacionError instanceof Error ? reubicacionError.stack : "N/A",
-        );
       }
     } else {
       console.log("[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones");
@@ -3204,7 +3141,6 @@ class FullSyncService {
           "BitacoraGps",
           "InventarioEnvase",
           "InventarioEnvasesHistorial",
-          "Reubicacion",
           "VisitaRealizada",
           "VentaCancelacion",
           "VentaModificacion",
@@ -3217,7 +3153,15 @@ class FullSyncService {
           console.log(`[FullSyncService] Tabla ${tableName} limpiada: ${objects.length} registros eliminados`);
         });
 
-        console.log("[FullSyncService] ✅ Todos los datos eliminados excepto Usuario");
+        const reubicacionesEnviadas = this.realm!.objects("Reubicacion").filtered("enviado == true");
+        const enviadasCount = reubicacionesEnviadas.length;
+        this.realm!.delete(reubicacionesEnviadas);
+        const pendientesCount = this.realm!.objects("Reubicacion").filtered("enviado == false").length;
+        console.log(
+          `[FullSyncService] Reubicaciones: ${enviadasCount} enviadas eliminadas, ${pendientesCount} pendientes conservadas`,
+        );
+
+        console.log("[FullSyncService] ✅ Todos los datos eliminados excepto Usuario y reubicaciones pendientes");
       });
     } catch (error) {
       console.error("[FullSyncService] Error al limpiar datos:", error);

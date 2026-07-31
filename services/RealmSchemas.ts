@@ -628,6 +628,112 @@ export const VentaModificacionSchema = {
   primaryKey: "id",
 };
 
+export const PedidoSchema = {
+  name: "Pedido",
+  properties: {
+    id: "int",
+    id_movil: "int?",
+    folio: "int",
+    fecha: "date?",
+    ruta: "int",
+    cliente: "int",
+    clienteNombre: "string?",
+    clienteDomicilio: "string?",
+    idCanal: "int?",
+    fechaAtencion: "date?",
+    idVendedor: "int",
+    numeroProductos: "int",
+    cantPedido: "float",
+    listaPrecio: "int?",
+    fechaEntrega: "date?",
+    estatus: "int",
+    estatusDescripcion: "string?",
+    fueraAgenda: "bool?",
+    observaciones: "string?",
+    no_venta: "int?",
+    tieneDiferencia: "bool?",
+    causaNoAtencion: "int?",
+    obserNoAtencion: "string?",
+    syncedAt: "date",
+    syncedAr: "date?",
+    modificadoLocal: "bool?",
+  },
+  primaryKey: "id",
+};
+
+export const PedidoDetalleSchema = {
+  name: "PedidoDetalle",
+  properties: {
+    id: "string",
+    idPedido: "int",
+    idProducto: "int",
+    productoNombre: "string?",
+    cantPedido: "float",
+    cantAtencion: "float?",
+    precio: "float?",
+    precioAtencion: "float?",
+    causaDiferencia: "int?",
+    causaDiferenciaDesc: "string?",
+    obserDiferencia: "string?",
+    tieneDiferencia: "bool?",
+    atendido: "bool?",
+    modificadoLocal: "bool?",
+  },
+  primaryKey: "id",
+};
+
+export const PedidoBitacoraSchema = {
+  name: "PedidoBitacora",
+  properties: {
+    id: "string",
+    idPedido: "int",
+    folio: "int",
+    fecha: "date",
+    ruta: "int",
+    cliente: "int",
+    idVendedor: "int",
+    idProducto: "int?",
+    estatus: "int",
+    estatusAnterior: "int?",
+    cantPedido: "float?",
+    cantAtencion: "float?",
+    causaDiferencia: "int?",
+    obserDiferencia: "string?",
+    causaNoAtencion: "int?",
+    obserNoAtencion: "string?",
+    tipoCambio: "string?",
+    enviado: "bool",
+  },
+  primaryKey: "id",
+};
+
+export const CatalogoEstatusPedidoSchema = {
+  name: "CatalogoEstatusPedido",
+  properties: {
+    id: "int",
+    descripcion: "string?",
+  },
+  primaryKey: "id",
+};
+
+export const CatalogoCausaDiferenciaSchema = {
+  name: "CatalogoCausaDiferencia",
+  properties: {
+    id: "int",
+    descripcion: "string?",
+  },
+  primaryKey: "id",
+};
+
+export const CatalogoCausaNoAtencionSchema = {
+  name: "CatalogoCausaNoAtencion",
+  properties: {
+    id: "int",
+    descripcion: "string?",
+  },
+  primaryKey: "id",
+};
+
 export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
@@ -659,4 +765,10 @@ export const allSchemas = [
   VentaModificacionSchema,
   RouteConfigSchema,
   FormaPagoSchema,
+  PedidoSchema,
+  PedidoDetalleSchema,
+  PedidoBitacoraSchema,
+  CatalogoEstatusPedidoSchema,
+  CatalogoCausaDiferenciaSchema,
+  CatalogoCausaNoAtencionSchema,
 ];

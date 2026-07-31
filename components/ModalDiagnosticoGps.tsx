@@ -205,7 +205,7 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
             )}
           </View>
 
-          <View style={styles.buttons}>
+          {/* <View style={styles.buttons}>
             {onReintentar && (
               <TouchableOpacity style={styles.retryBtn} onPress={() => { onClose(); onReintentar(); }}>
                 <Icon name="refresh" size={18} color="#fff" />
@@ -216,7 +216,7 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
               <Icon name="share" size={18} color={COLORS.primary} />
               <Text style={styles.reportText}>Reportar</Text>
             </TouchableOpacity>
-          </View>
+          </View> */}
         </View>
       </View>
     </Modal>

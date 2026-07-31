@@ -1655,7 +1655,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             setReubicandoCliente(true);
             try {
               console.log("[Sales] Obteniendo ubicación GPS para reubicación...");
-              const ubicacion = await LocationService.getBestLocation(5, 10000);
+              const ubicacion = await LocationService.getBestLocation(5, 10000, undefined, undefined, undefined, 3);
 
               if (!ubicacion) {
                 Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado y estés a cielo abierto.");

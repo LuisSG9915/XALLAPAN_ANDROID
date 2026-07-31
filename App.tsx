@@ -37,6 +37,8 @@ import ClienteGruposScreen from "./components/ClienteGruposScreen";
 import DataViewScreen from "./components/DataViewScreen";
 import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
 import CumplimientoScreen from "./components/CumplimientoScreen";
+import PedidosScreen from "./components/PedidosScreen";
+import PedidoDetalleScreen from "./components/PedidoDetalleScreen";
 import EnvaseOperacionScreen from "./components/EnvaseOperacionScreen";
 import CortesScreen from "./components/CortesScreen";
 import MapaClientesScreen from "./components/MapaClientesScreen";
@@ -348,6 +350,16 @@ function App() {
             options={{ title: "📅 Cumplimiento de Agenda" }}
           />
           <Stack.Screen
+            name="Pedidos"
+            component={PedidosScreen}
+            options={{ title: "📦 Pedidos de Central" }}
+          />
+          <Stack.Screen
+            name="PedidoDetalle"
+            component={PedidoDetalleScreen}
+            options={{ title: "Detalle de Pedido" }}
+          />
+          <Stack.Screen
             name="EnvaseOperacion"
             component={EnvaseOperacionScreen}
             options={{ title: "Operaciones de Envase", headerShown: false }}
@@ -642,6 +654,28 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
     const vendedor = currentUser.id || 0;
+    const ruta = currentUser.ruta ? parseInt(currentUser.ruta) : 0;
+
+    const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
+
+    if (!validacionPedidos.permitido) {
+      const listaPedidos = validacionPedidos.pedidosBloqueantes
+        .map((p: any) => `• Folio ${p.folio} - ${p.clienteNombre || `Cliente #${p.cliente}`}`)
+        .join("\n");
+
+      Alert.alert(
+        "⚠️ No se puede cerrar la ruta",
+        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendiente(s) sin causa registrada:\n\n${listaPedidos}\n\nDebe atender estos pedidos o registrar una causa antes de cerrar la ruta.`,
+        [
+          { text: "Entendido" },
+          {
+            text: "Ver Pedidos",
+            onPress: () => navigation.navigate("Pedidos"),
+          },
+        ],
+      );
+      return;
+    }
 
     Alert.alert(
       "Cerrar Ruta",
@@ -663,7 +697,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         },
       ],
     );
-  }, [currentUser, syncRouteTracking]);
+  }, [currentUser, syncRouteTracking, navigation]);
 
   const handleTapRutaCerrada = useCallback(() => {
     Alert.alert(
@@ -700,8 +734,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     lastTapRef.current = now;
   }, [navigation]);
 
-  // Orden de prioridad: Punto de Venta, Agenda, Mapa, Cargas, Inventario, Corte, Impresora
-  const priorityOrder = ["cumplimiento", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
+  // Orden de prioridad: Punto de Venta, Agenda, Pedidos, Mapa, Cargas, Inventario, Corte, Impresora
+  const priorityOrder = ["cumplimiento", "pedidos", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
@@ -726,6 +760,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       color: "#8E44AD",
       screen: "Cumplimiento",
       description: "Cumplimiento de visitas",
+    },
+    {
+      id: "pedidos",
+      title: "Pedidos",
+      icon: "inventory-2",
+      type: "material",
+      color: "#D84315",
+      screen: "Pedidos",
+      description: "Pedidos de Central",
     },
     {
       id: "mapa",

@@ -20,6 +20,10 @@ class ReubicacionService {
   private static instance: ReubicacionService;
   private realm: Realm | null = null;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
+  // Lock contra envíos concurrentes: syncIncremental (cada 3 min) y syncAll pueden
+  // solaparse. Sin este lock ambas ejecuciones leerían los mismos pendientes y
+  // el servidor recibiría cada reubicación duplicada.
+  private enviandoReubicaciones: Promise<{ success: boolean; sent: number; error?: string }> | null = null;
 
   getApiBaseUrl(): string {
     return this.apiBaseUrl;
@@ -191,8 +195,20 @@ class ReubicacionService {
       enviado: false,
     });
 
-    const metrosMovidos = gpsDiagnostico?.latitudAnterior != null && gpsDiagnostico?.longitudAnterior != null
-      ? calcularDistancia(gpsDiagnostico.latitudAnterior, gpsDiagnostico.longitudAnterior, latitud, longitud)
+    let latAnterior = gpsDiagnostico?.latitudAnterior ?? null;
+    let lngAnterior = gpsDiagnostico?.longitudAnterior ?? null;
+
+    if (latAnterior == null || lngAnterior == null) {
+      const clienteActual = this.realm.objectForPrimaryKey("ClienteFull", idCliente) as any;
+      if (clienteActual?.latitud && clienteActual?.longitud) {
+        latAnterior = clienteActual.latitud;
+        lngAnterior = clienteActual.longitud;
+        console.log(`[ReubicacionService] Coordenadas anteriores rescatadas desde Realm: ${latAnterior}, ${lngAnterior}`);
+      }
+    }
+
+    const metrosMovidos = latAnterior != null && lngAnterior != null
+      ? calcularDistancia(latAnterior, lngAnterior, latitud, longitud)
       : null;
 
     try {
@@ -203,8 +219,8 @@ class ReubicacionService {
           sucursal: sucursal ?? null,
           latitud,
           longitud,
-          latitudAnterior: gpsDiagnostico?.latitudAnterior ?? null,
-          longitudAnterior: gpsDiagnostico?.longitudAnterior ?? null,
+          latitudAnterior: latAnterior,
+          longitudAnterior: lngAnterior,
           accuracy: gpsDiagnostico?.accuracy ?? null,
           numFixes: gpsDiagnostico?.numFixes ?? null,
           metrosMovidos,
@@ -311,6 +327,25 @@ class ReubicacionService {
    * @returns Objeto con resultado de la sincronización
    */
   async enviarReubicacionesPendientes(
+    sucursal: number,
+    idUsuario: number,
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    // Lock de promesa compartida: si hay un envío en curso, esperamos su resultado.
+    if (this.enviandoReubicaciones) {
+      console.log("[ReubicacionService] ⏳ Envío de reubicaciones ya en curso, esperando resultado...");
+      return this.enviandoReubicaciones;
+    }
+
+    this.enviandoReubicaciones = this.ejecutarEnvioReubicaciones(sucursal, idUsuario);
+
+    try {
+      return await this.enviandoReubicaciones;
+    } finally {
+      this.enviandoReubicaciones = null;
+    }
+  }
+
+  private async ejecutarEnvioReubicaciones(
     sucursal: number,
     idUsuario: number,
   ): Promise<{ success: boolean; sent: number; error?: string }> {

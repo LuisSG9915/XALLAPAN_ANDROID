@@ -130,12 +130,13 @@ class BackgroundLocationService {
       accuracy: position.coords.accuracy ?? 999,
       timestamp: position.timestamp ?? ahora,
     };
+    this.evaluateGpsState(position.coords.accuracy ?? 999);
+
     if (this.lastCaptureAt > 0 && ahora - this.lastCaptureAt < this.intervalMs * 0.8) {
       return;
     }
     this.lastCaptureAt = ahora;
     const { latitude, longitude, accuracy } = position.coords;
-    this.evaluateGpsState(accuracy ?? 999);
     console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}`);
 
     try {

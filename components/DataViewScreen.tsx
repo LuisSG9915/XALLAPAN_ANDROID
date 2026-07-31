@@ -14,6 +14,7 @@ import {
 import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
 import VisitaSyncService from "../services/VisitaSyncService";
+import PedidosService from "../services/PedidosService";
 import AuthService from "../services/AuthService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
@@ -45,7 +46,13 @@ type EntityType =
   | "visitasRealizadas"
   | "formasPago"
   | "kitsIntercambio"
-  | "cias";
+  | "cias"
+  | "pedidos"
+  | "pedidoDetalle"
+  | "pedidoBitacora"
+  | "catalogoEstatusPedido"
+  | "catalogoCausaDiferencia"
+  | "catalogoCausaNoAtencion";
 
 interface EntityTab {
   key: EntityType;
@@ -82,6 +89,12 @@ const ENTITY_TABS: EntityTab[] = [
   { key: "inventarioEnvasesHistorial", title: "Historial Envases", icon: "history-toggle-off" },
   { key: "reubicaciones", title: "Reubicaciones", icon: "place" },
   { key: "visitasRealizadas", title: "Visitas Realizadas", icon: "check-circle" },
+  { key: "pedidos", title: "Pedidos", icon: "receipt" },
+  { key: "pedidoDetalle", title: "Pedido Detalle", icon: "view-list" },
+  { key: "pedidoBitacora", title: "Pedido Bitácora", icon: "history" },
+  { key: "catalogoEstatusPedido", title: "Estatus Pedido", icon: "label" },
+  { key: "catalogoCausaDiferencia", title: "Causa Diferencia", icon: "warning" },
+  { key: "catalogoCausaNoAtencion", title: "Causa No Atención", icon: "cancel" },
 ];
 
 export default function DataViewScreen() {
@@ -116,6 +129,9 @@ export default function DataViewScreen() {
   const loadData = useCallback(async () => {
     try {
       await FullSyncService.initialize();
+
+      const pedidosService = PedidosService.getInstance();
+      pedidosService.setRealm((FullSyncService as any).realm);
 
       const newStats = FullSyncService.getStats();
       setStats(newStats);
@@ -208,6 +224,24 @@ export default function DataViewScreen() {
           break;
         case "cias":
           setData(FullSyncService.getCiasPaginated(offset, ITEMS_PER_PAGE));
+          break;
+        case "pedidos":
+          setData(pedidosService.getAllPedidos());
+          break;
+        case "pedidoDetalle":
+          setData(pedidosService.getAllDetalles());
+          break;
+        case "pedidoBitacora":
+          setData(pedidosService.getAllBitacoras());
+          break;
+        case "catalogoEstatusPedido":
+          setData(pedidosService.getEstatusPedidos());
+          break;
+        case "catalogoCausaDiferencia":
+          setData(pedidosService.getCausasDiferencia());
+          break;
+        case "catalogoCausaNoAtencion":
+          setData(pedidosService.getCausasNoAtencion());
           break;
       }
     } catch (error) {
@@ -640,6 +674,95 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const renderPedido = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>
+            Folio {item.folio} - {item.clienteNombre || `Cliente #${item.cliente}`}
+          </Text>
+          <View style={[styles.estatusBadge, { backgroundColor: item.tieneDiferencia ? COLORS.warning : COLORS.success }]}>
+            <Text style={styles.estatusBadgeText}>{item.estatusDescripcion || `Estatus ${item.estatus}`}</Text>
+          </View>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID: {item.id}</Text>
+          <Text style={styles.cardText}>Ruta: {item.ruta}</Text>
+          <Text style={styles.cardText}>Cliente: {item.cliente}</Text>
+          <Text style={styles.cardText}>Productos: {item.numeroProductos}</Text>
+          <Text style={styles.cardText}>Cantidad solicitada: {item.cantPedido}</Text>
+          <Text style={styles.cardText}>Lista de precio: {item.listaPrecio}</Text>
+          {item.fechaEntrega && <Text style={styles.cardText}>Entrega: {new Date(item.fechaEntrega).toLocaleDateString()}</Text>}
+          <Text style={styles.cardText}>Fuera de agenda: {item.fueraAgenda ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>Modificado local: {item.modificadoLocal ? "Sí" : "No"}</Text>
+          {item.observaciones && <Text style={styles.cardText}>Obs: {item.observaciones}</Text>}
+          {item.obserNoAtencion && <Text style={[styles.cardText, { color: COLORS.error }]}>Causa no atención: {item.obserNoAtencion}</Text>}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderPedidoDetalle = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.productoNombre || `Producto #${item.idProducto}`}</Text>
+          <Text style={[styles.cardPrice, { color: item.tieneDiferencia ? COLORS.warning : COLORS.success }]}>
+            {item.cantAtencion ?? 0}/{item.cantPedido}
+          </Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>ID Pedido: {item.idPedido}</Text>
+          <Text style={styles.cardText}>ID Producto: {item.idProducto}</Text>
+          <Text style={styles.cardText}>Precio: {item.precio}</Text>
+          <Text style={styles.cardText}>Precio atención: {item.precioAtencion ?? "N/A"}</Text>
+          {item.causaDiferencia && <Text style={styles.cardText}>Causa: {item.causaDiferenciaDesc} ({item.causaDiferencia})</Text>}
+          {item.obserDiferencia && <Text style={styles.cardText}>Obs: {item.obserDiferencia}</Text>}
+          <Text style={styles.cardText}>Atendido: {item.atendido ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>Modificado local: {item.modificadoLocal ? "Sí" : "No"}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderPedidoBitacora = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Bitácora Pedido {item.idPedido}</Text>
+          <Text style={[styles.cardSubtitle, { color: item.enviado ? COLORS.success : COLORS.warning }]}>
+            {item.enviado ? "Enviado" : "Pendiente"}
+          </Text>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardText}>Folio: {item.folio}</Text>
+          <Text style={styles.cardText}>Ruta: {item.ruta}</Text>
+          <Text style={styles.cardText}>Cliente: {item.cliente}</Text>
+          <Text style={styles.cardText}>Vendedor: {item.idVendedor}</Text>
+          {item.idProducto && <Text style={styles.cardText}>Producto: {item.idProducto}</Text>}
+          <Text style={styles.cardText}>Estatus: {item.estatusAnterior ?? "—"} → {item.estatus}</Text>
+          <Text style={styles.cardText}>Tipo cambio: {item.tipoCambio}</Text>
+          {item.cantPedido && <Text style={styles.cardText}>Cant pedido: {item.cantPedido}</Text>}
+          {item.cantAtencion != null && <Text style={styles.cardText}>Cant atención: {item.cantAtencion}</Text>}
+          {item.causaDiferencia && <Text style={styles.cardText}>Causa dif: {item.causaDiferencia}</Text>}
+          {item.causaNoAtencion && <Text style={styles.cardText}>Causa no at: {item.causaNoAtencion}</Text>}
+          <Text style={styles.cardText}>Fecha: {item.fecha?.toLocaleString()}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderCatalogoItem = ({ item }: { item: any }) => (
+    <TouchableOpacity onPress={() => console.log(item)}>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{item.descripcion}</Text>
+          <Text style={styles.cardSubtitle}>ID: {item.id}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderItem = ({ item }: { item: any }) => {
     switch (selectedTab) {
       case "ventas":
@@ -684,6 +807,16 @@ export default function DataViewScreen() {
         return renderKit({ item });
       case "cias":
         return renderCia({ item });
+      case "pedidos":
+        return renderPedido({ item });
+      case "pedidoDetalle":
+        return renderPedidoDetalle({ item });
+      case "pedidoBitacora":
+        return renderPedidoBitacora({ item });
+      case "catalogoEstatusPedido":
+      case "catalogoCausaDiferencia":
+      case "catalogoCausaNoAtencion":
+        return renderCatalogoItem({ item });
       default:
         return null;
     }
@@ -745,6 +878,13 @@ export default function DataViewScreen() {
         return stats.kitIntercambio || 0;
       case "cias":
         return stats.cias || 0;
+      case "pedidos":
+      case "pedidoDetalle":
+      case "pedidoBitacora":
+      case "catalogoEstatusPedido":
+      case "catalogoCausaDiferencia":
+      case "catalogoCausaNoAtencion":
+        return data.length;
       default:
         return 0;
     }
@@ -1150,5 +1290,15 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: COLORS.success,
     borderRadius: 4,
+  },
+  estatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.round,
+  },
+  estatusBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fff",
   },
 });
