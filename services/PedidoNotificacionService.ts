@@ -4,10 +4,9 @@ import Realm from "realm";
 import notifee, { AndroidImportance, EventType } from "@notifee/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { navigate } from "./navigationRef";
-import PedidosService, { Pedido } from "./PedidosService";
+import PedidosService, { Pedido, ESTATUS_PEDIDO } from "./PedidosService";
 import AuthService from "./AuthService";
 
-const NOTIFICADOS_KEY = "@xallapan/pedidos_notificados";
 const CHANNEL_ID = "pedidos-central";
 
 class PedidoNotificacionService {
@@ -78,33 +77,34 @@ class PedidoNotificacionService {
   }
 
   /**
-   * Recibe el listado de folios sincronizados y notifica solo los que son nuevos.
+   * Recibe el listado de folios sincronizados y notifica solo los que aun no han sido notificados.
+   * Usa el estatus NOTIFICADO (4) como control principal para no depender de AsyncStorage.
    */
   async procesarPedidosSincronizados(folios: number[]): Promise<void> {
     if (!folios || folios.length === 0) return;
 
     try {
-      const notificados = await this.obtenerNotificados();
-      const nuevos = folios.filter((f) => !notificados.includes(f));
-
-      if (nuevos.length === 0) return;
-
       const pedidosService = PedidosService.getInstance();
       if (this.realm) {
         pedidosService.setRealm(this.realm);
       }
 
-      for (const folio of nuevos) {
-        const pedido = pedidosService.getPedidoById(folio);
-        if (pedido) {
-          await this.mostrarNotificacionPedido(pedido);
-          await this.registrarVisitaFueraAgenda(pedido);
-        }
-        // Marcar inmediatamente para evitar duplicados si el loop falla a la mitad
-        notificados.push(folio);
-      }
+      for (const folio of folios) {
+        const pedido = pedidosService.getPedidoByFolio(folio);
+        if (!pedido) continue;
 
-      await this.guardarNotificados(notificados);
+        // Solo notificar pedidos que aun no han sido notificados ni atendidos
+        if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO) {
+          console.log(`[PedidoNotificacionService] Folio ${folio} ya notificado o atendido, omitiendo`);
+          continue;
+        }
+
+        await this.mostrarNotificacionPedido(pedido);
+        await this.registrarVisitaFueraAgenda(pedido);
+
+        // Marcar como notificado para evitar duplicados en futuras sincronizaciones
+        this.marcarPedidoNotificado(folio);
+      }
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al procesar pedidos sincronizados:", error);
     }
@@ -114,10 +114,9 @@ class PedidoNotificacionService {
     try {
       await notifee.displayNotification({
         id: `pedido-${pedido.folio}`,
-        title: "📦 Nuevo pedido de Central",
+        title: "Nuevo pedido de Central",
         body: `${pedido.clienteNombre || `Cliente #${pedido.cliente}`} - ${pedido.numeroProductos} producto(s)`,
         data: {
-          pedidoId: String(pedido.id),
           folio: String(pedido.folio),
           cliente: String(pedido.cliente),
         },
@@ -139,11 +138,11 @@ class PedidoNotificacionService {
   }
 
   private async manejarToqueNotificacion(data: any): Promise<void> {
-    const pedidoId = data?.pedidoId ? parseInt(data.pedidoId) : null;
-    if (!pedidoId) return;
+    const folio = data?.folio ? parseInt(data.folio) : null;
+    if (!folio) return;
 
-    console.log(`[PedidoNotificacionService] Navegando a pedido ${pedidoId}`);
-    navigate("PedidoDetalle", { pedidoId, soloLectura: true });
+    console.log(`[PedidoNotificacionService] Navegando a pedido ${folio}`);
+    navigate("PedidoDetalle", { folio, soloLectura: true });
   }
 
   /**
@@ -154,54 +153,55 @@ class PedidoNotificacionService {
     const folio = data?.folio ? parseInt(data.folio) : null;
     if (!folio) return;
 
-    const notificados = await this.obtenerNotificados();
-    if (notificados.includes(folio)) {
-      console.log(`[PedidoNotificacionService] Push duplicada para folio ${folio}, ignorando`);
-      return;
-    }
-
     const pedidosService = PedidosService.getInstance();
     if (this.realm) {
       pedidosService.setRealm(this.realm);
     }
 
-    const pedido = pedidosService.getPedidoById(folio);
-    if (pedido) {
-      await this.mostrarNotificacionPedido(pedido);
-      await this.registrarVisitaFueraAgenda(pedido);
-      notificados.push(folio);
-      await this.guardarNotificados(notificados);
+    const pedido = pedidosService.getPedidoByFolio(folio);
+    if (!pedido) {
+      console.log(`[PedidoNotificacionService] Pedido ${folio} aun no sincronizado, ignorando push`);
+      return;
+    }
+
+    if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO) {
+      console.log(`[PedidoNotificacionService] Push duplicada para folio ${folio}, ignorando`);
+      return;
+    }
+
+    await this.mostrarNotificacionPedido(pedido);
+    await this.registrarVisitaFueraAgenda(pedido);
+    this.marcarPedidoNotificado(folio);
+  }
+
+  private marcarPedidoNotificado(folio: number): void {
+    try {
+      if (!this.realm) return;
+      const renglones = this.realm.objects("Pedido").filtered("folio = $0", folio);
+      if (renglones.length === 0) return;
+
+      this.realm.write(() => {
+        Array.from(renglones).forEach((renglon: any) => {
+          if (renglon.estatus < ESTATUS_PEDIDO.NOTIFICADO) {
+            renglon.estatus = ESTATUS_PEDIDO.NOTIFICADO;
+            renglon.estatusDescripcion = this.getEstatusDescripcion(ESTATUS_PEDIDO.NOTIFICADO);
+            renglon.syncedAt = new Date();
+          }
+        });
+      });
+      console.log(`[PedidoNotificacionService] Pedido ${folio} marcado como NOTIFICADO`);
+    } catch (error) {
+      console.warn("[PedidoNotificacionService] Error al marcar pedido como notificado:", error);
     }
   }
 
-  private async obtenerNotificados(): Promise<number[]> {
+  private getEstatusDescripcion(estatus: number): string {
     try {
-      const stored = await AsyncStorage.getItem(NOTIFICADOS_KEY);
-      if (!stored) return [];
-      const parsed = JSON.parse(stored);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-      console.warn("[PedidoNotificacionService] Error leyendo notificados:", error);
-      return [];
-    }
-  }
-
-  private async guardarNotificados(folios: number[]): Promise<void> {
-    try {
-      await AsyncStorage.setItem(NOTIFICADOS_KEY, JSON.stringify(folios));
-    } catch (error) {
-      console.warn("[PedidoNotificacionService] Error guardando notificados:", error);
-    }
-  }
-
-  /**
-   * Limpia el historial de notificados (útil al cerrar sesión o para pruebas).
-   */
-  async limpiarNotificados(): Promise<void> {
-    try {
-      await AsyncStorage.removeItem(NOTIFICADOS_KEY);
-    } catch (error) {
-      console.warn("[PedidoNotificacionService] Error limpiando notificados:", error);
+      if (!this.realm) return "Desconocido";
+      const catalogo = this.realm.objectForPrimaryKey("CatalogoEstatusPedido", estatus) as any;
+      return catalogo?.descripcion || "Desconocido";
+    } catch {
+      return "Desconocido";
     }
   }
 
@@ -256,4 +256,5 @@ class PedidoNotificacionService {
   }
 }
 
+export { PedidoNotificacionService };
 export default PedidoNotificacionService.getInstance();

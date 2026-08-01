@@ -26,6 +26,7 @@ import { FormaPagoSyncTask } from "./tasks/FormaPagoSyncTask";
 import { CiasSyncTask } from "./tasks/CiasSyncTask";
 import { CatalogosPedidosSyncTask } from "./tasks/CatalogosPedidosSyncTask";
 import { PedidosSyncTask } from "./tasks/PedidosSyncTask";
+// import { PedidosDetalleSyncTask } from "./tasks/PedidosDetalleSyncTask";
 import { PedidoBitacoraUploadSyncTask } from "./tasks/PedidoBitacoraUploadSyncTask";
 
 /**
@@ -89,7 +90,7 @@ export class SyncOrchestrator {
       new VentasArrastreSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Catálogos de pedidos - prioridad 5 (alta, antes que Pedidos)
       new CatalogosPedidosSyncTask(this.realm, this.syncLogId),
-      // Pedidos de la ruta - prioridad 50 (cabecera + detalle en el mismo endpoint)
+      // Pedidos de la ruta - prioridad 50 (cabecera + productos en el mismo endpoint)
       new PedidosSyncTask(this.realm, this.syncLogId),
       // Envío de bitácora de pedidos al servidor - prioridad 1 (primero, antes de descargar)
       new PedidoBitacoraUploadSyncTask(this.realm, this.syncLogId),

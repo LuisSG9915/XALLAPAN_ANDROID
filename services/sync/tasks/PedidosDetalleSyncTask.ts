@@ -24,9 +24,6 @@ export class PedidosDetalleSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      console.log(`[PedidosDetalleSyncTask] Deshabilitado temporalmente: endpoint no creado`);
-      return { success: true, registrosLeidos: 0, registrosGuardados: 0 };
-
       const user = this.realm.objects("Usuario").sorted("id", true)[0] as any;
       const ruta = user?.ruta ? parseInt(user.ruta) : 0;
 

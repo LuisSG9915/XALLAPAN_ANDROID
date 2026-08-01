@@ -3,6 +3,7 @@
 import Realm from "realm";
 import { SyncTask, SyncTaskResult } from "../SyncTask";
 import PedidoNotificacionService from "../../PedidoNotificacionService";
+import AuthService from "../../AuthService";
 
 export class PedidosSyncTask extends SyncTask {
   constructor(realm: Realm, syncLogId: string) {
@@ -25,102 +26,149 @@ export class PedidosSyncTask extends SyncTask {
     return ["ClienteFull", "CatalogosPedidos", "Producto"];
   }
 
+  private buildPedidoId(folio: number, idProducto: number): string {
+    return `${folio}-${idProducto}`;
+  }
+
   async execute(): Promise<SyncTaskResult> {
     try {
-      const user = this.realm.objects("Usuario").sorted("id", true)[0] as any;
-      const ruta = user?.ruta ? parseInt(user.ruta) : 0;
+      console.log("[PedidosSyncTask] === INICIANDO EJECUCION ===");
+
+      let ruta = 0;
+      const idUsuario = (this as any).idUsuario as number | undefined;
+      console.log(`[PedidosSyncTask] idUsuario recibido del orquestador: ${idUsuario ?? "no definido"}`);
+
+      // 1. Buscar usuario por idUsuario del orquestador
+      if (idUsuario) {
+        const usuarioActual = this.realm.objectForPrimaryKey("Usuario", idUsuario) as any;
+        if (usuarioActual?.ruta) {
+          ruta = parseInt(String(usuarioActual.ruta));
+          console.log(`[PedidosSyncTask] Ruta obtenida del usuario actual (id=${idUsuario}): ${ruta}`);
+        }
+      }
+
+      // 2. Fallback: AuthService
+      if (!ruta || ruta === 0) {
+        try {
+          const sessionUser = await AuthService.restoreSession();
+          if (sessionUser?.ruta) {
+            ruta = parseInt(String(sessionUser.ruta));
+            console.log(`[PedidosSyncTask] Ruta obtenida de sesion: ${ruta}`);
+          }
+        } catch (authError) {
+          console.warn("[PedidosSyncTask] Error obteniendo sesion:", authError);
+        }
+      }
+
+      // 3. Fallback final: buscar algun usuario con ruta en Realm
+      if (!ruta || ruta === 0) {
+        const usuariosConRuta = this.realm.objects("Usuario").filtered("ruta != null && ruta != \"\"");
+        if (usuariosConRuta.length > 0) {
+          const user = usuariosConRuta[0] as any;
+          ruta = parseInt(user.ruta);
+          console.log(`[PedidosSyncTask] Ruta obtenida de Realm (fallback): ${ruta}`);
+        }
+      }
 
       if (!ruta || ruta === 0) {
-        console.log(`[PedidosSyncTask] Usuario sin ruta asignada, omitiendo sincronización`);
+        console.error(`[PedidosSyncTask] Usuario sin ruta asignada, omitiendo sincronizacion`);
         return {
           success: true,
           registrosLeidos: 0,
           registrosGuardados: 0,
+          error: "Usuario sin ruta asignada",
         };
       }
 
       const endpoint = `${this.getEndpoint()}/${ruta}`;
-      console.log(`[PedidosSyncTask] Sincronizando pedidos para ruta ${ruta}...`);
+      console.log(`[PedidosSyncTask] Endpoint: ${endpoint}`);
 
       const response = await this.fetchWithTimeout(endpoint, {
         headers: { accept: "application/json" },
       });
+
+      console.log(`[PedidosSyncTask] Respuesta HTTP: ${response.status}`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const rows = await response.json();
+      console.log(`[PedidosSyncTask] JSON recibido, tipo: ${typeof rows}, es array: ${Array.isArray(rows)}, length: ${Array.isArray(rows) ? rows.length : "N/A"}`);
 
       if (!Array.isArray(rows)) {
         throw new Error("La respuesta no es un array de pedidos");
       }
 
-      console.log(`[PedidosSyncTask] Recibidos ${rows.length} renglones (cabecera + productos)`);
-
-      // Agrupar renglones por folio: cada renglón es un producto del pedido
-      const pedidosMap = new Map<number, any[]>();
-      rows.forEach((row: any) => {
-        const folio = row.folio;
-        if (!pedidosMap.has(folio)) {
-          pedidosMap.set(folio, []);
-        }
-        pedidosMap.get(folio)!.push(row);
-      });
+      console.log(`[PedidosSyncTask] Recibidos ${rows.length} renglones`);
 
       let registrosGuardados = 0;
       let registrosActualizados = 0;
-      let detallesGuardados = 0;
-      let detallesActualizados = 0;
-      const foliosNuevos: number[] = [];
+      const foliosNuevos = new Set<number>();
 
       this.realm.write(() => {
-        pedidosMap.forEach((renglones, folio) => {
-          const primero = renglones[0];
-          const pedidoExistente = this.realm.objectForPrimaryKey("Pedido", folio) as any;
+        rows.forEach((row: any) => {
+          const folio = row.folio;
+          const idProducto = row.idProducto;
+          const id = this.buildPedidoId(folio, idProducto);
+          const pedidoExistente = this.realm.objectForPrimaryKey("Pedido", id) as any;
 
-          // Si el pedido fue modificado localmente, conservar estado de atención
           const conservarLocal = pedidoExistente?.modificadoLocal === true;
-          const estatusFinal = conservarLocal ? pedidoExistente.estatus : primero.estatus;
+          const estatusFinal = conservarLocal ? pedidoExistente.estatus : row.estatus;
           const fechaAtencionFinal = conservarLocal ? pedidoExistente.fechaAtencion : null;
           const causaNoAtencionFinal = conservarLocal ? pedidoExistente.causaNoAtencion : null;
           const obserNoAtencionFinal = conservarLocal ? pedidoExistente.obserNoAtencion : null;
 
-          // Cabecera agrupada
-          const numeroProductos = renglones.length;
-          const cantPedidoTotal = renglones.reduce(
-            (sum: number, r: any) => sum + (parseFloat(r.cantPedido) || 0),
-            0
-          );
+          const cliente = this.getClienteNombre(row.cliente);
+          const clienteDomicilio = this.getClienteDomicilio(row.cliente);
+          const producto = this.realm.objectForPrimaryKey("Producto", idProducto) as any;
+          const productoNombre = producto?.descripcion || `Producto #${idProducto}`;
+          const cantPedido = parseFloat(row.cantPedido) || 0;
+          const cantAtencionFinal = pedidoExistente?.cantAtencion ?? null;
+          const tieneDiferencia =
+            cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal < cantPedido;
 
           this.realm.create(
             "Pedido",
             {
-              id: folio,
+              id,
+              idPedido: folio,
+              id_movil: pedidoExistente?.id_movil ?? null,
               folio,
-              fecha: primero.fecha ? new Date(primero.fecha) : null,
-              ruta: primero.ruta,
-              cliente: primero.cliente,
-              clienteNombre: this.getClienteNombre(primero.cliente),
-              clienteDomicilio: this.getClienteDomicilio(primero.cliente),
+              fecha: row.fecha ? new Date(row.fecha) : null,
+              ruta: row.ruta,
+              cliente: row.cliente,
+              clienteNombre: cliente,
+              clienteDomicilio,
               idCanal: null,
               fechaAtencion: fechaAtencionFinal,
-              idVendedor: primero.idVendedor,
-              numeroProductos,
-              cantPedido: cantPedidoTotal,
-              listaPrecio: primero.listaPrecio,
-              fechaEntrega: primero.fechaEntrega ? new Date(primero.fechaEntrega) : null,
+              idVendedor: row.idVendedor,
+              numeroProductos: row.numeroProductos ?? 1,
+              cantPedido,
+              listaPrecio: row.listaPrecio,
+              fechaEntrega: row.fechaEntrega ? new Date(row.fechaEntrega) : null,
               estatus: estatusFinal,
               estatusDescripcion: this.getEstatusDescripcion(estatusFinal),
-              fueraAgenda: primero.fueraAgenda,
-              observaciones: primero.observaciones,
-              no_venta: primero.noVenta,
-              tieneDiferencia: pedidoExistente?.tieneDiferencia ?? false,
+              fueraAgenda: row.fueraAgenda,
+              observaciones: row.observaciones,
+              no_venta: row.noVenta,
+              tieneDiferencia,
               causaNoAtencion: causaNoAtencionFinal,
               obserNoAtencion: obserNoAtencionFinal,
               syncedAt: new Date(),
               syncedAr: null,
               modificadoLocal: pedidoExistente?.modificadoLocal ?? false,
+              idProducto,
+              productoNombre,
+              cantAtencion: cantAtencionFinal,
+              precio: row.precio ?? null,
+              precioAtencion: pedidoExistente?.precioAtencion ?? null,
+              causaDiferencia: pedidoExistente?.causaDiferencia ?? null,
+              causaDiferenciaDesc: pedidoExistente?.causaDiferencia
+                ? this.getCausaDiferenciaDescripcion(pedidoExistente.causaDiferencia)
+                : null,
+              obserDiferencia: pedidoExistente?.obserDiferencia ?? null,
+              atendido: cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal > 0,
             },
             Realm.UpdateMode.Modified
           );
@@ -129,77 +177,34 @@ export class PedidosSyncTask extends SyncTask {
             registrosActualizados++;
           } else {
             registrosGuardados++;
-            foliosNuevos.push(folio);
+            foliosNuevos.add(folio);
           }
-
-          // Crear/actualizar detalles (productos) del pedido
-          renglones.forEach((renglon: any) => {
-            const idProducto = renglon.idProducto;
-            const idDetalle = `${folio}-${idProducto}`;
-            const detalleExistente = this.realm.objectForPrimaryKey("PedidoDetalle", idDetalle) as any;
-
-            const producto = this.realm.objectForPrimaryKey("Producto", idProducto) as any;
-            const productoNombre = producto?.descripcion || `Producto #${idProducto}`;
-
-            const cantPedido = parseFloat(renglon.cantPedido) || 0;
-            const cantAtencionFinal = detalleExistente?.cantAtencion ?? null;
-            const tieneDiferencia =
-              cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal < cantPedido;
-
-            this.realm.create(
-              "PedidoDetalle",
-              {
-                id: idDetalle,
-                idPedido: folio,
-                idProducto,
-                productoNombre,
-                cantPedido,
-                cantAtencion: cantAtencionFinal,
-                precio: renglon.precio ?? null,
-                precioAtencion: detalleExistente?.precioAtencion ?? null,
-                causaDiferencia: detalleExistente?.causaDiferencia ?? null,
-                causaDiferenciaDesc: detalleExistente?.causaDiferencia
-                  ? this.getCausaDiferenciaDescripcion(detalleExistente.causaDiferencia)
-                  : null,
-                obserDiferencia: detalleExistente?.obserDiferencia ?? null,
-                tieneDiferencia,
-                atendido: cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal > 0,
-                modificadoLocal: detalleExistente?.modificadoLocal ?? false,
-              },
-              Realm.UpdateMode.Modified
-            );
-
-            if (detalleExistente) {
-              detallesActualizados++;
-            } else {
-              detallesGuardados++;
-            }
-          });
         });
       });
 
       console.log(
-        `[PedidosSyncTask] Pedidos: ${registrosGuardados} nuevos, ${registrosActualizados} actualizados | Detalles: ${detallesGuardados} nuevos, ${detallesActualizados} actualizados`
+        `[PedidosSyncTask] Pedidos: ${registrosGuardados} nuevos, ${registrosActualizados} actualizados`
       );
+
+      // Verificacion post-guardado
+      const pedidosGuardados = this.realm.objects("Pedido").length;
+      console.log(`[PedidosSyncTask] Post-guardado: ${pedidosGuardados} renglones en Realm`);
 
       // Notificar pedidos nuevos (evita duplicados con push de central)
       try {
         PedidoNotificacionService.setRealm(this.realm);
-        await PedidoNotificacionService.procesarPedidosSincronizados(foliosNuevos);
+        await PedidoNotificacionService.procesarPedidosSincronizados(Array.from(foliosNuevos));
       } catch (notifError) {
         console.warn("[PedidosSyncTask] Error al notificar pedidos nuevos:", notifError);
       }
+
+      console.log("[PedidosSyncTask] === EJECUCION COMPLETADA ===");
 
       return {
         success: true,
         registrosLeidos: rows.length,
         registrosGuardados,
         registrosActualizados,
-        detalles: {
-          detallesGuardados,
-          detallesActualizados,
-          pedidosUnicos: pedidosMap.size,
-        },
       };
     } catch (error) {
       console.error("[PedidosSyncTask] Error:", error);

@@ -41,6 +41,7 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
 
       let enviados = 0;
       let fallidos = 0;
+      let endpointNoDisponible = false;
       const idsEnviados: string[] = [];
 
       for (const bitacora of bitacoras) {
@@ -77,6 +78,8 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
             tipo_cambio: b.tipoCambio ?? null,
           };
 
+          console.log(`[PedidoBitacoraUpload] Enviando bitácora ${b.id}:`, JSON.stringify(payload));
+
           const response = await this.fetchWithTimeout(this.getEndpoint(), {
             method: "POST",
             headers: {
@@ -86,12 +89,21 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
             body: JSON.stringify(payload),
           });
 
+          if (response.status === 404) {
+            endpointNoDisponible = true;
+            console.warn(`[PedidoBitacoraUpload] Endpoint no disponible (404), se omitirá el envío de bitácoras`);
+            break;
+          }
+
           if (response.ok) {
+            const responseText = await response.text();
+            console.log(`[PedidoBitacoraUpload] Bitácora ${b.id} enviada. Respuesta:`, responseText);
             enviados++;
             idsEnviados.push(b.id);
           } else {
             fallidos++;
-            console.warn(`[PedidoBitacoraUpload] Error enviando bitácora ${b.id}: HTTP ${response.status}`);
+            const errorText = await response.text().catch(() => "");
+            console.warn(`[PedidoBitacoraUpload] Error enviando bitácora ${b.id}: HTTP ${response.status} - ${errorText}`);
           }
         } catch (error) {
           fallidos++;
@@ -111,6 +123,15 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
       }
 
       console.log(`[PedidoBitacoraUpload] Enviados: ${enviados}, Fallidos: ${fallidos}`);
+
+      if (endpointNoDisponible) {
+        return {
+          success: true,
+          registrosLeidos: bitacoras.length,
+          registrosGuardados: 0,
+          error: "Endpoint de bitácora no disponible (404), se intentará en la próxima sincronización",
+        };
+      }
 
       return {
         success: fallidos === 0,

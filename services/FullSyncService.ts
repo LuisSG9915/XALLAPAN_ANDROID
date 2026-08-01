@@ -26,8 +26,20 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 51,
+        schemaVersion: 53,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v53: Pedido ahora es una sola tabla que incluye el detalle del producto.
+          // La primary key cambia a string compuesta `${folio}-${idProducto}`.
+          // Se elimina la tabla PedidoDetalle.
+          if (oldRealm.schemaVersion < 53) {
+            console.log("[Migration v53] Reestructurando Pedido como tabla única con detalle de producto");
+          }
+
+          // Migración v52: Crear/actualizar tablas de Pedidos (Pedido, PedidoBitacora, catálogos)
+          if (oldRealm.schemaVersion < 52) {
+            console.log("[Migration v52] Creando/actualizando tablas de Pedidos y catálogos");
+          }
+
           // Migración v51: Campos completos de snapshot en PedidoBitacora (id_movil, precio, observaciones, etc.)
           if (oldRealm.schemaVersion < 51) {
             console.log("[Migration v51] Ampliando esquema de PedidoBitacora para snapshot completo");
@@ -221,7 +233,16 @@ class FullSyncService {
       });
 
       this.isInitialized = true;
-      console.log("✅ FullSyncService inicializado correctamente (v16 - Visita con ID compuesto)");
+      console.log("✅ FullSyncService inicializado correctamente (v52 - Tablas de Pedidos)");
+
+      // Diagnostico: verificar tablas de pedidos
+      try {
+        const pedidoCount = this.realm.objects("Pedido").length;
+        const bitacoraCount = this.realm.objects("PedidoBitacora").length;
+        console.log(`[FullSyncService] Diagnostico Pedidos: ${pedidoCount} renglones, ${bitacoraCount} bitacoras`);
+      } catch (diagError) {
+        console.error("[FullSyncService] Error en diagnostico de tablas de pedidos:", diagError);
+      }
 
       // Inyectar Realm a otros servicios para evitar múltiples instancias
       await this.injectRealmToServices();
@@ -699,6 +720,17 @@ class FullSyncService {
         console.log(`[FullSync] ✅ ${cierreResult.sent} cierres de ruta enviados`);
       } else if (!cierreResult.success && cierreResult.error) {
         console.warn("[FullSync] ⚠️ Error enviando cierres de ruta:", cierreResult.error);
+      }
+    }
+
+    // PASO 5.6: Enviar bitácoras de pedidos pendientes al servidor
+    if (idUsuario) {
+      console.log("[FullSync] PASO 5.6 - Enviando bitácoras de pedidos pendientes...");
+      const bitacoraResult = await this.sendPendingPedidoBitacoraToServer(idUsuario);
+      if (bitacoraResult.success && bitacoraResult.sent > 0) {
+        console.log(`[FullSync] ✅ ${bitacoraResult.sent} bitácoras de pedidos enviadas`);
+      } else if (!bitacoraResult.success && bitacoraResult.error) {
+        console.warn("[FullSync] ⚠️ Error enviando bitácoras de pedidos:", bitacoraResult.error);
       }
     }
 
@@ -4153,6 +4185,97 @@ class FullSyncService {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSync-CierreRuta] ❌ Error:", error);
+      return { success: false, sent: 0, error: errorMsg };
+    }
+  }
+
+  /**
+   * Envía bitácoras de pedidos pendientes al servidor (arrastre).
+   * Endpoint: sp_DetallePedidosBitacoraArrastreJSON
+   */
+  async sendPendingPedidoBitacoraToServer(
+    idUsuario: number,
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (!this.realm || this.realm.isClosed) {
+      return { success: false, sent: 0, error: "Realm no inicializado" };
+    }
+
+    try {
+      const bitacorasPendientes = this.realm.objects("PedidoBitacora").filtered("enviado == false");
+      console.log(`[FullSync-PedidoBitacora] 📤 Bitácoras pendientes: ${bitacorasPendientes.length}`);
+
+      if (bitacorasPendientes.length === 0) {
+        return { success: true, sent: 0 };
+      }
+
+      const formatDate = (date: Date | null): string | null => {
+        if (!date) return null;
+        return this.formatMexicoDateForServer(date);
+      };
+
+      const payload = Array.from(bitacorasPendientes).map((b: any) => ({
+        id_pedido: b.idPedido ?? null,
+        id_movil: b.id_movil ?? null,
+        folio: b.folio,
+        fecha: formatDate(b.fecha),
+        ruta: b.ruta,
+        cliente: b.cliente,
+        idCanal: b.idCanal ?? null,
+        fechaAtencion: formatDate(b.fechaAtencion),
+        idVendedor: b.idVendedor,
+        idProducto: b.idProducto ?? null,
+        cantPedido: b.cantPedido ?? null,
+        precio: b.precio ?? null,
+        observaciones: b.observaciones ?? null,
+        listaPrecio: b.listaPrecio ?? null,
+        fechaEntrega: formatDate(b.fechaEntrega),
+        estatus: b.estatus,
+        cantAtencion: b.cantAtencion ?? null,
+        precioAtencion: b.precioAtencion ?? null,
+        causaDiferencia: b.causaDiferencia ?? null,
+        obserDiferencia: b.obserDiferencia ?? null,
+        causaNoAtencion: b.causaNoAtencion ?? null,
+        obserNoAtencion: b.obserNoAtencion ?? null,
+        usrAlta: b.usrAlta ?? idUsuario,
+        fueraAgenda: b.fueraAgenda ?? null,
+        no_venta: b.no_venta ?? null,
+        fecha_movil: formatDate(b.fecha),
+        estatus_anterior: b.estatusAnterior ?? null,
+        tipo_cambio: b.tipoCambio ?? null,
+        enviado: 1,
+        fecha_envio: formatDate(this.getMexicoNow()),
+      }));
+
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_DetallePedidosBitacoraArrastreJSON?idUsuario=${idUsuario}`;
+
+      console.log(`[FullSync-PedidoBitacora] 🌐 URL: ${url}`);
+      console.log(`[FullSync-PedidoBitacora] 📦 Payload:`, JSON.stringify(payload, null, 2));
+
+      const response = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        this.realm.write(() => {
+          Array.from(bitacorasPendientes).forEach((b: any) => {
+            b.enviado = true;
+          });
+        });
+        console.log(`[FullSync-PedidoBitacora] ✅ ${payload.length} bitácoras enviadas y marcadas`);
+        return { success: true, sent: payload.length };
+      } else {
+        const errorText = await response.text().catch(() => "Error desconocido");
+        console.warn(`[FullSync-PedidoBitacora] ⚠️ Error HTTP ${response.status}: ${errorText}`);
+        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSync-PedidoBitacora] ❌ Error:", error);
       return { success: false, sent: 0, error: errorMsg };
     }
   }

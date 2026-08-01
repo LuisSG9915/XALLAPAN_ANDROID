@@ -631,7 +631,8 @@ export const VentaModificacionSchema = {
 export const PedidoSchema = {
   name: "Pedido",
   properties: {
-    id: "int",
+    id: "string", // PK compuesta: `${folio}-${idProducto}`
+    idPedido: "int?", // folio del pedido
     id_movil: "int?",
     folio: "int",
     fecha: "date?",
@@ -657,27 +658,16 @@ export const PedidoSchema = {
     syncedAt: "date",
     syncedAr: "date?",
     modificadoLocal: "bool?",
-  },
-  primaryKey: "id",
-};
-
-export const PedidoDetalleSchema = {
-  name: "PedidoDetalle",
-  properties: {
-    id: "string",
-    idPedido: "int",
+    // Campos del producto (detalle del pedido en la misma tabla)
     idProducto: "int",
     productoNombre: "string?",
-    cantPedido: "float",
     cantAtencion: "float?",
     precio: "float?",
     precioAtencion: "float?",
     causaDiferencia: "int?",
     causaDiferenciaDesc: "string?",
     obserDiferencia: "string?",
-    tieneDiferencia: "bool?",
     atendido: "bool?",
-    modificadoLocal: "bool?",
   },
   primaryKey: "id",
 };
@@ -776,7 +766,6 @@ export const allSchemas = [
   RouteConfigSchema,
   FormaPagoSchema,
   PedidoSchema,
-  PedidoDetalleSchema,
   PedidoBitacoraSchema,
   CatalogoEstatusPedidoSchema,
   CatalogoCausaDiferenciaSchema,

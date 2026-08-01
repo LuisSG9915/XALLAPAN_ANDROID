@@ -13,12 +13,17 @@ import {
 } from "react-native";
 import { Icon } from "react-native-elements";
 import PedidosService, { Pedido, ESTATUS_PEDIDO } from "../services/PedidosService";
+
+interface PedidoAgrupado extends Pedido {
+  folioKey: number;
+  total?: number;
+}
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
 export default function PedidosScreen({ navigation }: { navigation: any }) {
-  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [pedidos, setPedidos] = useState<PedidoAgrupado[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -35,12 +40,43 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     setLoading(true);
     try {
       const user = await AuthService.restoreSession();
+      console.log("[PedidosScreen] Usuario de sesion:", JSON.stringify(user));
       if (!user) {
         Alert.alert("Error", "No hay sesión activa");
         return;
       }
 
-      const ruta = user.ruta ? parseInt(user.ruta) : 0;
+      let ruta = user.ruta ? parseInt(String(user.ruta)) : 0;
+      console.log(`[PedidosScreen] Ruta inicial de sesion: ${ruta}`);
+
+      if (!ruta || ruta === 0) {
+        // Fallback: buscar ruta en Realm por el usuario logueado
+        if (!FullSyncService.isServiceInitialized()) {
+          await FullSyncService.initialize();
+        }
+        const realm = (FullSyncService as any).realm;
+        const usuarios = realm.objects("Usuario").filtered("claveEmpleado == $0", user.claveEmpleado);
+        console.log(`[PedidosScreen] Usuarios en Realm con claveEmpleado ${user.claveEmpleado}: ${usuarios.length}`);
+        if (usuarios.length > 0) {
+          const u = usuarios[0] as any;
+          if (u.ruta) {
+            ruta = parseInt(String(u.ruta));
+            console.log(`[PedidosScreen] Ruta obtenida de Realm: ${ruta}`);
+          }
+        }
+      }
+
+      if (!ruta || ruta === 0) {
+        // Fallback final: cualquier usuario con ruta
+        const realm = (FullSyncService as any).realm;
+        const usuariosConRuta = realm.objects("Usuario").filtered("ruta != null && ruta != \"\"");
+        if (usuariosConRuta.length > 0) {
+          const u = usuariosConRuta[0] as any;
+          ruta = parseInt(String(u.ruta));
+          console.log(`[PedidosScreen] Ruta fallback de Realm: ${ruta}`);
+        }
+      }
+
       setCurrentRuta(ruta);
 
       if (!FullSyncService.isServiceInitialized()) {
@@ -50,8 +86,17 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const pedidosData = pedidosService.getPedidosByRuta(ruta);
-      setPedidos(pedidosData);
+      const folios = pedidosService.getFoliosByRuta(ruta);
+      const pedidosAgrupados: PedidoAgrupado[] = [];
+      folios.forEach((folio) => {
+        const pedido = pedidosService.getPedidoByFolio(folio);
+        if (pedido) {
+          const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
+          pedidosAgrupados.push({ ...pedido, folioKey: folio, total });
+        }
+      });
+      console.log(`[PedidosScreen] Folios encontrados para ruta ${ruta}: ${folios.length}`);
+      setPedidos(pedidosAgrupados);
     } catch (error) {
       console.error("[PedidosScreen] Error al cargar pedidos:", error);
       Alert.alert("Error", "No se pudieron cargar los pedidos");
@@ -76,9 +121,17 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const pedidosData = pedidosService.getPedidosByRuta(currentRuta);
-        setPedidos(pedidosData);
-        Alert.alert("Éxito", `Se sincronizaron ${result.count} pedidos (${result.detalles || 0} productos)`);
+        const folios = pedidosService.getFoliosByRuta(currentRuta);
+        const pedidosAgrupados: PedidoAgrupado[] = [];
+        folios.forEach((folio) => {
+          const pedido = pedidosService.getPedidoByFolio(folio);
+          if (pedido) {
+            const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
+            pedidosAgrupados.push({ ...pedido, folioKey: folio, total });
+          }
+        });
+        setPedidos(pedidosAgrupados);
+        Alert.alert("Éxito", `Se sincronizaron ${result.count} renglones`);
       } else {
         Alert.alert("Error", "No se pudieron sincronizar los pedidos");
       }
@@ -132,16 +185,49 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  const handleAbrirPedido = (pedido: Pedido) => {
+  const obtenerPrecioProducto = (
+    idProducto: number,
+    preciosPromo: any[],
+    preciosCliente: any[],
+    preciosDefault: any[],
+  ): number => {
+    const pp = preciosPromo.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+    if (pp) return pp.precio || 0;
+    const pc = preciosCliente.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+    if (pc) return pc.precio || 0;
+    const pd = preciosDefault.find((p: any) => parseInt(p.claveProd || "0", 10) === idProducto);
+    if (pd) return pd.precio || 0;
+    return 0;
+  };
+
+  const calcularTotalPedido = (folio: number, cliente: number, listaPrecio?: number): number => {
+    try {
+      const ps = PedidosService.getInstance();
+      const renglones = ps.getProductosByFolio(folio);
+      if (renglones.length === 0) return 0;
+      const preciosPromo = FullSyncService.getPreciosPromoByCliente(cliente);
+      const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecio ?? 0);
+      const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
+      return renglones.reduce((sum, r) => {
+        const precio = obtenerPrecioProducto(r.idProducto, preciosPromo, preciosCliente, preciosDefault);
+        return sum + precio * (r.cantPedido || 0);
+      }, 0);
+    } catch (error) {
+      console.error("[PedidosScreen] Error al calcular total:", error);
+      return 0;
+    }
+  };
+
+  const handleAbrirPedido = (pedido: PedidoAgrupado) => {
     if (
       pedido.estatus === ESTATUS_PEDIDO.ENTREGADO ||
       pedido.estatus === ESTATUS_PEDIDO.CANCELADO ||
       pedido.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
       pedido.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
     ) {
-      navigation.navigate("PedidoDetalle", { pedidoId: pedido.id, soloLectura: true });
+      navigation.navigate("PedidoDetalle", { folio: pedido.folioKey, soloLectura: true });
     } else {
-      navigation.navigate("PedidoDetalle", { pedidoId: pedido.id, soloLectura: false });
+      navigation.navigate("PedidoDetalle", { folio: pedido.folioKey, soloLectura: false });
     }
   };
 
@@ -164,7 +250,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       p.estatus !== ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
   ).length;
 
-  const renderPedido = ({ item }: { item: Pedido }) => {
+  const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
     const estatusColor = getEstatusColor(item.estatus);
     const estatusIcon = getEstatusIcon(item.estatus);
 
@@ -209,6 +295,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
             </Text>
           </View>
 
+          <View style={styles.infoRow}>
+            <Icon name="attach-money" type="material" size={18} color={COLORS.primary} />
+            <Text style={[styles.infoText, { fontWeight: "bold", color: COLORS.primary }]}>
+              Total: ${(item.total || 0).toFixed(2)}
+            </Text>
+          </View>
+
           {item.fechaEntrega && (
             <View style={styles.infoRow}>
               <Icon name="event" type="material" size={18} color={COLORS.muted} />
@@ -230,8 +323,8 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
 
         {item.fueraAgenda && (
           <View style={styles.fueraAgendaBadge}>
-            <Icon name="warning" type="material" size={14} color="#fff" />
-            <Text style={styles.fueraAgendaText}>Fuera de Agenda</Text>
+            <Icon name="receipt" type="material" size={14} color="#fff" />
+            <Text style={styles.fueraAgendaText}>Pedido de Central</Text>
           </View>
         )}
       </TouchableOpacity>

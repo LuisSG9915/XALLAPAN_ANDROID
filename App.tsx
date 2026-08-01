@@ -188,9 +188,9 @@ function App() {
           const pending = await AsyncStorage.getItem("@xallapan/pedido_pendiente_navegacion");
           if (pending) {
             const data = JSON.parse(pending);
-            const pedidoId = data?.pedidoId ? parseInt(data.pedidoId) : null;
-            if (pedidoId && navigationRef.isReady()) {
-              navigationRef.navigate("PedidoDetalle", { pedidoId, soloLectura: true });
+            const folio = data?.folio ? parseInt(data.folio) : null;
+            if (folio && navigationRef.isReady()) {
+              navigationRef.navigate("PedidoDetalle", { folio, soloLectura: true });
             }
             await AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
           }

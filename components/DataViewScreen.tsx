@@ -229,7 +229,7 @@ export default function DataViewScreen() {
           setData(pedidosService.getAllPedidos());
           break;
         case "pedidoDetalle":
-          setData(pedidosService.getAllDetalles());
+          setData([]);
           break;
         case "pedidoBitacora":
           setData(pedidosService.getAllBitacoras());
@@ -810,7 +810,7 @@ export default function DataViewScreen() {
       case "pedidos":
         return renderPedido({ item });
       case "pedidoDetalle":
-        return renderPedidoDetalle({ item });
+        return renderPedido({ item });
       case "pedidoBitacora":
         return renderPedidoBitacora({ item });
       case "catalogoEstatusPedido":

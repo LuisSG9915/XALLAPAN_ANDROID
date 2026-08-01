@@ -760,7 +760,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => {
     const esPedidoCentral = item.tipo === 99;
-    const pedidoId = esPedidoCentral ? item.idOriginal : null;
+    const folio = esPedidoCentral ? item.idOriginal : null;
 
     const card = (
       <View style={[styles.visitaCard, esPedidoCentral && styles.visitaCardPedidoCentral]}>
@@ -858,7 +858,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             {esPedidoCentral && (
               <TouchableOpacity
                 style={styles.botonVerPedido}
-                onPress={() => navigation.navigate("PedidoDetalle", { pedidoId, soloLectura: true })}
+                onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: true })}
                 activeOpacity={0.8}
               >
                 <Icon name="visibility" type="material" size={16} color="white" />
@@ -873,7 +873,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     return esPedidoCentral ? (
       <TouchableOpacity
         style={styles.visitaContainer}
-        onPress={() => navigation.navigate("PedidoDetalle", { pedidoId, soloLectura: true })}
+        onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: true })}
         activeOpacity={0.9}
       >
         {card}
