@@ -21,6 +21,7 @@ import {
   AppState,
   AppStateStatus,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Icon } from "react-native-elements";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
@@ -52,6 +53,8 @@ import BackgroundLocationService from "./services/BackgroundLocationService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
+import PedidoNotificacionService from "./services/PedidoNotificacionService";
+import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
@@ -174,6 +177,26 @@ function App() {
         await FullSyncService.initialize();
         console.log("[App] ✅ FullSyncService inicializado - Realm inyectado a servicios");
         setServicesReady(true);
+
+        // Inicializar servicio de notificaciones de pedidos
+        try {
+          const realm = (FullSyncService as any).realm;
+          PedidoNotificacionService.setRealm(realm);
+          await PedidoNotificacionService.inicializar();
+
+          // Si la app se abrió desde una notificación (background/killed), navegar al pedido
+          const pending = await AsyncStorage.getItem("@xallapan/pedido_pendiente_navegacion");
+          if (pending) {
+            const data = JSON.parse(pending);
+            const pedidoId = data?.pedidoId ? parseInt(data.pedidoId) : null;
+            if (pedidoId && navigationRef.isReady()) {
+              navigationRef.navigate("PedidoDetalle", { pedidoId, soloLectura: true });
+            }
+            await AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
+          }
+        } catch (notifError) {
+          console.error("[App] Error al inicializar notificaciones de pedidos:", notifError);
+        }
       } catch (error) {
         console.error("[App] ❌ Error al inicializar FullSyncService:", error);
       }
@@ -297,7 +320,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <Stack.Navigator
           initialRouteName="Login"
           screenOptions={({ route }) => ({
@@ -665,7 +688,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
       Alert.alert(
         "⚠️ No se puede cerrar la ruta",
-        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendiente(s) sin causa registrada:\n\n${listaPedidos}\n\nDebe atender estos pedidos o registrar una causa antes de cerrar la ruta.`,
+        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) sin atender:\n\n${listaPedidos}\n\nDebe atender los pedidos o registrar una causa antes de cerrar la ruta.`,
         [
           { text: "Entendido" },
           {

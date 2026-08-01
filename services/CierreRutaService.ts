@@ -1,7 +1,8 @@
 import Realm from "realm";
 import { allSchemas } from "./RealmSchemas";
 
-const ESTATUS_PEDIDO_SIN_CAUSA = 8;
+// Estados que ya consideran el pedido atendido/cerrado y NO bloquean el cierre
+const ESTATUS_PEDIDO_PERMITE_CIERRE = [2, 6, 7, 9];
 
 class CierreRutaService {
   private realm: Realm | null = null;
@@ -33,9 +34,18 @@ class CierreRutaService {
   validarPedidosPendientesSinCausa(ruta: number): { permitido: boolean; pedidosBloqueantes: any[] } {
     try {
       const realm = this.getRealm();
+      // Bloquea cualquier pedido que NO esté en un estado final/visitado:
+      // 2=ENTREGADO, 6=ENTREGADO PARCIAL, 7=PENDIENTE CON CAUSA, 9=CANCELADO
       const pedidos = realm
         .objects("Pedido")
-        .filtered("ruta = $0 AND estatus = $1", ruta, ESTATUS_PEDIDO_SIN_CAUSA);
+        .filtered(
+          "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3 AND estatus != $4",
+          ruta,
+          ESTATUS_PEDIDO_PERMITE_CIERRE[0],
+          ESTATUS_PEDIDO_PERMITE_CIERRE[1],
+          ESTATUS_PEDIDO_PERMITE_CIERRE[2],
+          ESTATUS_PEDIDO_PERMITE_CIERRE[3]
+        );
 
       const pedidosArray = Array.from(pedidos).map((p: any) => ({
         id: p.id,

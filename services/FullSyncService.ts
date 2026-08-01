@@ -26,8 +26,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 50,
+        schemaVersion: 51,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v51: Campos completos de snapshot en PedidoBitacora (id_movil, precio, observaciones, etc.)
+          if (oldRealm.schemaVersion < 51) {
+            console.log("[Migration v51] Ampliando esquema de PedidoBitacora para snapshot completo");
+          }
+
           // Migración v50: Nuevas tablas para módulo de Pedidos (Pedido, PedidoDetalle, PedidoBitacora, catálogos)
           if (oldRealm.schemaVersion < 50) {
             console.log("[Migration v50] Creando tablas de Pedidos y catálogos");
@@ -270,6 +275,14 @@ class FullSyncService {
       // Inyectar a RouteTrackingService
       const RouteTrackingService = (await import("./RouteTrackingService")).default;
       RouteTrackingService.setRealm(this.realm);
+
+      // Inyectar a PedidosService
+      const PedidosService = (await import("./PedidosService")).default;
+      PedidosService.getInstance().setRealm(this.realm);
+
+      // Inyectar a PedidoNotificacionService
+      const PedidoNotificacionService = (await import("./PedidoNotificacionService")).default;
+      PedidoNotificacionService.setRealm(this.realm);
 
       console.log("✅ Realm inyectado a todos los servicios");
     } catch (error) {

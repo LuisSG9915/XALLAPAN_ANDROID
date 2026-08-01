@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@microsoft/signalr": "^9.0.6",
+    "@notifee/react-native": "^9.1.8",
     "@react-native-async-storage/async-storage": "^1.21.0",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@react-native-community/datetimepicker": "^8.5.0",

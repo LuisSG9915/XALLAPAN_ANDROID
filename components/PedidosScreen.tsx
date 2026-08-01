@@ -72,12 +72,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
+      // Catálogos primero para que las descripciones de estatus se resuelvan correctamente
+      await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        await pedidosService.syncCatalogos();
         const pedidosData = pedidosService.getPedidosByRuta(currentRuta);
         setPedidos(pedidosData);
-        Alert.alert("Éxito", `Se sincronizaron ${result.count} pedidos`);
+        Alert.alert("Éxito", `Se sincronizaron ${result.count} pedidos (${result.detalles || 0} productos)`);
       } else {
         Alert.alert("Error", "No se pudieron sincronizar los pedidos");
       }
@@ -135,7 +136,8 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     if (
       pedido.estatus === ESTATUS_PEDIDO.ENTREGADO ||
       pedido.estatus === ESTATUS_PEDIDO.CANCELADO ||
-      pedido.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL
+      pedido.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
+      pedido.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
     ) {
       navigation.navigate("PedidoDetalle", { pedidoId: pedido.id, soloLectura: true });
     } else {

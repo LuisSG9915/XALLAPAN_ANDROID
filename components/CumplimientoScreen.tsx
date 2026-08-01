@@ -758,18 +758,21 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     }
   };
 
-  const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => (
-    <View style={styles.visitaContainer}>
-      <View style={styles.visitaCard}>
+  const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => {
+    const esPedidoCentral = item.tipo === 99;
+    const pedidoId = esPedidoCentral ? item.idOriginal : null;
+
+    const card = (
+      <View style={[styles.visitaCard, esPedidoCentral && styles.visitaCardPedidoCentral]}>
         <View style={styles.visitaHeader}>
           <View style={styles.visitaInfo}>
             <View style={styles.clienteRow}>
-              <View style={styles.clienteIcon}>
+              <View style={[styles.clienteIcon, esPedidoCentral && styles.clienteIconPedidoCentral]}>
                 <Icon
-                  name={item.visitado === 1 ? "check-circle" : "radio-button-unchecked"}
+                  name={esPedidoCentral ? "receipt" : item.visitado === 1 ? "check-circle" : "radio-button-unchecked"}
                   type="material"
                   size={20}
-                  color={item.visitado === 1 ? "#34C759" : "#007AFF"}
+                  color={esPedidoCentral ? "#FF9800" : item.visitado === 1 ? "#34C759" : "#007AFF"}
                 />
               </View>
               <View style={styles.clienteDetails}>
@@ -780,6 +783,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                     {item.domicilio}
                   </Text>
                 ) : null}
+                {esPedidoCentral && (
+                  <View style={styles.pedidoCentralBadge}>
+                    <Icon name="local_shipping" type="material" size={12} color="#fff" />
+                    <Text style={styles.pedidoCentralText}>Pedido de Central</Text>
+                  </View>
+                )}
               </View>
             </View>
             <View style={styles.horaRow}>
@@ -788,7 +797,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </View>
           </View>
           <View style={styles.botonesContainer}>
-            {usuarioPermisoReubicacion && (
+            {usuarioPermisoReubicacion && !esPedidoCentral && (
               <TouchableOpacity
                 style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
                 onPress={() => handleReubicarCliente({ id: item.idCliente, nombre: item.nombreCliente || "Cliente" })}
@@ -802,53 +811,77 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 <Text style={styles.reubicarBtnModalText}></Text>
               </TouchableOpacity>
             )}
-            {item.visitado === 0 && (
+            {!esPedidoCentral && item.visitado === 0 && (
               <TouchableOpacity style={styles.botonVentas} onPress={() => handleIrAVentas(item)} activeOpacity={0.8}>
                 <Icon name="shopping-cart" type="material" size={16} color="white" />
                 <Text style={styles.botonVentasTexto}>Ventas</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={[
-                styles.botonVisitado,
-                item.visitado === 1 ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
-                validandoUbicacion && styles.botonVisitadoDisabled,
-              ]}
-              onPress={() => handleMarcarVisitado(item.id)}
-              disabled={item.visitado === 1 || validandoUbicacion}
-              activeOpacity={0.8}
-            >
-              {validandoUbicacion ? (
-                <>
-                  <ActivityIndicator size="small" color="white" />
-                  <Text style={styles.botonVisitadoTexto}>
-                    {progresoValidacion ? `±${Math.round(progresoValidacion.accuracy)}m` : "GPS..."}
-                  </Text>
-                </>
-              ) : (
-                <>
-                  <Icon
-                    name={item.visitado === 1 ? "check" : "directions-walk"}
-                    type="material"
-                    size={16}
-                    color="white"
-                  />
-                  <Text
-                    style={[
-                      styles.botonVisitadoTexto,
-                      item.visitado === 1 ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
-                    ]}
-                  >
-                    {item.visitado === 1 ? "Completado" : "Visitar"}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {!esPedidoCentral && (
+              <TouchableOpacity
+                style={[
+                  styles.botonVisitado,
+                  item.visitado === 1 ? styles.botonVisitadoActivo : styles.botonVisitadoInactivo,
+                  validandoUbicacion && styles.botonVisitadoDisabled,
+                ]}
+                onPress={() => handleMarcarVisitado(item.id)}
+                disabled={item.visitado === 1 || validandoUbicacion}
+                activeOpacity={0.8}
+              >
+                {validandoUbicacion ? (
+                  <>
+                    <ActivityIndicator size="small" color="white" />
+                    <Text style={styles.botonVisitadoTexto}>
+                      {progresoValidacion ? `±${Math.round(progresoValidacion.accuracy)}m` : "GPS..."}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon
+                      name={item.visitado === 1 ? "check" : "directions-walk"}
+                      type="material"
+                      size={16}
+                      color="white"
+                    />
+                    <Text
+                      style={[
+                        styles.botonVisitadoTexto,
+                        item.visitado === 1 ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
+                      ]}
+                    >
+                      {item.visitado === 1 ? "Completado" : "Visitar"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+            {esPedidoCentral && (
+              <TouchableOpacity
+                style={styles.botonVerPedido}
+                onPress={() => navigation.navigate("PedidoDetalle", { pedidoId, soloLectura: true })}
+                activeOpacity={0.8}
+              >
+                <Icon name="visibility" type="material" size={16} color="white" />
+                <Text style={styles.botonVisitadoTexto}>Ver Pedido</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
-    </View>
-  );
+    );
+
+    return esPedidoCentral ? (
+      <TouchableOpacity
+        style={styles.visitaContainer}
+        onPress={() => navigation.navigate("PedidoDetalle", { pedidoId, soloLectura: true })}
+        activeOpacity={0.9}
+      >
+        {card}
+      </TouchableOpacity>
+    ) : (
+      <View style={styles.visitaContainer}>{card}</View>
+    );
+  };
 
   if (loading) {
     return (
@@ -1403,6 +1436,10 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     overflow: "hidden",
   },
+  visitaCardPedidoCentral: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#FF9800",
+  },
   visitaHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1462,6 +1499,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
+  },
+  clienteIconPedidoCentral: {
+    backgroundColor: "#FFF3E0",
+  },
+  pedidoCentralBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#FF9800",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 4,
+    gap: 4,
+  },
+  pedidoCentralText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  botonVerPedido: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: "#FF9800",
+    minWidth: 80,
+    justifyContent: "center",
   },
   clienteDetails: {
     flex: 1,

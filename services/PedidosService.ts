@@ -1,6 +1,7 @@
 import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import AuthService from "./AuthService";
+import PedidoNotificacionService from "./PedidoNotificacionService";
 
 export interface Pedido {
   id: number;
@@ -51,20 +52,30 @@ export interface PedidoDetalle {
 export interface PedidoBitacora {
   id: string;
   idPedido: number;
+  id_movil?: number;
   folio: number;
   fecha: Date;
   ruta: number;
   cliente: number;
+  idCanal?: number;
   idVendedor: number;
   idProducto?: number;
+  cantPedido?: number;
+  precio?: number;
+  observaciones?: string;
+  listaPrecio?: number;
+  fechaEntrega?: Date;
   estatus: number;
   estatusAnterior?: number;
-  cantPedido?: number;
   cantAtencion?: number;
+  precioAtencion?: number;
   causaDiferencia?: number;
   obserDiferencia?: string;
   causaNoAtencion?: number;
   obserNoAtencion?: string;
+  usrAlta?: number;
+  fueraAgenda?: boolean;
+  no_venta?: number;
   tipoCambio?: string;
   enviado: boolean;
 }
@@ -82,10 +93,19 @@ export const ESTATUS_PEDIDO = {
   EN_CAPTURA: 10,
 };
 
+// Estados en los que el pedido ya fue atendido/cerrado y no admite modificación
+const ESTADOS_FINALES = [
+  ESTATUS_PEDIDO.ENTREGADO,
+  ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+  ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+  ESTATUS_PEDIDO.CANCELADO,
+];
+
 class PedidosService {
   private static instance: PedidosService;
   private realm: Realm | null = null;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
+  private static idMovilCounter = 0;
 
   private constructor() {}
 
@@ -108,7 +128,15 @@ class PedidosService {
     return this.realm;
   }
 
-  async syncPedidos(ruta: number): Promise<{ success: boolean; count: number }> {
+  private getNextIdMovil(): number {
+    return ++PedidosService.idMovilCounter;
+  }
+
+  private puedeModificar(estatus: number): boolean {
+    return !ESTADOS_FINALES.includes(estatus);
+  }
+
+  async syncPedidos(ruta: number): Promise<{ success: boolean; count: number; detalles?: number }> {
     try {
       const endpoint = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesPedidosFull/${ruta}`;
       const response = await fetchWithTimeout(endpoint);
@@ -117,53 +145,139 @@ class PedidosService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const pedidosData = await response.json();
+      const rows = await response.json();
 
-      if (!Array.isArray(pedidosData)) {
+      if (!Array.isArray(rows)) {
         throw new Error("La respuesta no es un array de pedidos");
       }
 
       const realm = this.getRealm();
-      let nuevos = 0;
+
+      // Agrupar renglones por folio: cada renglón es un producto
+      const pedidosMap = new Map<number, any[]>();
+      rows.forEach((row: any) => {
+        if (!pedidosMap.has(row.folio)) {
+          pedidosMap.set(row.folio, []);
+        }
+        pedidosMap.get(row.folio)!.push(row);
+      });
+
+      let nuevosPedidos = 0;
+      let nuevosDetalles = 0;
+      const foliosNuevos: number[] = [];
 
       realm.write(() => {
-        pedidosData.forEach((pedido: any) => {
-          const cliente = this.getClienteById(pedido.cliente);
+        pedidosMap.forEach((renglones, folio) => {
+          const primero = renglones[0];
+          const pedidoExistente = realm.objectForPrimaryKey("Pedido", folio) as any;
+
+          const conservarLocal = pedidoExistente?.modificadoLocal === true;
+          const estatusFinal = conservarLocal ? pedidoExistente.estatus : primero.estatus;
+          const fechaAtencionFinal = conservarLocal ? pedidoExistente.fechaAtencion : null;
+          const causaNoAtencionFinal = conservarLocal ? pedidoExistente.causaNoAtencion : null;
+          const obserNoAtencionFinal = conservarLocal ? pedidoExistente.obserNoAtencion : null;
+
+          const numeroProductos = renglones.length;
+          const cantPedidoTotal = renglones.reduce(
+            (sum: number, r: any) => sum + (parseFloat(r.cantPedido) || 0),
+            0
+          );
+
+          const cliente = this.getClienteById(primero.cliente);
 
           realm.create(
             "Pedido",
             {
-              id: pedido.folio,
-              folio: pedido.folio,
-              fecha: pedido.fecha ? new Date(pedido.fecha) : null,
-              ruta: pedido.ruta,
-              cliente: pedido.cliente,
-              clienteNombre: cliente?.nombre || `Cliente #${pedido.cliente}`,
+              id: folio,
+              folio,
+              fecha: primero.fecha ? new Date(primero.fecha) : null,
+              ruta: primero.ruta,
+              cliente: primero.cliente,
+              clienteNombre: cliente?.nombre || `Cliente #${primero.cliente}`,
               clienteDomicilio: cliente?.domicilio || "",
               idCanal: null,
-              fechaAtencion: null,
-              idVendedor: pedido.idVendedor,
-              numeroProductos: pedido.numeroProductos,
-              cantPedido: pedido.cantPedido,
-              listaPrecio: pedido.listaPrecio,
-              fechaEntrega: pedido.fechaEntrega ? new Date(pedido.fechaEntrega) : null,
-              estatus: pedido.estatus,
-              estatusDescripcion: this.getEstatusDescripcion(pedido.estatus),
-              fueraAgenda: pedido.fueraAgenda,
-              observaciones: pedido.observaciones,
-              no_venta: pedido.noVenta,
-              tieneDiferencia: false,
+              fechaAtencion: fechaAtencionFinal,
+              idVendedor: primero.idVendedor,
+              numeroProductos,
+              cantPedido: cantPedidoTotal,
+              listaPrecio: primero.listaPrecio,
+              fechaEntrega: primero.fechaEntrega ? new Date(primero.fechaEntrega) : null,
+              estatus: estatusFinal,
+              estatusDescripcion: this.getEstatusDescripcion(estatusFinal),
+              fueraAgenda: primero.fueraAgenda,
+              observaciones: primero.observaciones,
+              no_venta: primero.noVenta,
+              tieneDiferencia: pedidoExistente?.tieneDiferencia ?? false,
+              causaNoAtencion: causaNoAtencionFinal,
+              obserNoAtencion: obserNoAtencionFinal,
               syncedAt: new Date(),
-              modificadoLocal: false,
+              modificadoLocal: pedidoExistente?.modificadoLocal ?? false,
             },
-            Realm.UpdateMode.Modified,
+            Realm.UpdateMode.Modified
           );
-          nuevos++;
+
+          if (!pedidoExistente) {
+            nuevosPedidos++;
+            foliosNuevos.push(folio);
+          }
+
+          // Crear/actualizar productos del pedido
+          renglones.forEach((renglon: any) => {
+            const idProducto = renglon.idProducto;
+            const idDetalle = `${folio}-${idProducto}`;
+            const detalleExistente = realm.objectForPrimaryKey("PedidoDetalle", idDetalle) as any;
+
+            const producto = this.getProductoById(idProducto);
+            const productoNombre = producto?.descripcion || `Producto #${idProducto}`;
+
+            const cantPedido = parseFloat(renglon.cantPedido) || 0;
+            const cantAtencionFinal = detalleExistente?.cantAtencion ?? null;
+            const tieneDiferencia =
+              cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal < cantPedido;
+
+            realm.create(
+              "PedidoDetalle",
+              {
+                id: idDetalle,
+                idPedido: folio,
+                idProducto,
+                productoNombre,
+                cantPedido,
+                cantAtencion: cantAtencionFinal,
+                precio: renglon.precio ?? null,
+                precioAtencion: detalleExistente?.precioAtencion ?? null,
+                causaDiferencia: detalleExistente?.causaDiferencia ?? null,
+                causaDiferenciaDesc: detalleExistente?.causaDiferencia
+                  ? this.getCausaDiferenciaDescripcion(detalleExistente.causaDiferencia)
+                  : null,
+                obserDiferencia: detalleExistente?.obserDiferencia ?? null,
+                tieneDiferencia,
+                atendido: cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal > 0,
+                modificadoLocal: detalleExistente?.modificadoLocal ?? false,
+              },
+              Realm.UpdateMode.Modified
+            );
+
+            if (!detalleExistente) {
+              nuevosDetalles++;
+            }
+          });
         });
       });
 
-      console.log(`[PedidosService] Sincronizados ${nuevos} pedidos para ruta ${ruta}`);
-      return { success: true, count: nuevos };
+      console.log(
+        `[PedidosService] Sincronizados ${nuevosPedidos} pedidos nuevos y ${nuevosDetalles} detalles nuevos para ruta ${ruta}`
+      );
+
+      // Notificar pedidos nuevos y registrar en agenda
+      try {
+        PedidoNotificacionService.setRealm(realm);
+        await PedidoNotificacionService.procesarPedidosSincronizados(foliosNuevos);
+      } catch (notifError) {
+        console.warn("[PedidosService] Error al notificar pedidos nuevos:", notifError);
+      }
+
+      return { success: true, count: nuevosPedidos, detalles: nuevosDetalles };
     } catch (error) {
       console.error("[PedidosService] Error al sincronizar pedidos:", error);
       return { success: false, count: 0 };
@@ -184,11 +298,7 @@ class PedidosService {
         const estatusData = await estatusRes.json();
         realm.write(() => {
           estatusData.forEach((item: any) => {
-            realm.create(
-              "CatalogoEstatusPedido",
-              { id: item.id, descripcion: item.descripcion },
-              Realm.UpdateMode.Modified,
-            );
+            realm.create("CatalogoEstatusPedido", { id: item.id, descripcion: item.descripcion }, Realm.UpdateMode.Modified);
           });
         });
       }
@@ -200,7 +310,7 @@ class PedidosService {
             realm.create(
               "CatalogoCausaDiferencia",
               { id: item.id, descripcion: item.descripcion },
-              Realm.UpdateMode.Modified,
+              Realm.UpdateMode.Modified
             );
           });
         });
@@ -213,7 +323,7 @@ class PedidosService {
             realm.create(
               "CatalogoCausaNoAtencion",
               { id: item.id, descripcion: item.descripcion },
-              Realm.UpdateMode.Modified,
+              Realm.UpdateMode.Modified
             );
           });
         });
@@ -236,11 +346,12 @@ class PedidosService {
     const pedidos = realm
       .objects("Pedido")
       .filtered(
-        "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3",
+        "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3 AND estatus != $4",
         ruta,
         ESTATUS_PEDIDO.ENTREGADO,
         ESTATUS_PEDIDO.CANCELADO,
         ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+        ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
       );
     return Array.from(pedidos) as unknown as Pedido[];
   }
@@ -255,7 +366,14 @@ class PedidosService {
     const realm = this.getRealm();
     const pedidos = realm
       .objects("Pedido")
-      .filtered("ruta = $0 AND estatus = $1", ruta, ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA);
+      .filtered(
+        "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3 AND estatus != $4",
+        ruta,
+        ESTATUS_PEDIDO.ENTREGADO,
+        ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+        ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+        ESTATUS_PEDIDO.CANCELADO
+      );
     return Array.from(pedidos) as unknown as Pedido[];
   }
 
@@ -267,7 +385,16 @@ class PedidosService {
     };
   }
 
-  cambiarEstatusPedido(idPedido: number, nuevoEstatus: number, causaNoAtencion?: number, obserNoAtencion?: string): boolean {
+  iniciarAtencionPedido(idPedido: number): boolean {
+    return this.cambiarEstatusPedido(idPedido, ESTATUS_PEDIDO.EN_ATENCION);
+  }
+
+  cambiarEstatusPedido(
+    idPedido: number,
+    nuevoEstatus: number,
+    causaNoAtencion?: number,
+    obserNoAtencion?: string
+  ): boolean {
     try {
       const realm = this.getRealm();
       const pedido = realm.objectForPrimaryKey("Pedido", idPedido) as any;
@@ -277,38 +404,44 @@ class PedidosService {
         return false;
       }
 
-      if (
-        pedido.estatus === ESTATUS_PEDIDO.ENTREGADO ||
-        pedido.estatus === ESTATUS_PEDIDO.CANCELADO ||
-        pedido.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
-        pedido.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
-      ) {
+      if (!this.puedeModificar(pedido.estatus)) {
         console.error("[PedidosService] No se puede modificar pedido con estatus:", pedido.estatus);
         return false;
       }
 
       const estatusAnterior = pedido.estatus;
+      const ahora = new Date();
 
       realm.write(() => {
         pedido.estatus = nuevoEstatus;
         pedido.estatusDescripcion = this.getEstatusDescripcion(nuevoEstatus);
         pedido.modificadoLocal = true;
-        pedido.syncedAt = new Date();
+        pedido.syncedAt = ahora;
+
+        // Registrar fecha de atención cuando el pedido pasa a un estado de atención/cierre
+        if (
+          nuevoEstatus === ESTATUS_PEDIDO.EN_ATENCION ||
+          nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ||
+          nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
+          nuevoEstatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
+        ) {
+          pedido.fechaAtencion = pedido.fechaAtencion || ahora;
+        }
 
         if (causaNoAtencion) {
           pedido.causaNoAtencion = causaNoAtencion;
           pedido.obserNoAtencion = obserNoAtencion || "";
         }
+
+        // Recalcular bandera de diferencia a nivel pedido
+        this.recalcularTieneDiferencia(pedido);
       });
 
-      this.registrarBitacora({
+      // Registrar bitácora con snapshot completo del renglón (uno por producto)
+      this.registrarBitacoraEstado({
         idPedido,
-        folio: pedido.folio,
-        ruta: pedido.ruta,
-        cliente: pedido.cliente,
-        idVendedor: pedido.idVendedor,
-        estatus: nuevoEstatus,
         estatusAnterior,
+        estatus: nuevoEstatus,
         tipoCambio: "estatus",
         causaNoAtencion,
         obserNoAtencion,
@@ -333,30 +466,26 @@ class PedidosService {
         return false;
       }
 
-      const cantPedidoAnterior = detalle.cantAtencion;
-      const tieneDiferencia = cantAtencion < detalle.cantPedido;
+      const pedido = realm.objectForPrimaryKey("Pedido", idPedido) as any;
+      if (!pedido || !this.puedeModificar(pedido.estatus)) {
+        console.error("[PedidosService] No se puede modificar cantidad del pedido:", pedido?.estatus);
+        return false;
+      }
+
+      const cantAtencionFinal = cantAtencion;
+      const tieneDiferencia = cantAtencionFinal < detalle.cantPedido;
 
       realm.write(() => {
-        detalle.cantAtencion = cantAtencion;
+        detalle.cantAtencion = cantAtencionFinal;
         detalle.tieneDiferencia = tieneDiferencia;
-        detalle.atendido = cantAtencion > 0;
+        detalle.atendido = cantAtencionFinal > 0;
         detalle.modificadoLocal = true;
+
+        // Recalcular bandera a nivel pedido
+        this.recalcularTieneDiferencia(pedido);
       });
 
-      this.registrarBitacora({
-        idPedido,
-        folio: this.getPedidoById(idPedido)?.folio || 0,
-        ruta: this.getPedidoById(idPedido)?.ruta || 0,
-        cliente: this.getPedidoById(idPedido)?.cliente || 0,
-        idVendedor: this.getPedidoById(idPedido)?.idVendedor || 0,
-        idProducto,
-        estatus: this.getPedidoById(idPedido)?.estatus || 0,
-        cantPedido: detalle.cantPedido,
-        cantAtencion,
-        tipoCambio: "cantidad",
-      });
-
-      console.log(`[PedidosService] Cantidad actualizada: ${cantPedidoAnterior} -> ${cantAtencion}`);
+      console.log(`[PedidosService] Cantidad actualizada: ${idProducto} -> ${cantAtencionFinal}`);
       return true;
     } catch (error) {
       console.error("[PedidosService] Error al actualizar cantidad:", error);
@@ -364,7 +493,12 @@ class PedidosService {
     }
   }
 
-  registrarCausaDiferencia(idPedido: number, idProducto: number, causaDiferencia: number, obserDiferencia?: string): boolean {
+  registrarCausaDiferencia(
+    idPedido: number,
+    idProducto: number,
+    causaDiferencia: number,
+    obserDiferencia?: string
+  ): boolean {
     try {
       const realm = this.getRealm();
       const idDetalle = `${idPedido}-${idProducto}`;
@@ -372,6 +506,12 @@ class PedidosService {
 
       if (!detalle) {
         console.error("[PedidosService] Detalle no encontrado:", idDetalle);
+        return false;
+      }
+
+      const pedido = realm.objectForPrimaryKey("Pedido", idPedido) as any;
+      if (!pedido || !this.puedeModificar(pedido.estatus)) {
+        console.error("[PedidosService] No se puede registrar causa del pedido:", pedido?.estatus);
         return false;
       }
 
@@ -384,20 +524,7 @@ class PedidosService {
         detalle.modificadoLocal = true;
       });
 
-      this.registrarBitacora({
-        idPedido,
-        folio: this.getPedidoById(idPedido)?.folio || 0,
-        ruta: this.getPedidoById(idPedido)?.ruta || 0,
-        cliente: this.getPedidoById(idPedido)?.cliente || 0,
-        idVendedor: this.getPedidoById(idPedido)?.idVendedor || 0,
-        idProducto,
-        estatus: this.getPedidoById(idPedido)?.estatus || 0,
-        causaDiferencia,
-        obserDiferencia,
-        tipoCambio: "causa",
-      });
-
-      console.log(`[PedidosService] Causa diferencia registrada: ${causaDiferencia}`);
+      console.log(`[PedidosService] Causa diferencia registrada: ${idProducto} -> ${causaDiferencia}`);
       return true;
     } catch (error) {
       console.error("[PedidosService] Error al registrar causa:", error);
@@ -453,36 +580,76 @@ class PedidosService {
     return Array.from(bitacoras) as unknown as PedidoBitacora[];
   }
 
-  private registrarBitacora(data: Partial<PedidoBitacora>): void {
-    const realm = this.getRealm();
-    const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  private recalcularTieneDiferencia(pedido: any): void {
+    const detalles = this.getRealm().objects("PedidoDetalle").filtered("idPedido = $0", pedido.id);
+    const tieneDiferencia = Array.from(detalles).some((d: any) => d.tieneDiferencia === true);
+    pedido.tieneDiferencia = tieneDiferencia;
+  }
 
-    realm.write(() => {
-      realm.create(
-        "PedidoBitacora",
-        {
-          id,
-          idPedido: data.idPedido,
-          folio: data.folio,
-          fecha: new Date(),
-          ruta: data.ruta,
-          cliente: data.cliente,
-          idVendedor: data.idVendedor,
-          idProducto: data.idProducto,
-          estatus: data.estatus,
-          estatusAnterior: data.estatusAnterior,
-          cantPedido: data.cantPedido,
-          cantAtencion: data.cantAtencion,
-          causaDiferencia: data.causaDiferencia,
-          obserDiferencia: data.obserDiferencia,
-          causaNoAtencion: data.causaNoAtencion,
-          obserNoAtencion: data.obserNoAtencion,
-          tipoCambio: data.tipoCambio,
-          enviado: false,
-        },
-        Realm.UpdateMode.Modified,
-      );
-    });
+  private registrarBitacoraEstado(data: {
+    idPedido: number;
+    estatusAnterior: number;
+    estatus: number;
+    tipoCambio: string;
+    causaNoAtencion?: number;
+    obserNoAtencion?: string;
+  }): void {
+    try {
+      const realm = this.getRealm();
+      const pedido = realm.objectForPrimaryKey("Pedido", data.idPedido) as any;
+      if (!pedido) return;
+
+      const detalles = this.getDetallePedido(data.idPedido);
+      const ahora = new Date();
+
+      realm.write(() => {
+        // Si no hay detalles, registrar una bitácora de cabecera
+        const registros = detalles.length > 0 ? detalles : [null];
+
+        registros.forEach((detalle, index) => {
+          const idMovil = this.getNextIdMovil();
+          // Usar timestamp + índice para evitar colisiones locales
+          const idLocal = `${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`;
+
+          realm.create(
+            "PedidoBitacora",
+            {
+              id: idLocal,
+              idPedido: data.idPedido,
+              id_movil: idMovil,
+              folio: pedido.folio,
+              fecha: ahora,
+              ruta: pedido.ruta,
+              cliente: pedido.cliente,
+              idCanal: pedido.idCanal ?? null,
+              idVendedor: pedido.idVendedor,
+              idProducto: detalle?.idProducto ?? null,
+              cantPedido: detalle?.cantPedido ?? null,
+              precio: detalle?.precio ?? null,
+              observaciones: pedido.observaciones ?? null,
+              listaPrecio: pedido.listaPrecio ?? null,
+              fechaEntrega: pedido.fechaEntrega ?? null,
+              estatus: data.estatus,
+              estatusAnterior: data.estatusAnterior,
+              cantAtencion: detalle?.cantAtencion ?? null,
+              precioAtencion: detalle?.precioAtencion ?? null,
+              causaDiferencia: detalle?.causaDiferencia ?? null,
+              obserDiferencia: detalle?.obserDiferencia ?? null,
+              causaNoAtencion: data.causaNoAtencion ?? null,
+              obserNoAtencion: data.obserNoAtencion ?? null,
+              usrAlta: pedido.idVendedor ?? null,
+              fueraAgenda: pedido.fueraAgenda ?? null,
+              no_venta: pedido.no_venta ?? null,
+              tipoCambio: data.tipoCambio,
+              enviado: false,
+            },
+            Realm.UpdateMode.Modified
+          );
+        });
+      });
+    } catch (error) {
+      console.error("[PedidosService] Error al registrar bitácora de estado:", error);
+    }
   }
 
   private getClienteById(idCliente: number): any {
@@ -490,6 +657,16 @@ class PedidosService {
       const realm = this.getRealm();
       const cliente = realm.objectForPrimaryKey("ClienteFull", idCliente);
       return cliente;
+    } catch {
+      return null;
+    }
+  }
+
+  private getProductoById(idProducto: number): any {
+    try {
+      const realm = this.getRealm();
+      const producto = realm.objectForPrimaryKey("Producto", idProducto);
+      return producto;
     } catch {
       return null;
     }

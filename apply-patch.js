@@ -169,4 +169,37 @@ if (fs.existsSync(bluetoothJavaFile)) {
   }
 }
 
+const codegenFile = path.join(__dirname, 'node_modules', '@react-native', 'codegen', 'lib', 'cli', 'combine', 'combine-js-to-schema.js');
+if (fs.existsSync(codegenFile)) {
+  let codegenSrc = fs.readFileSync(codegenFile, 'utf8');
+  if (codegenSrc.includes('mkdirpSync(outDir)')) {
+    console.log('El parche de codegen ya está aplicado.');
+  } else {
+    const mkdirpPatch = `const mkdirpSync = (dir) => {
+    const parent = path.dirname(dir);
+    if (parent !== dir && !fs.existsSync(parent)) {
+      mkdirpSync(parent);
+    }
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+  };
+  mkdirpSync(outDir);`;
+
+    if (codegenSrc.includes('fs.mkdirSync(outDir, { recursive: true })')) {
+      codegenSrc = codegenSrc.replace(
+        'fs.mkdirSync(outDir, { recursive: true });',
+        mkdirpPatch
+      );
+    } else {
+      codegenSrc = codegenSrc.replace(
+        "const formattedSchema = JSON.stringify(combined);\n  fs.writeFileSync(outfile, formattedSchema);",
+        `const formattedSchema = JSON.stringify(combined);\n  const outDir = path.dirname(outfile);\n  ${mkdirpPatch}\n  fs.writeFileSync(outfile, formattedSchema);`
+      );
+    }
+    fs.writeFileSync(codegenFile, codegenSrc, 'utf8');
+    console.log('Parche de codegen aplicado correctamente en', codegenFile);
+  }
+}
+
 console.log('postinstall completado.');
