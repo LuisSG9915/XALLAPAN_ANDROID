@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { navigate } from "./navigationRef";
 import PedidosService, { Pedido, ESTATUS_PEDIDO } from "./PedidosService";
 import AuthService from "./AuthService";
+import FullSyncService from "./FullSyncService";
 
 const CHANNEL_ID = "pedidos-central";
 
@@ -159,6 +160,15 @@ class PedidoNotificacionService {
       }
       const result = pedidosService.iniciarAtencionPedido(folio);
       console.log(`[PedidoNotificacionService] Iniciar atencion folio ${folio}: ${result}`);
+
+      // Enviar arrastre de bitacoras pendientes al tocar la notificacion
+      AuthService.restoreSession().then((user) => {
+        if (!user) return;
+        const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
+        FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
+          .then((r) => console.log(`[PedidoNotificacionService] Arrastre bitacora pedidos folio ${folio}:`, r))
+          .catch((e) => console.warn("[PedidoNotificacionService] Error arrastre bitacora pedidos:", e));
+      }).catch((e) => console.warn("[PedidoNotificacionService] Error obteniendo sesion:", e));
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al iniciar atencion:", error);
     }

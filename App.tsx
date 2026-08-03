@@ -197,6 +197,14 @@ function App() {
                 pedidosService.iniciarAtencionPedido(folio);
                 navigationRef.navigate("PedidoDetalle", { folio, soloLectura: false });
                 AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
+
+                AuthService.restoreSession().then((user) => {
+                  if (!user) return;
+                  const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
+                  FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
+                    .then((r) => console.log(`[App] Arrastre bitacora pedidos folio ${folio}:`, r))
+                    .catch((e) => console.warn("[App] Error arrastre bitacora pedidos:", e));
+                }).catch((e) => console.warn("[App] Error obteniendo sesion:", e));
               };
 
               if (navigationRef.isReady()) {

@@ -14,6 +14,7 @@ import {
 import { Icon } from "react-native-elements";
 import PedidosService, { Pedido, ESTATUS_PEDIDO } from "../services/PedidosService";
 import FullSyncService from "../services/FullSyncService";
+import AuthService from "../services/AuthService";
 import LocationService from "../services/LocationService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
@@ -287,6 +288,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           const result = pedidosService.finalizarPedido(folio, nuevoEstatus);
 
           if (result.success) {
+            AuthService.restoreSession().then((user) => {
+              if (!user) return;
+              const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
+              FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
+                .then((r) => console.log(`[PedidoDetalle] Arrastre bitacora pedidos confirmar entrega folio ${folio}:`, r))
+                .catch((e) => console.warn("[PedidoDetalle] Error arrastre bitacora pedidos:", e));
+            }).catch((e) => console.warn("[PedidoDetalle] Error obteniendo sesion:", e));
+
             Alert.alert("Éxito", nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada", [
               { text: "OK", onPress: () => navigation.goBack() },
             ]);
