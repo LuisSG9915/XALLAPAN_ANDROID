@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -48,9 +48,28 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const [causaNoAtencionSel, setCausaNoAtencionSel] = useState<number | null>(null);
   const [observacionNoAtencion, setObservacionNoAtencion] = useState("");
 
+  const salidaControlada = useRef(false);
+
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", () => {
+      if (salidaControlada.current) return;
+      const pedidosService = PedidosService.getInstance();
+      pedidosService.setRealm((FullSyncService as any).realm);
+      const pedidoActual = pedidosService.getPedidoByFolio(folio);
+      if (
+        pedidoActual &&
+        (pedidoActual.estatus === ESTATUS_PEDIDO.EN_ATENCION ||
+          pedidoActual.estatus === ESTATUS_PEDIDO.EN_CAPTURA)
+      ) {
+        pedidosService.cambiarEstatusPedido(folio, ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, folio]);
 
   const cargarDatos = async () => {
     setLoading(true);
@@ -235,7 +254,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     if (result.success) {
       setModalNoAtencionVisible(false);
       Alert.alert("Éxito", "Pedido marcado como pendiente con causa", [
-        { text: "OK", onPress: () => navigation.goBack() },
+        { text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } },
       ]);
     } else {
       Alert.alert("Error", "No se pudo actualizar el pedido");
@@ -297,7 +316,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             }).catch((e) => console.warn("[PedidoDetalle] Error obteniendo sesion:", e));
 
             Alert.alert("Éxito", nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada", [
-              { text: "OK", onPress: () => navigation.goBack() },
+              { text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } },
             ]);
           } else {
             Alert.alert("Error", "No se pudo confirmar la entrega");
@@ -327,6 +346,27 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     return { totalSolicitado, totalEntregado, conDiferencia, importeSolicitado, importeEntregado };
   };
 
+  const asegurarEnCaptura = () => {
+    const pedidosService = PedidosService.getInstance();
+    pedidosService.setRealm((FullSyncService as any).realm);
+    const pedidoActual = pedidosService.getPedidoByFolio(folio);
+    if (pedidoActual && pedidoActual.estatus === ESTATUS_PEDIDO.EN_ATENCION) {
+      const success = pedidosService.cambiarEstatusPedido(folio, ESTATUS_PEDIDO.EN_CAPTURA);
+      if (success) {
+        const pedidoActualizado = pedidosService.getPedidoByFolio(folio);
+        if (pedidoActualizado) setPedido(pedidoActualizado);
+
+        AuthService.restoreSession().then((user) => {
+          if (!user) return;
+          const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
+          FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
+            .then((r) => console.log(`[PedidoDetalle] Arrastre bitacora pedidos EN_CAPTURA folio ${folio}:`, r))
+            .catch((e) => console.warn("[PedidoDetalle] Error arrastre bitacora pedidos EN_CAPTURA:", e));
+        }).catch((e) => console.warn("[PedidoDetalle] Error obteniendo sesion EN_CAPTURA:", e));
+      }
+    }
+  };
+
   const actualizarCantidadLocal = (idProducto: number, cantidad: number) => {
     const pedidosService = PedidosService.getInstance();
     pedidosService.setRealm((FullSyncService as any).realm);
@@ -334,6 +374,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     if (success) {
       const productosActualizados = pedidosService.getProductosByFolio(folio);
       setProductos(productosActualizados);
+      asegurarEnCaptura();
     }
   };
 
@@ -477,9 +518,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   }
 
   const resumen = calcularResumen();
-  const pedidoEnAtencion = pedido.estatus === ESTATUS_PEDIDO.EN_ATENCION;
-  const puedeEditar = !soloLectura && (gpsValidado || pedidoEnAtencion);
-  const puedeConfirmar = !soloLectura && (gpsValidado || pedidoEnAtencion);
+  const pedidoEnProceso = pedido.estatus === ESTATUS_PEDIDO.EN_ATENCION || pedido.estatus === ESTATUS_PEDIDO.EN_CAPTURA;
+  const puedeEditar = !soloLectura && (gpsValidado || pedidoEnProceso);
+  const puedeConfirmar = !soloLectura && (gpsValidado || pedidoEnProceso);
 
   return (
     <View style={styles.container}>
@@ -531,7 +572,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           )}
         </View>
 
-        {!soloLectura && !gpsValidado && pedido.estatus !== ESTATUS_PEDIDO.EN_ATENCION && (
+        {!soloLectura && !gpsValidado && !pedidoEnProceso && (
           <View style={styles.botonesRow}>
             <TouchableOpacity style={[styles.gpsBtn, styles.btnMitad]} onPress={validarGPS} disabled={validandoGPS}>
               {validandoGPS ? (
