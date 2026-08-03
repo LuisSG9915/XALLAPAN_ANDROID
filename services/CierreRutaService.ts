@@ -2,7 +2,8 @@ import Realm from "realm";
 import { allSchemas } from "./RealmSchemas";
 
 // Estados que ya consideran el pedido atendido/cerrado y NO bloquean el cierre
-const ESTATUS_PEDIDO_PERMITE_CIERRE = [2, 6, 7, 9];
+// 2=ENTREGADO, 6=ENTREGADO PARCIAL, 9=CANCELADO
+const ESTATUS_PEDIDO_PERMITE_CIERRE = [2, 6, 9];
 
 class CierreRutaService {
   private realm: Realm | null = null;

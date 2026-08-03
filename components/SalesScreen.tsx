@@ -2841,10 +2841,14 @@ export default function SalesScreen({ route }: { route?: any }) {
         ticketImpreso,
       });
 
-      // Disparar sincronización parcial (incremental) tras venta exitosa.
-      // Si ya hay una sync corriendo, BackgroundSyncService la cancela y reinicia.
+      // Disparar sincronización post-venta (solo envía arrastre de venta, envases y bitácoras).
       // No usar await para no bloquear la UI.
-      BackgroundSyncService.triggerPartialSync("venta-finalizada").catch((err) => {
+      const sucursalPost =
+        (currentUser?.sucursal_origen as number | null | undefined) ??
+        (currentUser?.sucursal as number | null | undefined) ??
+        1;
+      const idUsuarioPost = Number(currentUser?.id ?? 1);
+      FullSyncService.syncPostVenta(sucursalPost, idUsuarioPost).catch((err) => {
         console.warn("[Sales] No se pudo iniciar sincronización post-venta:", err);
       });
     } catch (error) {

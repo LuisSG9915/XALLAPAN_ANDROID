@@ -54,6 +54,7 @@ import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
 import PedidoNotificacionService from "./services/PedidoNotificacionService";
+import PedidosService from "./services/PedidosService";
 import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
@@ -189,10 +190,29 @@ function App() {
           if (pending) {
             const data = JSON.parse(pending);
             const folio = data?.folio ? parseInt(data.folio) : null;
-            if (folio && navigationRef.isReady()) {
-              navigationRef.navigate("PedidoDetalle", { folio, soloLectura: true });
+            if (folio) {
+              const navegarAPedido = () => {
+                const pedidosService = PedidosService.getInstance();
+                pedidosService.setRealm(realm);
+                pedidosService.iniciarAtencionPedido(folio);
+                navigationRef.navigate("PedidoDetalle", { folio, soloLectura: false });
+                AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
+              };
+
+              if (navigationRef.isReady()) {
+                navegarAPedido();
+              } else {
+                const timer = setInterval(() => {
+                  if (navigationRef.isReady()) {
+                    clearInterval(timer);
+                    navegarAPedido();
+                  }
+                }, 200);
+                setTimeout(() => clearInterval(timer), 5000);
+              }
+            } else {
+              await AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
             }
-            await AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
           }
         } catch (notifError) {
           console.error("[App] Error al inicializar notificaciones de pedidos:", notifError);
@@ -675,6 +695,11 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     if (!currentUser) return;
 
+    if (!FullSyncService.isServiceInitialized()) {
+      await FullSyncService.initialize();
+    }
+    CierreRutaService.setRealm((FullSyncService as any).realm);
+
     const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
     const vendedor = currentUser.id || 0;
     const ruta = currentUser.ruta ? parseInt(currentUser.ruta) : 0;
@@ -688,7 +713,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
       Alert.alert(
         "⚠️ No se puede cerrar la ruta",
-        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) sin atender:\n\n${listaPedidos}\n\nDebe atender los pedidos o registrar una causa antes de cerrar la ruta.`,
+        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendientes:\n\n${listaPedidos}\n\nDebe atender todos los pedidos antes de cerrar la ruta.`,
         [
           { text: "Entendido" },
           {

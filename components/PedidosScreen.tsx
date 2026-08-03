@@ -20,6 +20,7 @@ interface PedidoAgrupado extends Pedido {
 }
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService";
+import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
 export default function PedidosScreen({ navigation }: { navigation: any }) {
@@ -29,6 +30,18 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filtroEstatus, setFiltroEstatus] = useState<number | null>(null);
   const [currentRuta, setCurrentRuta] = useState<number>(0);
+  const [ubicacion, setUbicacion] = useState<LocationCoordinates | null>(null);
+
+  const buscarClienteEnRealm = (idCliente: number): any => {
+    const realm = (FullSyncService as any).realm;
+    if (!realm) return null;
+    let cliente = realm.objectForPrimaryKey("ClienteFull", Number(idCliente));
+    if (!cliente) {
+      const clientes = realm.objects("ClienteFull").filtered("id = $0", Number(idCliente));
+      if (clientes.length > 0) cliente = clientes[0];
+    }
+    return cliente;
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -83,6 +96,9 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         await FullSyncService.initialize();
       }
 
+      const ubicacionActual = await LocationService.getCurrentLocation();
+      setUbicacion(ubicacionActual);
+
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
@@ -91,8 +107,16 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (pedido) {
+          const clienteFull = buscarClienteEnRealm(pedido.cliente);
           const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
-          pedidosAgrupados.push({ ...pedido, folioKey: folio, total });
+          pedidosAgrupados.push({
+            ...pedido,
+            folioKey: folio,
+            clienteNombre: clienteFull?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`,
+            clienteDomicilio: clienteFull?.domicilio || pedido.clienteDomicilio || "",
+            observaciones: pedido.observaciones || "",
+            total,
+          });
         }
       });
       console.log(`[PedidosScreen] Folios encontrados para ruta ${ruta}: ${folios.length}`);
@@ -126,8 +150,16 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);
           if (pedido) {
+            const clienteFull = buscarClienteEnRealm(pedido.cliente);
             const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
-            pedidosAgrupados.push({ ...pedido, folioKey: folio, total });
+            pedidosAgrupados.push({
+              ...pedido,
+              folioKey: folio,
+              clienteNombre: clienteFull?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`,
+              clienteDomicilio: clienteFull?.domicilio || pedido.clienteDomicilio || "",
+              observaciones: pedido.observaciones || "",
+              total,
+            });
           }
         });
         setPedidos(pedidosAgrupados);
@@ -209,7 +241,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecio ?? 0);
       const preciosDefault = FullSyncService.getPreciosByListaPrecio(13);
       return renglones.reduce((sum, r) => {
-        const precio = obtenerPrecioProducto(r.idProducto, preciosPromo, preciosCliente, preciosDefault);
+        const precio = obtenerPrecioProducto(r.idProducto, preciosPromo, preciosCliente, preciosDefault) || (r.precio ?? 0);
         return sum + precio * (r.cantPedido || 0);
       }, 0);
     } catch (error) {
@@ -251,83 +283,82 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   ).length;
 
   const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
+    const clienteFull = buscarClienteEnRealm(Number(item.cliente));
+    const clienteNombre = item.clienteNombre || `Cliente #${item.cliente}`;
+    const clienteDomicilio = item.clienteDomicilio || "";
     const estatusColor = getEstatusColor(item.estatus);
-    const estatusIcon = getEstatusIcon(item.estatus);
+
+    let distanciaTexto = "--- M";
+    if (ubicacion && clienteFull?.latitud != null && clienteFull?.longitud != null) {
+      const dist = calcularDistancia(
+        ubicacion.latitude,
+        ubicacion.longitude,
+        clienteFull.latitud,
+        clienteFull.longitud,
+      );
+      distanciaTexto = `${Math.round(dist)} M`;
+    }
 
     return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => handleAbrirPedido(item)}
-        activeOpacity={0.8}
-      >
+      <View style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.folioContainer}>
             <Icon name="receipt" type="material" size={18} color={COLORS.primary} />
             <Text style={styles.folioText}>Folio: {item.folio}</Text>
           </View>
           <View style={[styles.estatusBadge, { backgroundColor: estatusColor }]}>
-            <Icon name={estatusIcon} type="material" size={14} color="#fff" />
             <Text style={styles.estatusText}>{item.estatusDescripcion || "N/A"}</Text>
           </View>
         </View>
 
         <View style={styles.cardBody}>
-          <View style={styles.infoRow}>
-            <Icon name="person" type="material" size={18} color={COLORS.muted} />
-            <Text style={styles.infoText} numberOfLines={1}>
-              {item.clienteNombre || `Cliente #${item.cliente}`}
-            </Text>
+          <View style={styles.clienteRow}>
+            <View style={styles.clienteAvatar}>
+              <Text style={styles.clienteAvatarText}>{clienteNombre.charAt(0).toUpperCase()}</Text>
+            </View>
+            <View style={styles.clienteInfo}>
+              <Text style={styles.clienteNombre} numberOfLines={1}>
+                {clienteNombre}
+              </Text>
+              <View style={styles.direccionRow}>
+                <Icon name="place" type="material" size={14} color={COLORS.muted} />
+                <Text style={styles.direccionText} numberOfLines={1}>
+                  {clienteDomicilio || "Sin dirección"}
+                </Text>
+              </View>
+            </View>
           </View>
 
-          {item.clienteDomicilio ? (
-            <View style={styles.infoRow}>
-              <Icon name="place" type="material" size={18} color={COLORS.muted} />
-              <Text style={styles.infoTextSmall} numberOfLines={1}>
-                {item.clienteDomicilio}
+          <View style={styles.badgesRow}>
+            <View style={styles.badge}>
+              <Icon name="inventory-2" type="material" size={14} color={COLORS.primary} />
+              <Text style={styles.badgeText}>{item.numeroProductos} productos</Text>
+            </View>
+            <View style={[styles.badge, styles.badgeDistancia]}>
+              <Icon name="location-on" type="material" size={14} color={COLORS.success} />
+              <Text style={[styles.badgeText, styles.badgeDistanciaText]}>{distanciaTexto}</Text>
+            </View>
+          </View>
+
+          {item.observaciones ? (
+            <View style={styles.observacionesContainer}>
+              <Icon name="notes" type="material" size={14} color={COLORS.warning} />
+              <Text style={styles.observacionesText} numberOfLines={1}>
+                {item.observaciones}
               </Text>
             </View>
           ) : null}
 
-          <View style={styles.infoRow}>
-            <Icon name="inventory-2" type="material" size={18} color={COLORS.muted} />
-            <Text style={styles.infoText}>
-              {item.numeroProductos} productos | {item.cantPedido} unidades
-            </Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Icon name="attach-money" type="material" size={18} color={COLORS.primary} />
-            <Text style={[styles.infoText, { fontWeight: "bold", color: COLORS.primary }]}>
-              Total: ${(item.total || 0).toFixed(2)}
-            </Text>
-          </View>
-
-          {item.fechaEntrega && (
-            <View style={styles.infoRow}>
-              <Icon name="event" type="material" size={18} color={COLORS.muted} />
-              <Text style={styles.infoText}>
-                Entrega: {new Date(item.fechaEntrega).toLocaleDateString("es-MX")}
-              </Text>
-            </View>
-          )}
-
-          {item.observaciones && (
-            <View style={styles.observacionesContainer}>
-              <Icon name="notes" type="material" size={16} color={COLORS.warning} />
-              <Text style={styles.observacionesText} numberOfLines={2}>
-                {item.observaciones}
-              </Text>
-            </View>
-          )}
+          <TouchableOpacity
+            style={styles.irABtn}
+            onPress={() => handleAbrirPedido(item)}
+            activeOpacity={0.8}
+          >
+            <Icon name="arrow-forward" type="material" size={18} color="#fff" style={{ marginRight: SPACING.xs }} />
+            <Text style={styles.irABtnText}>IR A PEDIDO</Text>
+          </TouchableOpacity>
         </View>
-
-        {item.fueraAgenda && (
-          <View style={styles.fueraAgendaBadge}>
-            <Icon name="receipt" type="material" size={14} color="#fff" />
-            <Text style={styles.fueraAgendaText}>Pedido de Central</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+      </View>
     );
   };
 
@@ -565,6 +596,53 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     ...SHADOWS.medium,
   },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: SPACING.m,
+    gap: SPACING.s,
+  },
+  col: {
+    justifyContent: "center",
+  },
+  colNombre: {
+    flex: 2.5,
+  },
+  colDireccion: {
+    flex: 2,
+  },
+  colNumero: {
+    flex: 0.8,
+    alignItems: "center",
+  },
+  colDistancia: {
+    flex: 1.2,
+    alignItems: "center",
+  },
+  colText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+  },
+  colTextSmall: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  irABtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.m,
+  },
+  irABtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -598,6 +676,71 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     padding: SPACING.m,
+  },
+  clienteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: SPACING.m,
+  },
+  clienteAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: SPACING.m,
+  },
+  clienteAvatarText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  clienteInfo: {
+    flex: 1,
+  },
+  clienteNombre: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.xs,
+  },
+  direccionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs,
+  },
+  direccionText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    flex: 1,
+  },
+  badgesRow: {
+    flexDirection: "row",
+    gap: SPACING.s,
+    marginBottom: SPACING.m,
+  },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F2F2F7",
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.round,
+    gap: SPACING.xs,
+  },
+  badgeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.textPrimary,
+    fontWeight: "600",
+  },
+  badgeDistancia: {
+    backgroundColor: "#E8F5E9",
+  },
+  badgeDistanciaText: {
+    color: COLORS.success,
   },
   infoRow: {
     flexDirection: "row",

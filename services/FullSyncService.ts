@@ -465,6 +465,75 @@ class FullSyncService {
   }
 
   /**
+   * Sincronización POST-VENTA.
+   * Solo envía lo generado localmente al cerrar una venta:
+   * movimientos de envase, bitácoras asociadas y la venta recién creada.
+   * No descarga catálogos ni reinicia el timer de background.
+   */
+  async syncPostVenta(
+    sucursal: number = 1,
+    idUsuario: number = 1,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.isInitialized || !this.realm || this.realm.isClosed) {
+      await this.initialize();
+    }
+    if (!this.realm || this.realm.isClosed) {
+      return { success: false, error: "Realm no inicializado o cerrado" };
+    }
+
+    try {
+      // 1. Enviar movimientos de envase generados por la venta
+      const envasesPendientes = this.getInventarioEnvasesPendientes();
+      if (envasesPendientes.length > 0) {
+        console.log(`[FullSync-PostVenta] Enviando ${envasesPendientes.length} movimientos de envase...`);
+        const envasePayload = envasesPendientes.map((r: any) => ({
+          sucursal: r.sucursal ?? sucursal,
+          clave_prod: r.claveProd ?? 0,
+          folio_movto: r.folioMovto ?? 1,
+          cantidad_entrada: r.cantidadEntrada ?? 0,
+          cantidad_salida: r.cantidadSalida ?? 0,
+          costo: r.costo ?? 0,
+          tipo_movto: r.tipoMovto ?? 0,
+          fecha_alta: (r.fechaAlta ?? new Date()).toISOString(),
+          fecha_act: (r.fechaAct ?? new Date()).toISOString(),
+          id_movil: r.idMovil ?? 0,
+          observacion: r.observacion ?? "",
+        }));
+        const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+        const envaseResp = await fetchWithTimeout(envaseUrl, {
+          method: "POST",
+          headers: { accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify(envasePayload),
+        });
+        if (envaseResp.ok) {
+          const ids = envasesPendientes.map((r: any) => r.id as string);
+          this.marcarInventarioEnvaseSincronizado(ids);
+          console.log(`[FullSync-PostVenta] ${envasesPendientes.length} envases sincronizados`);
+        } else {
+          console.warn(`[FullSync-PostVenta] Error HTTP ${envaseResp.status} enviando envases`);
+        }
+      }
+
+      // 2. Enviar bitácoras pendientes
+      await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+      await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+      await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
+      await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
+      await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
+
+      // 3. Enviar la venta recién generada
+      const ventasResult = await this.sendPendingVentasToServer(sucursal, idUsuario);
+      console.log("[FullSync-PostVenta] Arrastre de ventas:", ventasResult);
+
+      return { success: true };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      console.error("[FullSync-PostVenta] Error:", errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  }
+
+  /**
    * Sincronización INCREMENTAL para background (cada 3 minutos).
    *
    * Usa los nuevos endpoints basados en fechaInicial, tomando como referencia

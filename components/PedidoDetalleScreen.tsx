@@ -33,7 +33,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [validandoGPS, setValidandoGPS] = useState(false);
   const [gpsValidado, setGpsValidado] = useState(false);
-
+  const [clienteNombre, setClienteNombre] = useState<string>("");
+  const [clienteDireccion, setClienteDireccion] = useState<string>("");
+  const [observaciones, setObservaciones] = useState<string>("");
   const [modalCausaVisible, setModalCausaVisible] = useState(false);
   const [productoSeleccionado, setProductoSeleccionado] = useState<Pedido | null>(null);
   const [causasDiferencia, setCausasDiferencia] = useState<{ id: number; descripcion: string }[]>([]);
@@ -67,9 +69,35 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       setPedido(pedidoData);
       setProductos(productosData);
       if (pedidoData) {
+        const realm = (FullSyncService as any).realm;
+        let clienteObj: any = realm
+          ? realm.objectForPrimaryKey("ClienteFull", Number(pedidoData.cliente))
+          : null;
+        if (!clienteObj && realm) {
+          const clientes = realm.objects("ClienteFull").filtered("id = $0", Number(pedidoData.cliente));
+          if (clientes.length > 0) clienteObj = clientes[0];
+        }
+
+        const nombreCliente =
+          clienteObj?.nombre ||
+          pedidoData.clienteNombre ||
+          `Cliente #${pedidoData.cliente}`;
+        const domicilioCliente =
+          clienteObj?.domicilio || pedidoData.clienteDomicilio || "Sin dirección";
+
+        setClienteNombre(nombreCliente);
+        setClienteDireccion(domicilioCliente);
+        setObservaciones(
+          pedidoData.observaciones ||
+            (productosData as any[]).find((p: any) => p.observaciones)?.observaciones ||
+            "",
+        );
         setPreciosPromo(FullSyncService.getPreciosPromoByCliente(pedidoData.cliente));
         setPreciosLista(FullSyncService.getPreciosByListaPrecio(pedidoData.listaPrecio ?? 0));
       } else {
+        setClienteNombre("");
+        setClienteDireccion("");
+        setObservaciones("");
         setPreciosPromo([]);
         setPreciosLista([]);
       }
@@ -145,6 +173,13 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       return;
     }
 
+    const causa = causasDiferencia.find((c) => c.id === causaSeleccionada);
+    const esOtro = causa && ["otro", "otra"].includes(causa.descripcion.trim().toLowerCase());
+    if (esOtro && !observacionCausa.trim()) {
+      Alert.alert("Observación requerida", "La observación es obligatoria para la causa 'Otro/Otra'");
+      return;
+    }
+
     const pedidosService = PedidosService.getInstance();
     pedidosService.setRealm((FullSyncService as any).realm);
 
@@ -179,6 +214,13 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       return;
     }
 
+    const causa = causasNoAtencion.find((c) => c.id === causaNoAtencionSel);
+    const esOtro = causa && ["otro", "otra"].includes(causa.descripcion.trim().toLowerCase());
+    if (esOtro && !observacionNoAtencion.trim()) {
+      Alert.alert("Observación requerida", "La observación es obligatoria para la causa 'Otro/Otra'");
+      return;
+    }
+
     const pedidosService = PedidosService.getInstance();
     pedidosService.setRealm((FullSyncService as any).realm);
 
@@ -202,7 +244,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const confirmarEntrega = () => {
     const productosConDiferencia = productos.filter((p) => {
       const cantAtencion = p.cantAtencion ?? 0;
-      return cantAtencion < p.cantPedido && !p.causaDiferencia;
+      return cantAtencion !== p.cantPedido && !p.causaDiferencia;
     });
 
     if (productosConDiferencia.length > 0) {
@@ -215,6 +257,10 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
     const todosEntregados = productos.every((p) => (p.cantAtencion ?? 0) === p.cantPedido);
     const hayEntregados = productos.some((p) => (p.cantAtencion ?? 0) > 0);
+    const hayDiferenciasConCausa = productos.some((p) => {
+      const cantAtencion = p.cantAtencion ?? 0;
+      return cantAtencion !== p.cantPedido && p.causaDiferencia;
+    });
 
     let nuevoEstatus: number;
     let mensaje: string;
@@ -222,7 +268,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     if (todosEntregados) {
       nuevoEstatus = ESTATUS_PEDIDO.ENTREGADO;
       mensaje = "¿Confirmar entrega completa del pedido?";
-    } else if (hayEntregados) {
+    } else if (hayEntregados || hayDiferenciasConCausa) {
       nuevoEstatus = ESTATUS_PEDIDO.ENTREGADO_PARCIAL;
       mensaje = "¿Confirmar entrega parcial del pedido?";
     } else {
@@ -265,7 +311,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const calcularResumen = () => {
     const totalSolicitado = productos.reduce((sum, p) => sum + p.cantPedido, 0);
     const totalEntregado = productos.reduce((sum, p) => sum + (p.cantAtencion || 0), 0);
-    const conDiferencia = productos.filter((p) => (p.cantAtencion ?? 0) < p.cantPedido).length;
+    const conDiferencia = productos.filter((p) => (p.cantAtencion ?? 0) !== p.cantPedido).length;
     const importeSolicitado = productos.reduce((sum, p) => sum + obtenerPrecioProducto(p.idProducto) * p.cantPedido, 0);
     const importeEntregado = productos.reduce((sum, p) => sum + obtenerPrecioProducto(p.idProducto) * (p.cantAtencion || 0), 0);
 
@@ -286,7 +332,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     const producto = productos.find((p) => p.idProducto === idProducto);
     if (!producto || soloLectura) return;
     const actual = producto.cantAtencion ?? 0;
-    const nueva = Math.max(0, Math.min(producto.cantPedido, actual + delta));
+    const nueva = Math.max(0, actual + delta);
     actualizarCantidadLocal(idProducto, nueva);
   };
 
@@ -305,20 +351,15 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
   const renderProducto = ({ item }: { item: Pedido }) => {
     const cantAtencion = item.cantAtencion ?? 0;
-    const tieneDiferencia = cantAtencion < item.cantPedido;
+    const tieneDiferencia = cantAtencion !== item.cantPedido;
     const atendidoCompleto = cantAtencion === item.cantPedido;
     const precioUnitario = obtenerPrecioProducto(item.idProducto);
-    const subtotal = precioUnitario * item.cantPedido;
+    const subtotal = precioUnitario * cantAtencion;
 
     return (
       <View style={[styles.productoCard, tieneDiferencia && styles.productoCardDiferencia]}>
         <View style={styles.productoHeader}>
-          <Icon
-            name={atendidoCompleto ? "check-circle" : tieneDiferencia ? "warning" : "radio-button-unchecked"}
-            type="material"
-            size={22}
-            color={atendidoCompleto ? COLORS.success : tieneDiferencia ? COLORS.warning : COLORS.muted}
-          />
+        
           <Text style={styles.productoNombre} numberOfLines={2}>
             {item.productoNombre || `Producto #${item.idProducto}`}
           </Text>
@@ -326,12 +367,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
         <View style={styles.cantidadesRow}>
           <View style={styles.cantidadItem}>
-            <Text style={styles.cantidadLabel}>Solicitado</Text>
-            <Text style={styles.cantidadValor}>{item.cantPedido}</Text>
-          </View>
-
-          <View style={styles.cantidadItem}>
-            <Text style={styles.cantidadLabel}>Entregado</Text>
+            <Text style={styles.cantidadLabel}>Atención</Text>
             {!puedeEditar ? (
               <Text style={styles.cantidadValor}>{cantAtencion}</Text>
             ) : (
@@ -339,16 +375,16 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
                 <TouchableOpacity
                   style={styles.stepperBtn}
                   onPress={() => ajustarCantidad(item.idProducto, -1)}
-                  disabled={cantAtencion <= 0}
                 >
-                  <Icon name="remove" type="material" size={18} color={cantAtencion <= 0 ? COLORS.muted : "#fff"} />
+                  <Icon name="remove" type="material" size={18} color="#fff" />
                 </TouchableOpacity>
                 <TextInput
+                  key={`${item.idProducto}-${cantAtencion}`}
                   style={styles.cantidadInput}
-                  value={cantAtencion.toString()}
+                  defaultValue={cantAtencion.toString()}
                   onEndEditing={(e) => {
                     const num = parseFloat(e.nativeEvent.text) || 0;
-                    const clamped = Math.max(0, Math.min(item.cantPedido, num));
+                    const clamped = Math.max(0, num);
                     actualizarCantidadLocal(item.idProducto, clamped);
                   }}
                   keyboardType="decimal-pad"
@@ -356,20 +392,19 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
                 <TouchableOpacity
                   style={styles.stepperBtn}
                   onPress={() => ajustarCantidad(item.idProducto, 1)}
-                  disabled={cantAtencion >= item.cantPedido}
                 >
-                  <Icon name="add" type="material" size={18} color={cantAtencion >= item.cantPedido ? COLORS.muted : "#fff"} />
+                  <Icon name="add" type="material" size={18} color="#fff" />
                 </TouchableOpacity>
               </View>
             )}
           </View>
 
-          <View style={styles.cantidadItem}>
+          {/* <View style={styles.cantidadItem}>
             <Text style={styles.cantidadLabel}>Diferencia</Text>
             <Text style={[styles.cantidadValor, tieneDiferencia && styles.diferenciaText]}>
               {item.cantPedido - cantAtencion}
             </Text>
-          </View>
+          </View> */}
         </View>
 
         <View style={[styles.cantidadesRow, { marginTop: SPACING.s, paddingTop: SPACING.s, borderTopWidth: 1, borderTopColor: "#F0F0F0" }]}>
@@ -467,44 +502,47 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           <View style={styles.clienteRow}>
             <Icon name="person" type="material" size={28} color={COLORS.primary} />
             <View style={styles.clienteInfo}>
-              <Text style={styles.clienteNombre}>{pedido.clienteNombre}</Text>
+              <Text style={styles.clienteNombre}>{clienteNombre || `Cliente #${pedido.cliente}`}</Text>
               <Text style={styles.clienteId}>Cliente #{pedido.cliente}</Text>
             </View>
           </View>
 
-          {pedido.clienteDomicilio && (
+          {clienteDireccion ? (
             <View style={styles.domicilioRow}>
               <Icon name="place" type="material" size={18} color={COLORS.muted} />
-              <Text style={styles.domicilioText}>{pedido.clienteDomicilio}</Text>
+              <Text style={styles.domicilioText}>{clienteDireccion}</Text>
             </View>
-          )}
+          ) : null}
 
-          {pedido.observaciones && (
+          {observaciones && (
             <View style={styles.observacionesCard}>
               <Icon name="notes" type="material" size={18} color={COLORS.warning} />
-              <Text style={styles.observacionesText}>{pedido.observaciones}</Text>
+              <Text style={styles.observacionesText}>Observacion: {observaciones}</Text>
             </View>
           )}
         </View>
 
-        {!gpsValidado && !soloLectura && pedido.estatus !== ESTATUS_PEDIDO.EN_ATENCION && (
-          <TouchableOpacity style={styles.gpsBtn} onPress={validarGPS} disabled={validandoGPS}>
-            {validandoGPS ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Icon name="my-location" type="material" size={20} color="#fff" />
-            )}
-            <Text style={styles.gpsBtnText}>
-              {validandoGPS ? "Validando ubicación..." : "Validar ubicación GPS"}
-            </Text>
-          </TouchableOpacity>
-        )}
+        {!soloLectura && !gpsValidado && pedido.estatus !== ESTATUS_PEDIDO.EN_ATENCION && (
+          <View style={styles.botonesRow}>
+            <TouchableOpacity style={[styles.gpsBtn, styles.btnMitad]} onPress={validarGPS} disabled={validandoGPS}>
+              {validandoGPS ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Icon name="my-location" type="material" size={20} color="#fff" />
+              )}
+              <Text style={styles.gpsBtnText}>
+                {validandoGPS ? "Validando..." : "Validar GPS"}
+              </Text>
+            </TouchableOpacity>
 
-        {!puedeEditar && !soloLectura && pedido.estatus !== ESTATUS_PEDIDO.EN_ATENCION && (
-          <TouchableOpacity style={styles.gpsBtn} onPress={iniciarAtencion}>
-            <Icon name="play-arrow" type="material" size={20} color="#fff" />
-            <Text style={styles.gpsBtnText}>Iniciar atención del pedido</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.gpsBtn, styles.btnMitad, styles.iniciarBtn]}
+              onPress={iniciarAtencion}
+            >
+              <Icon name="play-arrow" type="material" size={20} color="#fff" />
+              <Text style={styles.gpsBtnText}>Iniciar atención</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {gpsValidado && (
@@ -514,49 +552,6 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <View style={styles.resumenCard}>
-          <Text style={styles.resumenTitle}>Resumen de Entrega</Text>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Unidades solicitadas:</Text>
-            <Text style={styles.resumenValor}>{resumen.totalSolicitado}</Text>
-          </View>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Unidades entregadas:</Text>
-            <Text style={[styles.resumenValor, { color: COLORS.success }]}>{resumen.totalEntregado}</Text>
-          </View>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Productos con diferencia:</Text>
-            <Text style={[styles.resumenValor, { color: resumen.conDiferencia > 0 ? COLORS.warning : COLORS.success }]}>
-              {resumen.conDiferencia}
-            </Text>
-          </View>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Total productos:</Text>
-            <Text style={styles.resumenValor}>{productos.length}</Text>
-          </View>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Importe solicitado:</Text>
-            <Text style={styles.resumenValor}>${resumen.importeSolicitado.toFixed(2)}</Text>
-          </View>
-          <View style={styles.resumenRow}>
-            <Text style={styles.resumenLabel}>Importe entregado:</Text>
-            <Text style={[styles.resumenValor, { color: COLORS.success }]}>${resumen.importeEntregado.toFixed(2)}</Text>
-          </View>
-          {resumen.conDiferencia > 0 && productos.some((p) => (p.cantAtencion ?? 0) < p.cantPedido && !p.causaDiferencia) && (
-            <View style={styles.alertaDiferencia}>
-              <Icon name="warning" type="material" size={18} color={COLORS.warning} />
-              <Text style={styles.alertaDiferenciaText}>
-                Hay productos con diferencia sin causa registrada. Debe registrar la causa antes de confirmar.
-              </Text>
-            </View>
-          )}
-          {/* {puedeEditar && resumen.totalEntregado < resumen.totalSolicitado && (
-            <TouchableOpacity style={styles.entregarTodoPedidoBtn} onPress={entregarTodoPedido}>
-              <Icon name="done-all" type="material" size={18} color="#fff" />
-              <Text style={styles.entregarTodoPedidoBtnText}>Entregar todo el pedido</Text>
-            </TouchableOpacity>
-          )} */}
-        </View>
 
         <Text style={styles.productosTitle}>Productos del Pedido</Text>
 
@@ -594,9 +589,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             {productoSeleccionado && (
               <View style={styles.productoInfoModal}>
                 <Text style={styles.productoInfoNombre}>{productoSeleccionado.productoNombre}</Text>
-                <Text style={styles.productoInfoCantidad}>
+                { /*<Text style={styles.productoInfoCantidad}>
                   Solicitado: {productoSeleccionado.cantPedido} | Entregado: {productoSeleccionado.cantAtencion || 0}
-                </Text>
+                </Text>*/ }
               </View>
             )}
 
@@ -622,7 +617,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
               ))}
             </ScrollView>
 
-            <Text style={styles.modalLabel}>Observaciones (opcional):</Text>
+            <Text style={styles.modalLabel}>Observaciones:</Text>
             <TextInput
               style={styles.observacionInput}
               value={observacionCausa}
@@ -684,7 +679,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
               ))}
             </ScrollView>
 
-            <Text style={styles.modalLabel}>Observaciones (opcional):</Text>
+            <Text style={styles.modalLabel}>Observaciones:</Text>
             <TextInput
               style={styles.observacionInput}
               value={observacionNoAtencion}
@@ -829,6 +824,20 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.m,
     gap: SPACING.s,
     ...SHADOWS.small,
+  },
+  botonesRow: {
+    flexDirection: "row",
+    gap: SPACING.s,
+    marginHorizontal: SPACING.m,
+    marginVertical: SPACING.s,
+  },
+  btnMitad: {
+    flex: 1,
+    marginHorizontal: 0,
+    padding: SPACING.m,
+  },
+  iniciarBtn: {
+    backgroundColor: COLORS.success,
   },
   gpsBtnText: {
     color: "#fff",

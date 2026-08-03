@@ -2,6 +2,7 @@ import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import AuthService from "./AuthService";
 import PedidoNotificacionService from "./PedidoNotificacionService";
+import { PedidoBitacoraUploadSyncTask } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
 
 export interface Pedido {
   id: string;
@@ -457,6 +458,9 @@ class PedidosService {
         obserNoAtencion,
       });
 
+      // Enviar bitácora al servidor en tiempo real
+      this.enviarBitacoraInmediata();
+
       console.log(`[PedidosService] Estatus cambiado: ${estatusAnterior} -> ${nuevoEstatus}`);
       return true;
     } catch (error) {
@@ -482,7 +486,7 @@ class PedidosService {
       }
 
       const cantAtencionAnterior = renglon.cantAtencion;
-      const tieneDiferencia = cantAtencion < renglon.cantPedido;
+      const tieneDiferencia = cantAtencion !== renglon.cantPedido;
 
       realm.write(() => {
         renglon.cantAtencion = cantAtencion;
@@ -491,14 +495,7 @@ class PedidosService {
         renglon.modificadoLocal = true;
       });
 
-      // Registrar bitacora de cambio de detalle
-      this.registrarBitacoraDetalle({
-        folio,
-        idProducto,
-        campo: "cantAtencion",
-        valorAnterior: cantAtencionAnterior,
-        valorNuevo: cantAtencion,
-      });
+      // No se registra bitácora de detalle; solo en cambio de estado
 
       console.log(`[PedidosService] Cantidad actualizada: ${idProducto} -> ${cantAtencion}`);
       return true;
@@ -526,13 +523,7 @@ class PedidosService {
         renglon.modificadoLocal = true;
       });
 
-      this.registrarBitacoraDetalle({
-        folio,
-        idProducto,
-        campo: "precioAtencion",
-        valorAnterior: precioAtencionAnterior,
-        valorNuevo: precioAtencion,
-      });
+      // No se registra bitácora de detalle; solo en cambio de estado
 
       console.log(`[PedidosService] Precio atencion actualizado: ${idProducto} -> ${precioAtencion}`);
       return true;
@@ -569,23 +560,10 @@ class PedidosService {
         renglon.modificadoLocal = true;
       });
 
-      this.registrarBitacoraDetalle({
-        folio,
-        idProducto,
-        campo: "causaDiferencia",
-        valorAnterior: causaAnterior,
-        valorNuevo: causaDiferencia,
-        observacion: obserDiferencia || "",
-      });
+      // No se registra bitácora de detalle; solo en cambio de estado
 
       if (obserDiferencia && obserDiferencia !== obserAnterior) {
-        this.registrarBitacoraDetalle({
-          folio,
-          idProducto,
-          campo: "obserDiferencia",
-          valorAnterior: obserAnterior,
-          valorNuevo: obserDiferencia,
-        });
+        // No se registra bitácora de detalle; solo en cambio de estado
       }
 
       console.log(`[PedidosService] Causa diferencia registrada: ${idProducto} -> ${causaDiferencia}`);
@@ -722,14 +700,14 @@ class PedidosService {
               fecha: ahora,
               ruta: renglon.ruta,
               cliente: renglon.cliente,
-              idCanal: renglon.idCanal ?? null,
+              idCanal: null,
               idVendedor: renglon.idVendedor,
               idProducto: renglon.idProducto ?? null,
-              cantPedido: renglon.cantPedido ?? null,
-              precio: renglon.precio ?? null,
+              cantPedido: null,
+              precio: null,
               observaciones: renglon.observaciones ?? null,
-              listaPrecio: renglon.listaPrecio ?? null,
-              fechaEntrega: renglon.fechaEntrega ?? null,
+              listaPrecio: null,
+              fechaEntrega: null,
               estatus: data.estatus,
               estatusAnterior: data.estatusAnterior,
               cantAtencion: renglon.cantAtencion ?? null,
@@ -739,7 +717,7 @@ class PedidosService {
               causaNoAtencion: data.causaNoAtencion ?? null,
               obserNoAtencion: data.obserNoAtencion ?? null,
               usrAlta: renglon.idVendedor ?? null,
-              fueraAgenda: renglon.fueraAgenda ?? null,
+              fueraAgenda: null,
               no_venta: renglon.no_venta ?? null,
               tipoCambio: data.tipoCambio,
               enviado: false,
@@ -750,6 +728,19 @@ class PedidosService {
       });
     } catch (error) {
       console.error("[PedidosService] Error al registrar bitácora de estado:", error);
+    }
+  }
+
+  private enviarBitacoraInmediata(): void {
+    try {
+      const realm = this.getRealm();
+      const syncLogId = `realtime-${Date.now()}`;
+      const task = new PedidoBitacoraUploadSyncTask(realm, syncLogId);
+      task.execute().catch((error) => {
+        console.warn("[PedidosService] Error enviando bitácora en tiempo real:", error);
+      });
+    } catch (error) {
+      console.warn("[PedidosService] No se pudo iniciar envío de bitácora:", error);
     }
   }
 

@@ -93,8 +93,14 @@ class PedidoNotificacionService {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (!pedido) continue;
 
-        // Solo notificar pedidos que aun no han sido notificados ni atendidos
-        if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO) {
+        // Solo notificar pedidos programados, aun no notificados ni cerrados
+        const ESTATUS_FINALES_NOTIF = [
+          ESTATUS_PEDIDO.ENTREGADO,
+          ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+          ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+          ESTATUS_PEDIDO.CANCELADO,
+        ];
+        if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO || ESTATUS_FINALES_NOTIF.includes(pedido.estatus)) {
           console.log(`[PedidoNotificacionService] Folio ${folio} ya notificado o atendido, omitiendo`);
           continue;
         }
@@ -112,10 +118,15 @@ class PedidoNotificacionService {
 
   async mostrarNotificacionPedido(pedido: Pedido): Promise<void> {
     try {
+      const cliente = this.realm?.objectForPrimaryKey("ClienteFull", pedido.cliente) as any;
+      const clienteNombre = cliente?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`;
+      const clienteDireccion = cliente?.domicilio || pedido.clienteDomicilio || "Sin dirección";
+      const body = `${clienteNombre} - ${clienteDireccion} - ${pedido.numeroProductos} producto(s)`;
+
       await notifee.displayNotification({
         id: `pedido-${pedido.folio}`,
         title: "Nuevo pedido de Central",
-        body: `${pedido.clienteNombre || `Cliente #${pedido.cliente}`} - ${pedido.numeroProductos} producto(s)`,
+        body,
         data: {
           folio: String(pedido.folio),
           cliente: String(pedido.cliente),
@@ -141,8 +152,19 @@ class PedidoNotificacionService {
     const folio = data?.folio ? parseInt(data.folio) : null;
     if (!folio) return;
 
+    try {
+      const pedidosService = PedidosService.getInstance();
+      if (this.realm) {
+        pedidosService.setRealm(this.realm);
+      }
+      const result = pedidosService.iniciarAtencionPedido(folio);
+      console.log(`[PedidoNotificacionService] Iniciar atencion folio ${folio}: ${result}`);
+    } catch (error) {
+      console.error("[PedidoNotificacionService] Error al iniciar atencion:", error);
+    }
+
     console.log(`[PedidoNotificacionService] Navegando a pedido ${folio}`);
-    navigate("PedidoDetalle", { folio, soloLectura: true });
+    navigate("PedidoDetalle", { folio, soloLectura: false });
   }
 
   /**
@@ -176,19 +198,11 @@ class PedidoNotificacionService {
 
   private marcarPedidoNotificado(folio: number): void {
     try {
-      if (!this.realm) return;
-      const renglones = this.realm.objects("Pedido").filtered("folio = $0", folio);
-      if (renglones.length === 0) return;
-
-      this.realm.write(() => {
-        Array.from(renglones).forEach((renglon: any) => {
-          if (renglon.estatus < ESTATUS_PEDIDO.NOTIFICADO) {
-            renglon.estatus = ESTATUS_PEDIDO.NOTIFICADO;
-            renglon.estatusDescripcion = this.getEstatusDescripcion(ESTATUS_PEDIDO.NOTIFICADO);
-            renglon.syncedAt = new Date();
-          }
-        });
-      });
+      const pedidosService = PedidosService.getInstance();
+      if (this.realm) {
+        pedidosService.setRealm(this.realm);
+      }
+      pedidosService.cambiarEstatusPedido(folio, ESTATUS_PEDIDO.NOTIFICADO);
       console.log(`[PedidoNotificacionService] Pedido ${folio} marcado como NOTIFICADO`);
     } catch (error) {
       console.warn("[PedidoNotificacionService] Error al marcar pedido como notificado:", error);

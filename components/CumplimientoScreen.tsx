@@ -120,8 +120,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
 
-  // Tabs: 'agendados' (visitas del día) | 'cercanos' (GPS) | 'todos' (todos los clientes)
-  const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "todos">("agendados");
+  // Tabs: 'agendados' (visitas del día) | 'cercanos' (GPS) | 'folios' (pedidos central) | 'todos' (todos los clientes)
+  const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "folios" | "todos">("agendados");
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
   const [clientesVisitadosHoy, setClientesVisitadosHoy] = useState<Set<number>>(new Set());
@@ -858,11 +858,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             {esPedidoCentral && (
               <TouchableOpacity
                 style={styles.botonVerPedido}
-                onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: true })}
+                onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: false })}
                 activeOpacity={0.8}
               >
-                <Icon name="visibility" type="material" size={16} color="white" />
-                <Text style={styles.botonVisitadoTexto}>Ver Pedido</Text>
+                <Icon name="arrow-forward" type="material" size={16} color="white" />
+                <Text style={styles.botonVisitadoTexto}>IR A PEDIDO</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -873,7 +873,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     return esPedidoCentral ? (
       <TouchableOpacity
         style={styles.visitaContainer}
-        onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: true })}
+        onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: false })}
         activeOpacity={0.9}
       >
         {card}
@@ -893,7 +893,19 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   }
 
   // Filtrar visitas según búsqueda y toggle de visitadas
-  const visitasFiltradas = visitas.filter((v) => {
+  const visitasAgendadas = visitas.filter((v) => {
+    if (v.tipo === 99) return false; // Los pedidos de central van en su propia pestaña
+    const coincideBusqueda =
+      !searchQuery.trim() ||
+      (v.nombreCliente || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(v.idCliente).includes(searchQuery);
+    const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
+    return coincideBusqueda && coincideEstado;
+  });
+
+  // Visor de folios: pedidos de central (tipo 99)
+  const visitasFolios = visitas.filter((v) => {
+    if (v.tipo !== 99) return false;
     const coincideBusqueda =
       !searchQuery.trim() ||
       (v.nombreCliente || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1106,6 +1118,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           <Text style={[styles.tabItemText, clienteTab === "cercanos" && styles.tabItemTextActive]}>Cercanos</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
+          onPress={() => setClienteTab("folios")}
+        >
+          <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Folios</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.tabItem, clienteTab === "todos" && styles.tabItemActive]}
           onPress={() => setClienteTab("todos")}
         >
@@ -1160,7 +1178,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
       {clienteTab === "agendados" ? (
         <FlatList
-          data={visitasFiltradas}
+          data={visitasAgendadas}
           renderItem={renderVisita}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.lista}
@@ -1174,6 +1192,22 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                   : mostrarVisitadas
                   ? "No hay visitas programadas"
                   : "No hay visitas pendientes"}
+              </Text>
+            </View>
+          }
+        />
+      ) : clienteTab === "folios" ? (
+        <FlatList
+          data={visitasFolios}
+          renderItem={renderVisita}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.lista}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={sincronizarFecha} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="receipt" type="material" size={64} color="#C7C7CC" />
+              <Text style={styles.emptyTexto}>
+                {searchQuery ? 'Sin resultados para "' + searchQuery + '"' : "No hay folios de pedidos"}
               </Text>
             </View>
           }
