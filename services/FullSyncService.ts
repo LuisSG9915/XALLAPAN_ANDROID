@@ -26,8 +26,15 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 53,
+        schemaVersion: 54,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v54: Nueva tabla BitacoraTrackingGps (tracking de recorrido cada ~30s).
+          // Realm creará automáticamente la tabla. No hay que mover datos porque los pings
+          // anteriores se seguirán enviando desde BitacoraGps/BitacoraValidacion viejos.
+          if (oldRealm.schemaVersion < 54) {
+            console.log("[Migration v54] Creando tabla BitacoraTrackingGps");
+          }
+
           // Migración v53: Pedido ahora es una sola tabla que incluye el detalle del producto.
           // La primary key cambia a string compuesta `${folio}-${idProducto}`.
           // Se elimina la tabla PedidoDetalle.
@@ -651,6 +658,8 @@ class FullSyncService {
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras GPS pendientes...");
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras de tracking GPS pendientes...");
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");
@@ -2185,6 +2194,8 @@ class FullSyncService {
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras GPS pendientes...");
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        console.log("[FullSync] Enviando bitácoras de tracking GPS pendientes...");
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");

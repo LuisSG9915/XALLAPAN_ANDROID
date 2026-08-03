@@ -444,6 +444,8 @@ class BackgroundSyncService {
           await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Enviando bitácoras GPS pendientes al finalizar...");
           await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+          console.log("[BackgroundSync] Enviando bitácoras de tracking GPS pendientes al finalizar...");
+          await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Enviando bitácoras de validación de ubicación pendientes al finalizar...");
           await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
           console.log("[BackgroundSync] Enviando bitácoras de tiempos de venta pendientes al finalizar...");
@@ -531,6 +533,7 @@ class BackgroundSyncService {
       if (result.success) {
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
         await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
         GpsBitacoraService.limpiarRegistrosEnviados(7);

@@ -21,8 +21,8 @@ GO
 -- Clave de idempotencia: ignora silenciosamente los inserts con idLocal repetido.
 CREATE UNIQUE NONCLUSTERED INDEX UX_BitacoraGps_IdLocal
     ON [dbo].[BitacoraGpsMovil] (idLocal)
-    WITH (IGNORE_DUP_KEY = ON)
-    WHERE idLocal IS NOT NULL;
+    WHERE idLocal IS NOT NULL
+    WITH (IGNORE_DUP_KEY = ON);
 GO
 
 CREATE PROCEDURE [dbo].[sp_MovilesBitacoraGpsArrastreJSON]

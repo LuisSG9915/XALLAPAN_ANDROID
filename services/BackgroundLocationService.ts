@@ -1,11 +1,10 @@
-import { AppState, Alert, Linking, NativeModules, Platform } from "react-native";
+import { Alert, Linking, NativeModules, Platform } from "react-native";
 import BackgroundActions from "react-native-background-actions";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
 import NetInfo from "@react-native-community/netinfo";
 import FullSyncService from "./FullSyncService";
 import GpsBitacoraService from "./GpsBitacoraService";
 import LocationService from "./LocationService";
-import { getCurrentScreenState } from "./ScreenState";
 
 const TAG = "[BackgroundLocationService]";
 
@@ -142,14 +141,12 @@ class BackgroundLocationService {
     try {
       const netInfo = await NetInfo.fetch().catch(() => null);
       const conCobertura = netInfo ? netInfo.isConnected === true : false;
-      const motivo = await this.getMotivoRecorrido();
 
       await GpsBitacoraService.registrarCapturaTracking(
         latitude,
         longitude,
         accuracy,
         conCobertura,
-        motivo,
         this.intervalMs,
       );
 
@@ -159,7 +156,7 @@ class BackgroundLocationService {
         ? `GPS: enganchado ±${acc}m`
         : `GPS: buscando satélites (±${acc}m)`;
       this.updateNotificationText(`${estadoGps} — ${hora}`);
-      console.log(TAG, `Tracking registrado: cobertura=${conCobertura}, motivo=${motivo}`);
+      console.log(TAG, `Tracking registrado: cobertura=${conCobertura}`);
     } catch (error) {
       console.error(TAG, "Error procesando fix GPS:", error);
     }
@@ -256,26 +253,6 @@ class BackgroundLocationService {
     } catch (e) {
       // updateNotification puede fallar si el servicio se detuvo; es no crítico
     }
-  }
-
-  /**
-   * Determina el contexto de la captura combinando:
-   * - estado de la pantalla (nativo): encendida / apagada.
-   * - AppState (React Native): active / background / inactive.
-   */
-  private async getMotivoRecorrido(): Promise<string> {
-    const screenState = await getCurrentScreenState();
-
-    if (screenState === "off") {
-      return "recorrido_pantalla_apagada";
-    }
-
-    // screenState === "on" (pantalla encendida)
-    if (AppState.currentState === "active") {
-      return "recorrido_app";
-    }
-
-    return "recorrido_pantalla_encendida_2plano";
   }
 
   /**

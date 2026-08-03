@@ -430,6 +430,28 @@ export const BitacoraValidacionSchema = {
 };
 
 /**
+ * Schema para tracking periódico de ubicación del vendedor (BackgroundLocationService).
+ * Guarda una fila por cada ventana de tiempo (~30s) con la posición del vendedor.
+ * Es una tabla aparte de BitacoraGps (fixes puntuales) y BitacoraValidacion
+ * (diagnóstico de validaciones de visita a cliente) para no mezclar volumes.
+ */
+export const BitacoraTrackingGpsSchema = {
+  name: "BitacoraTrackingGps",
+  properties: {
+    id: "string", // idLocal determinista por ventana: `${idUsuario}-${Math.floor(ts / intervalMs)}`
+    idUsuario: "int",
+    sucursal: "int",
+    latitud: "float",
+    longitud: "float",
+    precision: "float?", // precisión GPS en metros
+    conCobertura: "bool?", // true = había red al capturar, false = offline, null = no evaluado
+    fecha: "date",
+    enviado: "bool", // true = ya sincronizado al servidor
+  },
+  primaryKey: "id",
+};
+
+/**
  * Schema para bitácora de tiempos del cierre de venta.
  * Guarda UNA fila por cada venta procesada (SalesScreen.processSale)
  * para medir en el servidor cuánto tarda cada etapa del cierre
@@ -756,6 +778,7 @@ export const allSchemas = [
   BitacoraSyncSchema,
   BitacoraGpsSchema,
   BitacoraValidacionSchema,
+  BitacoraTrackingGpsSchema,
   BitacoraTiemposVentaSchema,
   InventarioEnvaseSchema,
   InventarioEnvasesHistorialSchema,
