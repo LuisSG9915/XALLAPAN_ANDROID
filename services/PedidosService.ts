@@ -4,6 +4,15 @@ import AuthService from "./AuthService";
 import PedidoNotificacionService from "./PedidoNotificacionService";
 import { PedidoBitacoraUploadSyncTask } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
 
+// Generación de id_movil corto e irrepetible para pedidos/ventas locales.
+// Estructura: MOVIL_ID_BASE + (segundos desde EPOCH * 1000) + sucursal
+//  - Siempre > 1700000000 (umbral que distingue registros locales de los del servidor)
+//  - La sucursal queda en los últimos 3 dígitos (id_movil % 1000 === sucursal)
+//  - La guardia monotónica evita colisiones si se generan dos en el mismo segundo
+const MOVIL_ID_BASE = 1700000000;
+const MOVIL_ID_EPOCH_SECONDS = 1704067200; // 2024-01-01 00:00:00 UTC
+let lastMovilSeconds = 0;
+
 export interface Pedido {
   id: string;
   idPedido?: number;
@@ -100,7 +109,6 @@ class PedidosService {
   private static instance: PedidosService;
   private realm: Realm | null = null;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
-  private static idMovilCounter = 0;
 
   private constructor() {}
 
@@ -124,7 +132,14 @@ class PedidosService {
   }
 
   private getNextIdMovil(): number {
-    return ++PedidosService.idMovilCounter;
+    const user = AuthService.currentUser;
+    const sucursal = user?.sucursal_origen || user?.sucursal || 1;
+    let seconds = Math.floor(Date.now() / 1000) - MOVIL_ID_EPOCH_SECONDS;
+    if (seconds <= lastMovilSeconds) {
+      seconds = lastMovilSeconds + 1;
+    }
+    lastMovilSeconds = seconds;
+    return MOVIL_ID_BASE + seconds * 1000 + (sucursal % 1000);
   }
 
   private puedeModificar(estatus: number): boolean {
