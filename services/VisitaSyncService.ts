@@ -138,8 +138,6 @@ class VisitaSyncService {
       await BitacoraService.registrarFinSync(idBitacoraVisitas, {
         exitoso: true,
         registrosLeidos: visitasData.length,
-        registrosGuardados: nuevos,
-        registrosActualizados: 0,
       });
 
       return {
@@ -340,8 +338,9 @@ class VisitaSyncService {
   }> {
     try {
       const visitas = await this.getVisitasByFecha(fecha, sucursal);
-      const totalProgramadas = visitas.length;
-      const totalRealizadas = visitas.filter((v) => v.visitado === 1).length;
+      const visitasSinPedidos = visitas.filter((v) => v.tipo !== 99);
+      const totalProgramadas = visitasSinPedidos.length;
+      const totalRealizadas = visitasSinPedidos.filter((v) => v.visitado === 1).length;
       const porcentaje = totalProgramadas > 0 ? (totalRealizadas / totalProgramadas) * 100 : 0;
 
       return {
@@ -419,8 +418,6 @@ class VisitaSyncService {
       await BitacoraService.registrarFinSync(idBitacora, {
         exitoso: true,
         registrosLeidos: visitasData.length,
-        registrosGuardados: visitasData.length,
-        registrosActualizados: 0,
       });
 
       return {
@@ -506,7 +503,7 @@ class VisitaSyncService {
         return inicioDia.getTime() >= startOfDay.getTime() && inicioDia.getTime() <= endOfDay.getTime();
       };
 
-      // 1. Tabla Visita (local) con visitado == 1
+      // 1. Tabla Visita (local) con visitado == 1 (excluir pedidos de central tipo 99)
       const visitasLocales = realm
         .objects("Visita")
         .filtered(
@@ -515,7 +512,11 @@ class VisitaSyncService {
           startOfDay,
           endOfDay,
         );
-      visitasLocales.forEach((v: any) => clientesVisitados.add(v.idCliente));
+      visitasLocales.forEach((v: any) => {
+        if (v.tipo !== 99) {
+          clientesVisitados.add(v.idCliente);
+        }
+      });
       console.log("[Visitas] Fuente 1 - Visita local (visitado=1):", visitasLocales.length, "registros. Clientes:", Array.from(visitasLocales).map((v: any) => v.idCliente));
 
       // 2. Tabla VisitaRealizada (sincronizada) - filtrar por sucursal/ruta y día local

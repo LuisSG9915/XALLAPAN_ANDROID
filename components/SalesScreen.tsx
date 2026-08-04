@@ -261,15 +261,16 @@ export default function SalesScreen({ route }: { route?: any }) {
   const determinarPrecioKit = useCallback(
     (
       productoId: number,
-      kitsData: any[],
+      kitsPorProducto: Map<number, any[]>,
       productosPorId: Map<number, any>,
+      productosPorClave: Map<number, any>,
       preciosMap?: Map<number, number>,
       preciosDefaultMap?: Map<number, number>,
       preciosPromoMap?: Map<number, number>,
     ): { usarPrecioKit: boolean; precioKit?: number } => {
 
       // Obtener los kits para este producto
-      const kitsDelProducto = kitsData.filter((k: any) => k.idProducto === productoId);
+      const kitsDelProducto = kitsPorProducto.get(productoId) || [];
 
       if (kitsDelProducto.length === 0) {
         return { usarPrecioKit: false };
@@ -277,15 +278,6 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Calcular precio del kit sumando TODOS los insumos
       let precioDelKit = 0;
-
-      // Mapa inverso por claveProd: el campo kit.idInsumo es inconsistente en el codebase
-      // (en unas partes representa el id del producto y en otras la clave_prod del inventario),
-      // por lo que resolvemos el insumo por ambas llaves.
-      const productosPorClave = new Map<number, any>();
-      productosPorId.forEach((prod: any) => {
-        const clave = prod?.claveProd !== undefined && prod?.claveProd !== null ? parseInt(prod.claveProd, 10) : NaN;
-        if (!Number.isNaN(clave)) productosPorClave.set(clave, prod);
-      });
 
       for (const kit of kitsDelProducto) {
         const insumoProducto = productosPorId.get(kit.idInsumo) ?? productosPorClave.get(kit.idInsumo);
@@ -504,7 +496,7 @@ export default function SalesScreen({ route }: { route?: any }) {
 
       // Forzar inclusión de productos especiales (PRESTAMO e INTERCAMBIO detectados por cat_kits)
       productosPorClave.forEach((prod: any, clave: number) => {
-        const prodKits = kitsData.filter((k: any) => k.idProducto === prod.id);
+        const prodKits = kitsPorProducto.get(prod.id) || [];
         if (prodKits.some((k: any) => k.recuperaEnvaseOtro || k.controlPresamo)) {
           todasLasClaves.add(clave);
         }
@@ -521,7 +513,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         const inventariable = Boolean(productoBase?.inventariable);
         const productoId = productoBase?.id ?? claveNum;
         // Detectar intercambio y prestamo por cat_kits (no por producto.intercambio/prestamo)
-        const prodKits = esKit ? kitsData.filter((k: any) => k.idProducto === productoId) : [];
+        const prodKits = esKit ? kitsPorProducto.get(productoId) || [] : [];
         const intercambio = prodKits.some((k: any) => k.recuperaEnvaseOtro);
         const prestamo = prodKits.some((k: any) => k.controlPresamo);
         let descripcion = productoBase?.descripcion || "Sin descripción";
@@ -559,8 +551,9 @@ export default function SalesScreen({ route }: { route?: any }) {
         if (esKit && !inventariable && !esPromocion) {
           const { usarPrecioKit, precioKit } = determinarPrecioKit(
             productoId,
-            kitsData,
+            kitsPorProducto,
             productosPorId,
+            productosPorClave,
             preciosMap,
             preciosDefaultMap,
             preciosPromoMap,
@@ -1927,7 +1920,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     if (selectedClient) {
       // Usar listaPrecio del cliente para buscar precios, si no tiene usar 0 (precio general)
       const listaPrecios = selectedClient.listaPrecio ?? 0;
-
+      
       // Buscar precios promocionales para el cliente
       const preciosPromo = FullSyncService.getPreciosPromoByCliente(selectedClient.id);
 

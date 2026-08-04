@@ -55,6 +55,7 @@ export const UsuarioSchema = {
     dobleTicket: "bool?",
     envaseRuta: "bool?",
     syncedAt: "date",
+    syncedAr: "date?",
   },
   primaryKey: "id",
 };
@@ -76,6 +77,7 @@ export const ProductoSchema = {
     precioCatalogo: "bool?",
     envaseRuta: "bool?",
     syncedAt: "date",
+    syncedAr: "date?",
   },
   primaryKey: "id",
 };
@@ -322,47 +324,21 @@ export const BitacoraSyncSchema = {
   properties: {
     idBitacoraMovil: "string", // Primary key
     tabla: "string",
-    tipoSync: "string", // "incremental" | "full"
     fechaInicio: "date",
-    fechaFinal: "date?",
     duracionMs: "int?",
 
     // Contexto Usuario
     idUsuario: "int?",
-    nombreUsuario: "string?",
-    sucursal: "int?",
-
-    // Contexto Dispositivo
-    ipDispositivo: "string?",
-    nombreDispositivo: "string?",
-    sistemaOperativo: "string?",
-    versionApp: "string?",
-
-    // Contexto Red
-    tipoConexion: "string?", // "wifi", "cellular", "none", "unknown"
-    tipoConexionDetallado: "string?", // "2g", "3g", "4g", "5g", etc.
-    estadoConexion: "int?", // 1 = conectado, 0 = desconectado
-    intensidadSenal: "int?",
-    velocidadDescargaMbps: "double?",
-    velocidadCargaMbps: "double?",
-    latenciaMs: "int?",
-    esConexionMetered: "bool?",
 
     // Contexto App
-    appState: "string?", // "active", "background", "inactive"
-    origenSync: "string?", // "manual" | "background"
+    versionApp: "string?",
     endpoint: "string?",
-    detallesJSON: "string?",
 
     // Resultados
     exitoso: "bool",
     registrosLeidos: "int?",
-    registrosGuardados: "int?",
-    registrosActualizados: "int?",
-    registrosEliminados: "int?",
 
     // Errores
-    error: "string?",
     codigoError: "string?",
     descripcionError: "string?",
     stackTrace: "string?",

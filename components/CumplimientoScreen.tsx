@@ -89,6 +89,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         }
 
         setCurrentSucursal(sucursal);
+        setCurrentUserId(user.id ? Number(user.id) : null);
 
         // Cargar lista completa de clientes (para tabs Cercanos / Todos)
         cargarClientes();
@@ -119,9 +120,19 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [userMetros, setUserMetros] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const ocultarFolios = currentUserId === 4;
 
   // Tabs: 'agendados' (visitas del día) | 'cercanos' (GPS) | 'folios' (pedidos central) | 'todos' (todos los clientes)
   const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "folios" | "todos">("agendados");
+
+  // Si se oculta el tab folios, evitar que quede seleccionado
+  useEffect(() => {
+    if (ocultarFolios && clienteTab === "folios") {
+      setClienteTab("agendados");
+    }
+  }, [ocultarFolios, clienteTab]);
+
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
   const [clientesVisitadosHoy, setClientesVisitadosHoy] = useState<Set<number>>(new Set());
@@ -1117,12 +1128,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         >
           <Text style={[styles.tabItemText, clienteTab === "cercanos" && styles.tabItemTextActive]}>Cercanos</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
-          onPress={() => setClienteTab("folios")}
-        >
-          <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Folios</Text>
-        </TouchableOpacity>
+        {!ocultarFolios && (
+          <TouchableOpacity
+            style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
+            onPress={() => setClienteTab("folios")}
+          >
+            <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Pedido</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.tabItem, clienteTab === "todos" && styles.tabItemActive]}
           onPress={() => setClienteTab("todos")}
@@ -1196,7 +1209,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </View>
           }
         />
-      ) : clienteTab === "folios" ? (
+      ) : clienteTab === "folios" && !ocultarFolios ? (
         <FlatList
           data={visitasFolios}
           renderItem={renderVisita}

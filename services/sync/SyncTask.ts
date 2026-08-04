@@ -166,8 +166,6 @@ export abstract class SyncTask {
         await BitacoraService.registrarFinSync(idBitacora, {
           exitoso: result.success,
           registrosLeidos: result.registrosLeidos,
-          registrosGuardados: result.registrosGuardados,
-          registrosActualizados: result.registrosActualizados,
           error: result.error,
         });
 

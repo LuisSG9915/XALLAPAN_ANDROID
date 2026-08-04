@@ -797,6 +797,12 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
   const isAdmin = currentUser?.id === 4;
 
+  // Menús ocultos por usuario (por id)
+  const hiddenMenusForUser: Record<number, string[]> = {
+    4: ["pedidos"],
+  };
+  const userHiddenMenus = currentUser?.id != null ? hiddenMenusForUser[currentUser.id] : [];
+
   const allMenuItems = [
     {
       id: "sales",
@@ -913,9 +919,12 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   // Menús ocultos del panel principal (siguen registrados/navegables desde otras pantallas)
   const hiddenMenus = ["sales"];
 
-  // Filtrar menús de admin si el usuario no es ID 4 y menús ocultos del panel
+  // Filtrar menús de admin, menús ocultos y menús ocultos para el usuario conectado
   const filteredItems = allMenuItems.filter(
-    (item) => (!adminOnlyMenus.includes(item.id) || isAdmin) && !hiddenMenus.includes(item.id),
+    (item) =>
+      (!adminOnlyMenus.includes(item.id) || isAdmin) &&
+      !hiddenMenus.includes(item.id) &&
+      !userHiddenMenus?.includes(item.id),
   );
 
   // Ordenar: primero los de prioridad, luego el resto
@@ -1047,7 +1056,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.3.3</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.3.4</Text>
         </View>
       </ScrollView>
 

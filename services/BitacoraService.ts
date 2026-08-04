@@ -1,17 +1,12 @@
 import Realm from "realm";
-import NetInfo from "@react-native-community/netinfo";
-import DeviceInfo from "react-native-device-info";
-import { Platform, AppState } from "react-native";
 import AuthService from "./AuthService";
+import DeviceInfo from "react-native-device-info";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
 // Definición de tipos para los resultados de sync
 export interface SyncResult {
   exitoso: boolean;
   registrosLeidos?: number;
-  registrosGuardados?: number;
-  registrosActualizados?: number;
-  registrosEliminados?: number;
   error?: string;
   errorCode?: string;
   stackTrace?: string;
@@ -51,72 +46,23 @@ class BitacoraService {
   ): Promise<string> {
     const realm = this.getRealm();
 
-    // Generar un ID descriptivo como el ejemplo solicitado: TimeStamp-Random-Tabla
+    // Generar un ID descriptivo: TimeStamp-Random-Tabla
     const randomStr = Math.random().toString(36).substring(2, 9);
     const suffix = tipoSync === "incremental" ? "Incremental" : "Full";
     const idBitacoraMovil = `${Date.now()}-${randomStr}-${tabla}${suffix}`;
-    
-    // Capturar contexto
-    const netInfo = await NetInfo.fetch();
-    const ipAddress = await DeviceInfo.getIpAddress().catch(() => "0.0.0.0");
-    const appVersion = DeviceInfo.getVersion();
-    const systemName = DeviceInfo.getSystemName();
-    const systemVersion = DeviceInfo.getSystemVersion();
-    const deviceName = await DeviceInfo.getDeviceName();
-    
-    // Usuario
-    const user = await AuthService.restoreSession();
-    const nombreUsuario = user ? (user.nombre || user.nombreCompleto || user.usuario || null) : null;
-
     const fechaInicio = new Date();
-
-    const details = netInfo.details as any;
-    const intensidadSenal = details?.strength ?? (details?.signalStrength ?? null);
-    const velocidadDescarga = details?.linkSpeed ?? (details?.downlink ?? null);
-    const esMetered = details?.isConnectionMetered ?? false;
-
-    // Medición de latencia deshabilitada temporalmente para optimizar velocidad en background
-    let latenciaMs = null;
+    const appVersion = DeviceInfo.getVersion();
+    const user = await AuthService.restoreSession();
 
     try {
       realm.write(() => {
         realm.create("BitacoraSync", {
           idBitacoraMovil,
           tabla: `${tabla}${suffix}`,
-          tipoSync,
           fechaInicio,
-          
-          // Contexto Dispositivo
-          ipDispositivo: ipAddress,
-          nombreDispositivo: deviceName,
-          sistemaOperativo: `${systemName} ${Platform.Version || systemVersion}`.toLowerCase(),
           versionApp: appVersion,
-
-          // Contexto Red
-          tipoConexion: netInfo.type,
-          tipoConexionDetallado: details?.cellularGeneration || netInfo.type,
-          estadoConexion: netInfo.isConnected ? 1 : 0,
-          intensidadSenal: intensidadSenal, 
-          velocidadDescargaMbps: velocidadDescarga, 
-          velocidadCargaMbps: null, 
-          latenciaMs: latenciaMs,
-          esConexionMetered: esMetered,
-          endpoint: endpoint || null, 
-          
-          // Contexto App
-          appState: AppState.currentState,
-          origenSync,
-          detallesJSON: JSON.stringify({
-            endpoint: endpoint || null,
-            platform: Platform.OS,
-            isWifiEnabled: (netInfo as any).isWifiEnabled,
-            details: details
-          }),
-          
-          // Usuario
+          endpoint: endpoint || null,
           idUsuario: idUsuario || user?.id || user?.idUsuario || 0,
-          nombreUsuario: nombreUsuario,
-          sucursal: sucursal || user?.sucursal || user?.sucursal_origen || 0,
 
           // Valores por defecto
           enviado: false,
@@ -142,16 +88,11 @@ class BitacoraService {
         const registro: any = realm.objectForPrimaryKey("BitacoraSync", idBitacoraMovil);
         if (registro) {
           const ahora = new Date();
-          registro.fechaFinal = ahora;
           registro.duracionMs = ahora.getTime() - registro.fechaInicio.getTime();
           registro.exitoso = result.exitoso;
           registro.registrosLeidos = result.registrosLeidos || 0;
-          registro.registrosGuardados = result.registrosGuardados || 0;
-          registro.registrosActualizados = result.registrosActualizados || 0;
-          registro.registrosEliminados = result.registrosEliminados || 0;
-          
+
           if (!result.exitoso) {
-            registro.error = result.error || "Error desconocido";
             registro.codigoError = result.errorCode || "500";
             registro.descripcionError = result.error || "Error desconocido";
             registro.stackTrace = result.stackTrace;
@@ -193,47 +134,24 @@ class BitacoraService {
 
     if (pendientes.length === 0) return;
 
-    const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_BitacoraSyncArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+    const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_BitacoraSyncOptimizadoArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
     console.log(`[BitacoraService] Enviando ${pendientes.length} registros de bitácora...`);
     console.log(`[BitacoraService] URL:`, url);
 
     const payload = pendientes.map((p: any) => ({
       idBitacoraMovil: p.idBitacoraMovil,
       tabla: p.tabla,
-      tipoSync: p.tipoSync,
       fechaInicio: this.formatDate(p.fechaInicio),
-      fechaFinal: p.fechaFinal ? this.formatDate(p.fechaFinal) : this.formatDate(new Date()),
       duracionMs: p.duracionMs || 0,
-      
       idUsuario: p.idUsuario,
-      nombreUsuario: p.nombreUsuario,
-      ipDispositivo: p.ipDispositivo || "0.0.0.0",
-      nombreDispositivo: p.nombreDispositivo || "unknown",
-      sistemaOperativo: p.sistemaOperativo || "unknown",
       versionApp: p.versionApp || "1.0.0",
-      sucursal: p.sucursal || sucursal,
-
       endpoint: p.endpoint || null,
       registrosLeidos: p.registrosLeidos || 0,
-      registrosGuardados: p.registrosGuardados || 0,
-      registrosActualizados: p.registrosActualizados || 0,
-      registrosEliminados: p.registrosEliminados || 0,
-      
       exitoso: p.exitoso || false,
       codigoError: p.codigoError || null,
       descripcionError: p.descripcionError || null,
       stackTrace: p.stackTrace || null,
-      detallesJSON: p.detallesJSON || null,
       fechaArrastre: this.formatDate(new Date()),
-
-      tipoConexion: p.tipoConexion || "unknown",
-      tipoConexionDetallado: p.tipoConexionDetallado || null,
-      estadoConexion: p.estadoConexion ?? 1,
-      intensidadSenal: p.intensidadSenal || 0,
-      velocidadDescargaMbps: p.velocidadDescargaMbps || 0,
-      velocidadCargaMbps: p.velocidadCargaMbps || 0,
-      latenciaMs: p.latenciaMs || 0,
-      esConexionMetered: p.esConexionMetered ? 1 : 0
     }));
 
     console.log(`[BitacoraService] 📤 Primer registro del payload:`, payload[0]);

@@ -26,8 +26,14 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 54,
+        schemaVersion: 55,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v55: Agregar syncedAr a Usuario y Producto para sincronización parcial.
+          // Los campos son opcionales; Realm los inicializa en null. No es necesario copiar datos.
+          if (oldRealm.schemaVersion < 55) {
+            console.log("[Migration v55] Agregando syncedAr a Usuario y Producto");
+          }
+
           // Migración v54: Nueva tabla BitacoraTrackingGps (tracking de recorrido cada ~30s).
           // Realm creará automáticamente la tabla. No hay que mover datos porque los pings
           // anteriores se seguirán enviando desde BitacoraGps/BitacoraValidacion viejos.
@@ -862,12 +868,11 @@ class FullSyncService {
           let last = this.getLastSyncedAr(tableName);
 
           if (!last) {
-            last = new Date();
-            last.setDate(last.getDate() - 2);
+            last = new Date("1900-01-01T00:00:00");
           }
 
           const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes/full?sucursal=${sucursal}`;
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(fechaInicial)}&sucursal=${sucursal}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
             tableName,
             "incremental",
@@ -894,13 +899,9 @@ class FullSyncService {
             const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
             let registrosGuardados = 0;
             let registrosActualizados = 0;
-            let registrosEliminados = 0;
 
             this.realm!.write(() => {
-              // Crear un Set con los IDs de clientes del servidor para búsqueda rápida
-              const idsDelServidor = new Set(clientes.map((c: any) => c.id));
-
-              // Actualizar/crear clientes del servidor
+              // Actualizar/crear clientes del servidor (parcial, no se eliminan locales)
               for (const cliente of clientes) {
                 const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
 
@@ -928,36 +929,15 @@ class FullSyncService {
                   registrosGuardados++;
                 }
               }
-
-              // Eliminar clientes locales que no están en la respuesta del servidor
-              const todosLosClientesLocales = this.realm!.objects("ClienteFull");
-              const clientesAEliminar: any[] = [];
-
-              for (const clienteLocal of todosLosClientesLocales) {
-                const id = (clienteLocal as any).id;
-                if (!idsDelServidor.has(id)) {
-                  clientesAEliminar.push(clienteLocal);
-                }
-              }
-
-              if (clientesAEliminar.length > 0) {
-                console.log(
-                  `[Incremental] Eliminando ${clientesAEliminar.length} clientes que no están en el servidor`,
-                );
-                this.realm!.delete(clientesAEliminar);
-                registrosEliminados = clientesAEliminar.length;
-              }
             });
 
             console.log(
-              `[Incremental] Clientes: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}, eliminados=${registrosEliminados}`,
+              `[Incremental] Clientes: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
             );
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -982,7 +962,14 @@ class FullSyncService {
         name: "UsuariosIncremental",
         run: async () => {
           const tableName = "Usuario";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios/full`;
+          let last = this.getLastSyncedAr(tableName);
+
+          if (!last) {
+            last = new Date("1900-01-01T00:00:00");
+          }
+
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
             tableName,
             "incremental",
@@ -993,7 +980,7 @@ class FullSyncService {
           );
 
           try {
-            console.log("[Incremental] Usuarios full desde", url);
+            console.log("[Incremental] Usuarios desde", fechaInicial, url);
             const response = await fetchWithTimeout(url, {
               headers: { accept: "application/json" },
             });
@@ -1078,8 +1065,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -1103,10 +1088,18 @@ class FullSyncService {
       {
         name: "ProductosIncremental",
         run: async () => {
-          const tableName = "Productos";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
+          const tableName = "Producto"; // nombre del schema en Realm
+          const syncLogTableName = "Productos"; // nombre para bitácora de sync
+          let last = this.getLastSyncedAr(tableName);
+
+          if (!last) {
+            last = new Date("1900-01-01T00:00:00");
+          }
+
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/productos?fechaInicial=${encodeURIComponent(fechaInicial)}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
+            syncLogTableName,
             "incremental",
             "background",
             idUsuario,
@@ -1115,7 +1108,7 @@ class FullSyncService {
           );
 
           try {
-            console.log("[Incremental] Productos desde", url);
+            console.log("[Incremental] Productos desde", fechaInicial, url);
 
             const response = await fetchWithTimeout(url, {
               headers: { accept: "application/json" },
@@ -1128,15 +1121,11 @@ class FullSyncService {
             const registrosLeidos = Array.isArray(productos) ? productos.length : 0;
             let registrosGuardados = 0;
             let registrosActualizados = 0;
-            let registrosEliminados = 0;
 
             this.realm!.write(() => {
-              // Crear un Set con los IDs de productos del servidor para búsqueda rápida
-              const idsDelServidor = new Set(productos.map((p: any) => p.id));
-
-              // Actualizar/crear productos del servidor
+              // Actualizar/crear productos del servidor (parcial, no se eliminan locales)
               for (const producto of productos) {
-                const existing = this.realm!.objectForPrimaryKey("Producto", producto.id) as any;
+                const existing = this.realm!.objectForPrimaryKey(tableName, producto.id) as any;
 
                 const productoData: any = {
                   ...producto,
@@ -1145,44 +1134,22 @@ class FullSyncService {
                 };
 
                 if (existing) {
-                  this.realm!.create("Producto", productoData, UpdateMode.Modified);
+                  this.realm!.create(tableName, productoData, UpdateMode.Modified);
                   registrosActualizados++;
                 } else {
-                  this.realm!.create("Producto", productoData);
+                  this.realm!.create(tableName, productoData);
                   registrosGuardados++;
                 }
-              }
-
-              // Eliminar productos locales que no están en la respuesta del servidor
-              const todosLosProductosLocales = this.realm!.objects("Producto");
-              const productosAEliminar: any[] = [];
-
-              for (const productoLocal of todosLosProductosLocales) {
-                const id = (productoLocal as any).id;
-                if (!idsDelServidor.has(id)) {
-                  productosAEliminar.push(productoLocal);
-                }
-              }
-
-              if (productosAEliminar.length > 0) {
-                console.log(
-                  `[Incremental] Eliminando ${productosAEliminar.length} productos que no están en el servidor`,
-                );
-                this.realm!.delete(productosAEliminar);
-                registrosEliminados = productosAEliminar.length;
               }
             });
 
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-              registrosEliminados,
             });
 
             return {
-              tabla: tableName,
+              tabla: syncLogTableName,
               endpoint: url,
               registrosLeidos,
               registrosGuardados,
@@ -1261,8 +1228,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -1349,8 +1314,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -1428,8 +1391,6 @@ class FullSyncService {
       //       await BitacoraService.registrarFinSync(idBitacora, {
       //         exitoso: true,
       //         registrosLeidos,
-      //         registrosGuardados,
-      //         registrosActualizados,
       //       });
 
       //       return {
@@ -1602,8 +1563,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -1699,8 +1658,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -1746,8 +1703,6 @@ class FullSyncService {
               await BitacoraService.registrarFinSync(idBitacora, {
                 exitoso: true,
                 registrosLeidos: 0,
-                registrosGuardados: 0,
-                registrosActualizados: 0,
               });
 
               return {
@@ -1820,8 +1775,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos: visitasArray.length,
-              registrosGuardados: 0,
-              registrosActualizados: visitasArray.length,
             });
 
             return {
@@ -1908,8 +1861,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados: registrosLeidos,
-              registrosActualizados: 0,
             });
 
             return {
@@ -1996,8 +1947,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: true,
               registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
             });
 
             return {
@@ -2120,8 +2069,6 @@ class FullSyncService {
             await BitacoraService.registrarFinSync(idBitacora, {
               exitoso: result.success,
               registrosLeidos: result.registros,
-              registrosGuardados: result.registros,
-              registrosActualizados: 0,
               error: result.error,
             });
 
@@ -4299,28 +4246,19 @@ class FullSyncService {
         folio: b.folio,
         fecha: formatDate(b.fecha),
         ruta: b.ruta,
-        cliente: b.cliente,
-        idCanal: b.idCanal ?? null,
         fechaAtencion: formatDate(b.fechaAtencion),
         idVendedor: b.idVendedor,
         idProducto: b.idProducto ?? null,
-        cantPedido: b.cantPedido ?? null,
         precio: b.precio ?? null,
-        observaciones: b.observaciones ?? null,
-        listaPrecio: b.listaPrecio ?? null,
-        fechaEntrega: formatDate(b.fechaEntrega),
         estatus: b.estatus,
+        estatus_anterior: b.estatusAnterior ?? null,
         cantAtencion: b.cantAtencion ?? null,
         precioAtencion: b.precioAtencion ?? null,
         causaDiferencia: b.causaDiferencia ?? null,
         obserDiferencia: b.obserDiferencia ?? null,
         causaNoAtencion: b.causaNoAtencion ?? null,
         obserNoAtencion: b.obserNoAtencion ?? null,
-        usrAlta: b.usrAlta ?? idUsuario,
-        fueraAgenda: b.fueraAgenda ?? null,
         no_venta: b.no_venta ?? null,
-        fecha_movil: formatDate(b.fecha),
-        estatus_anterior: b.estatusAnterior ?? null,
         tipo_cambio: b.tipoCambio ?? null,
         enviado: 1,
         fecha_envio: formatDate(this.getMexicoNow()),
@@ -4535,8 +4473,6 @@ class FullSyncService {
           await BitacoraService.registrarFinSync(idBitacora, {
             exitoso: true,
             registrosLeidos: productos.length,
-            registrosGuardados: productosGuardados,
-            registrosActualizados: productosActualizados,
           });
         }
       } else {

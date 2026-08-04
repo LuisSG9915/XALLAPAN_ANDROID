@@ -641,16 +641,14 @@ export default function DataViewScreen() {
           </Text>
         </View>
         <View style={styles.cardBody}>
-          <Text style={styles.cardText}>Tipo: {item.tipoSync}</Text>
-          <Text style={styles.cardText}>Usuario: {item.nombreUsuario}</Text>
-          <Text style={styles.cardText}>Sucursal: {item.sucursal}</Text>
           <Text style={styles.cardText}>Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}</Text>
           <Text style={styles.cardText}>Duración: {item.duracionMs ? `${item.duracionMs} ms` : "N/A"}</Text>
-          <Text style={styles.cardText}>
-            Leídos: {item.registrosLeidos || 0} | Guardados: {item.registrosGuardados || 0}
-          </Text>
-          <Text style={styles.cardText}>Conexión: {item.tipoConexion}</Text>
-          {item.error && <Text style={[styles.cardText, { color: COLORS.error }]}>Error: {item.error}</Text>}
+          <Text style={styles.cardText}>Leídos: {item.registrosLeidos || 0}</Text>
+          {item.codigoError && (
+            <Text style={[styles.cardText, { color: COLORS.error }]}>
+              Error: {item.codigoError} - {item.descripcionError}
+            </Text>
+          )}
         </View>
       </View>
     </TouchableOpacity>
