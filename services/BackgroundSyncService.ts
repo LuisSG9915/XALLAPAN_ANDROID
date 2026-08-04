@@ -53,8 +53,12 @@ class BackgroundSyncService {
   // Estado interno
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isBackgroundFetchConfigured = false;
+  // Bandera para evitar carreras concurrentes en start()
+  private isStarting = false;
   // Bandera para cancelar la sincronización en curso entre tareas
   private cancelRequested = false;
+  // Último intento de sincronización (para evitar syncs más frecuentes que el intervalo)
+  private lastSyncAttemptTime: number | null = null;
   private state: BackgroundSyncState = {
     status: "idle",
     lastSyncTime: null,
@@ -83,18 +87,27 @@ class BackgroundSyncService {
   async start(): Promise<void> {
     console.log("[BackgroundSync] 🔍 start() llamado", {
       intervalId: !!this.intervalId,
+      isStarting: this.isStarting,
       status: this.state.status,
     });
 
-    // Si ya está activo, no hacer nada
-    if (this.intervalId) {
-      console.log("[BackgroundSync] ✅ Ya está activo, ignorando llamada duplicada");
+    // Si ya está activo o iniciándose, no hacer nada
+    if (this.intervalId || this.isStarting) {
+      console.log("[BackgroundSync] ✅ Ya está activo o iniciándose, ignorando llamada duplicada");
       return;
     }
+
+    this.isStarting = true;
 
     try {
       // Configurar BackgroundFetch para sincronización en segundo plano
       await this.configureBackgroundFetch();
+
+      // Doble chequeo: otro start pudo haber creado el intervalo mientras se configuraba
+      if (this.intervalId) {
+        console.log("[BackgroundSync] ✅ Intervalo creado por otra llamada mientras se configuraba");
+        return;
+      }
 
       // Iniciar intervalo de sincronización en primer plano (cada 3 minutos)
       this.intervalId = setInterval(() => {
@@ -124,6 +137,8 @@ class BackgroundSyncService {
         status: "error",
         errorMessage: "No se pudo iniciar la sincronización automática",
       });
+    } finally {
+      this.isStarting = false;
     }
   }
 
@@ -153,10 +168,15 @@ class BackgroundSyncService {
           // Este callback se ejecuta cuando la app está activa
           console.log("[BackgroundFetch] Tarea recibida (app activa):", taskId);
 
-          try {
-            await this.performSync();
-          } catch (error) {
-            console.error("[BackgroundFetch] Error en sincronización:", error);
+          // Si el intervalo de primer plano ya está corriendo, no duplicar la sync
+          if (this.intervalId) {
+            console.log("[BackgroundFetch] Intervalo de primer plano activo, omitiendo sync");
+          } else {
+            try {
+              await this.performSync();
+            } catch (error) {
+              console.error("[BackgroundFetch] Error en sincronización:", error);
+            }
           }
 
           // IMPORTANTE: Siempre llamar finish() cuando termine
@@ -247,7 +267,7 @@ class BackgroundSyncService {
    * Ejecuta una sincronización manual (no afecta el intervalo automático)
    */
   async syncNow(): Promise<void> {
-    await this.performSync();
+    await this.performSync(true);
   }
 
   /**
@@ -304,7 +324,7 @@ class BackgroundSyncService {
     }
 
     try {
-      await this.performSync();
+      await this.performSync(true);
       if (Platform.OS === "android" && this.state.status === "success") {
         ToastAndroid.show("Sincronización completa", ToastAndroid.SHORT);
       }
@@ -341,12 +361,13 @@ class BackgroundSyncService {
    * - Retry logic con exponential backoff
    * - Dependencias entre tablas
    */
-  private async performSync(): Promise<void> {
+  private async performSync(force = false): Promise<void> {
     const syncStartTime = Date.now();
     console.log("[BackgroundSync] 🔄 performSync llamado", {
       currentStatus: this.state.status,
       lastSync: this.state.lastSyncTime,
       nextSync: this.state.nextSyncTime,
+      force,
     });
 
     // Si ya está sincronizando, no iniciar otra
@@ -354,6 +375,23 @@ class BackgroundSyncService {
       console.warn("[BackgroundSync] ⚠️ Ya hay una sincronización en curso, omitiendo");
       return;
     }
+
+    // Guarda de frecuencia mínima: evita que dos disparadores (setInterval, BackgroundFetch,
+    // llamadas concurrentes a start) ejecuten una sync antes de que pase el tiempo configurado.
+    if (
+      !force &&
+      this.lastSyncAttemptTime &&
+      syncStartTime - this.lastSyncAttemptTime < this.SYNC_INTERVAL_MS - 5000
+    ) {
+      const secondsSinceLast = Math.round((syncStartTime - this.lastSyncAttemptTime) / 1000);
+      console.warn(
+        `[BackgroundSync] ⚠️ Sincronización intentada a los ${secondsSinceLast}s, omitiendo (mínimo ${this.SYNC_INTERVAL_MS / 1000}s)`,
+      );
+      return;
+    }
+
+    // Registrar el intento ANTES de cualquier await para bloquear reentradas concurrentes
+    this.lastSyncAttemptTime = syncStartTime;
 
     // Verificar si hay usuario logueado ANTES de cambiar estado
     const user = await AuthService.restoreSession();
