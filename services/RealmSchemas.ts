@@ -23,6 +23,8 @@ export const VentaSchema = {
     latitud: "double?",
     longitud: "double?",
     observacion: "string?",
+    idPedido: "int?",
+    idLista: "int?",
     syncedAt: "date",
     syncedAr: "date?",
   },

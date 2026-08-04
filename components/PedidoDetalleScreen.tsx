@@ -16,6 +16,8 @@ import PedidosService, { Pedido, ESTATUS_PEDIDO } from "../services/PedidosServi
 import FullSyncService from "../services/FullSyncService";
 import AuthService from "../services/AuthService";
 import LocationService from "../services/LocationService";
+import VisitaSyncService from "../services/VisitaSyncService";
+import DetalleVisitasService from "../services/DetalleVisitasService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
 interface Props {
@@ -261,6 +263,143 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     }
   };
 
+  const registrarVisitaPorEntrega = async (pedidoCerrado: Pedido, sucursal: number, idUsuario: number): Promise<void> => {
+    try {
+      const visitasDelDia = await VisitaSyncService.getInstance().getVisitasByFecha(new Date(), sucursal);
+      const visitaPendiente = visitasDelDia
+        .filter((v: any) => v.visitado === 0)
+        .find((v: any) => v.idCliente === pedidoCerrado.cliente);
+
+      if (visitaPendiente) {
+        await VisitaSyncService.getInstance().marcarVisitado(
+          visitaPendiente.id,
+          1,
+          new Date(visitaPendiente.fecha),
+        );
+      }
+    } catch (error) {
+      console.warn(`[PedidoDetalle] No se pudo marcar la visita del pedido ${pedidoCerrado.folio}:`, error);
+    }
+
+    try {
+      await DetalleVisitasService.getInstance().registrarVisitaCompleta(
+        pedidoCerrado.cliente,
+        idUsuario,
+        sucursal,
+        1,
+      );
+    } catch (error) {
+      console.warn(`[PedidoDetalle] No se pudo registrar DetalleVisitas del pedido ${pedidoCerrado.folio}:`, error);
+    }
+  };
+
+  const registrarVentaEInventarioPedido = async (
+    pedidoCerrado: Pedido,
+    productosEntregados: Pedido[],
+    idMovil: number,
+    sucursal: number,
+    user: any,
+    idUsuario: number,
+  ): Promise<void> => {
+    const productosCatalogo = FullSyncService.getProductos(100000);
+    const listaCliente = pedidoCerrado.listaPrecio ?? null;
+    const obtenerListaProducto = (idProducto: number): number | null => {
+      const tienePrecioListaCliente = preciosLista.some(
+        (p: any) => parseInt(p.claveProd || "0", 10) === idProducto,
+      );
+      return tienePrecioListaCliente ? listaCliente : 13;
+    };
+    const entregas = productosEntregados
+      .map((producto) => {
+        const cantidad = Number(producto.cantAtencion ?? 0);
+        const precio = Number(producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto));
+        const productoCatalogo = productosCatalogo.find((p: any) => Number(p.id) === Number(producto.idProducto));
+        return {
+          idProducto: producto.idProducto,
+          nombreProducto: producto.productoNombre || productoCatalogo?.descripcion || `Producto #${producto.idProducto}`,
+          cantidad,
+          precio: Number.isFinite(precio) ? precio : 0,
+          idLista: obtenerListaProducto(producto.idProducto),
+          esKit: productoCatalogo?.esKit === true,
+        };
+      })
+      .filter((producto) => Number.isFinite(producto.cantidad) && producto.cantidad > 0);
+
+    if (entregas.length === 0) {
+      throw new Error(`El pedido ${pedidoCerrado.folio} no tiene productos entregados`);
+    }
+
+    const ventasExistentes = FullSyncService.getVentasByMovilId(idMovil);
+    if (ventasExistentes.length > 0) {
+      console.log(`[PedidoDetalle] Venta ya registrada para id_movil ${idMovil}; se omite duplicar venta e inventario`);
+      return;
+    }
+
+    const nombreCliente = pedidoCerrado.clienteNombre || clienteNombre || `Cliente #${pedidoCerrado.cliente}`;
+    const vendedor = user?.claveEmpleado || user?.nombre || String(idUsuario);
+    const fechaVenta = FullSyncService.getMexicoNow();
+
+    await FullSyncService.createLocalVentas(
+      entregas.map((entrega, index) => ({
+        id: idMovil + index,
+        idMovil,
+        sucursal,
+        noVenta: 0,
+        claveProd: entrega.idProducto,
+        nombreProducto: entrega.nombreProducto,
+        cantProducto: entrega.cantidad,
+        precio: entrega.precio,
+        importe: entrega.precio * entrega.cantidad,
+        cveCliente: pedidoCerrado.cliente,
+        nombreCliente,
+        fecha: fechaVenta,
+        tipoPago: 1,
+        descripcionMedioPago: "Efectivo",
+        vendedor,
+        folioFactura: false,
+        facturacionMovil: false,
+        latitud: null,
+        longitud: null,
+        observacion: pedidoCerrado.observaciones ?? "",
+        idPedido: pedidoCerrado.idPedido ?? pedidoCerrado.folio,
+        idLista: entrega.idLista,
+      })),
+    );
+
+    await FullSyncService.updateInventarioAfterSaleScreen(
+      entregas.map((entrega) => ({
+        sucursal,
+        claveProd: entrega.idProducto,
+        cantidad: entrega.cantidad,
+        esKit: entrega.esKit,
+        idProducto: entrega.idProducto,
+      })),
+    );
+  };
+
+  const procesarCierreComoVenta = async (
+    pedidoCerrado: Pedido,
+    productosEntregados: Pedido[],
+    idMovil: number,
+  ): Promise<void> => {
+    const user = await AuthService.restoreSession();
+    const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedidoCerrado.idVendedor ?? 1);
+    const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoCerrado.ruta || 1);
+
+    await registrarVisitaPorEntrega(pedidoCerrado, sucursal, idUsuario);
+    await registrarVentaEInventarioPedido(pedidoCerrado, productosEntregados, idMovil, sucursal, user, idUsuario);
+
+    const ventaArrastre = await FullSyncService.syncPostVenta(sucursal, idUsuario);
+    if (!ventaArrastre.success) {
+      console.warn(`[PedidoDetalle] Arrastre de venta pendiente para folio ${pedidoCerrado.folio}:`, ventaArrastre.error);
+    }
+
+    const bitacoraArrastre = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
+    if (!bitacoraArrastre.success) {
+      console.warn(`[PedidoDetalle] Arrastre de bitácora pendiente para folio ${pedidoCerrado.folio}:`, bitacoraArrastre.error);
+    }
+  };
+
   const confirmarEntrega = () => {
     const productosConDiferencia = productos.filter((p) => {
       const cantAtencion = p.cantAtencion ?? 0;
@@ -300,24 +439,37 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       { text: "Cancelar", style: "cancel" },
       {
         text: "Confirmar",
-        onPress: () => {
+        onPress: async () => {
           const pedidosService = PedidosService.getInstance();
           pedidosService.setRealm((FullSyncService as any).realm);
 
+          const pedidoCerrado = pedido;
+          const productosEntregados = [...productos];
+          if (!pedidoCerrado) {
+            Alert.alert("Error", "No se encontró el pedido para confirmar la entrega");
+            return;
+          }
+
           const result = pedidosService.finalizarPedido(folio, nuevoEstatus);
 
-          if (result.success) {
-            AuthService.restoreSession().then((user) => {
-              if (!user) return;
-              const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
-              FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
-                .then((r) => console.log(`[PedidoDetalle] Arrastre bitacora pedidos confirmar entrega folio ${folio}:`, r))
-                .catch((e) => console.warn("[PedidoDetalle] Error arrastre bitacora pedidos:", e));
-            }).catch((e) => console.warn("[PedidoDetalle] Error obteniendo sesion:", e));
-
-            Alert.alert("Éxito", nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada", [
-              { text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } },
-            ]);
+          if (result.success && result.idMovil) {
+            try {
+              await procesarCierreComoVenta(pedidoCerrado, productosEntregados, result.idMovil);
+              Alert.alert(
+                "Éxito",
+                nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada",
+                [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
+              );
+            } catch (error) {
+              console.error(`[PedidoDetalle] Error al completar cierre como venta para folio ${folio}:`, error);
+              Alert.alert(
+                "Entrega confirmada",
+                "El pedido se cerró, pero no se pudo completar la venta o el descuento de inventario. Verifica el registro antes de reintentar.",
+                [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
+              );
+            }
+          } else if (result.success) {
+            Alert.alert("Error", "El pedido se cerró sin un id_movil válido; no se pudo registrar la venta");
           } else {
             Alert.alert("Error", "No se pudo confirmar la entrega");
           }

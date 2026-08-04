@@ -18,10 +18,25 @@ interface PedidoAgrupado extends Pedido {
   folioKey: number;
   total?: number;
 }
+
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService";
 import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
+
+const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
+  if (!fechaEntrega) return false;
+
+  const fecha = fechaEntrega instanceof Date ? fechaEntrega : new Date(String(fechaEntrega));
+  if (Number.isNaN(fecha.getTime())) return false;
+
+  const hoy = new Date();
+  return (
+    fecha.getFullYear() === hoy.getFullYear() &&
+    fecha.getMonth() === hoy.getMonth() &&
+    fecha.getDate() === hoy.getDate()
+  );
+};
 
 export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [pedidos, setPedidos] = useState<PedidoAgrupado[]>([]);
@@ -102,7 +117,9 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const folios = pedidosService.getFoliosByRuta(ruta);
+      const folios = pedidosService.getFoliosByRuta(ruta).filter((folio) =>
+        pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
+      );
       const pedidosAgrupados: PedidoAgrupado[] = [];
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
@@ -145,7 +162,9 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const folios = pedidosService.getFoliosByRuta(currentRuta);
+        const folios = pedidosService.getFoliosByRuta(currentRuta).filter((folio) =>
+          pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
+        );
         const pedidosAgrupados: PedidoAgrupado[] = [];
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);

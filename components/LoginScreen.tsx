@@ -16,6 +16,7 @@ import { Icon } from "react-native-elements";
 import AuthService from "../services/AuthService";
 import FullSyncService, { SyncProgress } from "../services/FullSyncService";
 import BackgroundSyncService from "../services/BackgroundSyncService";
+import PedidoNotificacionService from "../services/PedidoNotificacionService";
 import SyncProgressModal from "./SyncProgressModal";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
@@ -33,6 +34,11 @@ export default function LoginScreen({ navigation }: any) {
       if (session) {
         console.log("Session found, redirecting to Home");
         navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+        setTimeout(() => {
+          PedidoNotificacionService.procesarNavegacionPendiente().catch((error) =>
+            console.warn("[Login] Error procesando pedido pendiente:", error),
+          );
+        }, 0);
       }
     };
     checkSession();
@@ -87,6 +93,11 @@ export default function LoginScreen({ navigation }: any) {
       });
 
       navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+      setTimeout(() => {
+        PedidoNotificacionService.procesarNavegacionPendiente().catch((error) =>
+          console.warn("[Login] Error procesando pedido pendiente después del login:", error),
+        );
+      }, 0);
     } catch (err: any) {
       console.error("[Login] Error completo:", err);
       const msg = err?.message || String(err) || "Ocurrió un error al iniciar sesión";

@@ -3,17 +3,19 @@
 import Realm from "realm";
 import notifee, { AndroidImportance, EventType } from "@notifee/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { navigate } from "./navigationRef";
+import { navigationRef } from "./navigationRef";
 import PedidosService, { Pedido, ESTATUS_PEDIDO } from "./PedidosService";
 import AuthService from "./AuthService";
 import FullSyncService from "./FullSyncService";
 
 const CHANNEL_ID = "pedidos-central";
+const PENDING_NAVIGATION_KEY = "@xallapan/pedido_pendiente_navegacion";
 
 class PedidoNotificacionService {
   private static instance: PedidoNotificacionService;
   private realm: any = null;
   private inicializado = false;
+  private navegacionPendienteEnCurso: Promise<boolean> | null = null;
 
   private constructor() {}
 
@@ -28,18 +30,22 @@ class PedidoNotificacionService {
     this.realm = realm;
   }
 
+  private async asegurarCanalNotificacion(): Promise<void> {
+    await notifee.createChannel({
+      id: CHANNEL_ID,
+      name: "Pedidos de Central",
+      sound: "default",
+      importance: AndroidImportance.HIGH,
+      vibration: true,
+    });
+  }
+
   async inicializar(): Promise<void> {
     if (this.inicializado) return;
 
     try {
       // Canal de notificaciones para Android
-      await notifee.createChannel({
-        id: CHANNEL_ID,
-        name: "Pedidos de Central",
-        sound: "default",
-        importance: AndroidImportance.HIGH,
-        vibration: true,
-      });
+      await this.asegurarCanalNotificacion();
 
       // Solicitar permiso en iOS
       const settings = await notifee.requestPermission();
@@ -47,10 +53,25 @@ class PedidoNotificacionService {
 
       // Escuchar eventos en primer plano
       notifee.onForegroundEvent(({ type, detail }) => {
-        if (type === EventType.PRESS && detail?.notification?.data) {
+        if (
+          (type === EventType.PRESS || type === EventType.ACTION_PRESS) &&
+          detail?.notification?.data
+        ) {
           this.manejarToqueNotificacion(detail.notification.data as any);
         }
       });
+
+      try {
+        const initialNotification = await notifee.getInitialNotification();
+        if (initialNotification?.notification?.data) {
+          await AsyncStorage.setItem(
+            PENDING_NAVIGATION_KEY,
+            JSON.stringify(initialNotification.notification.data),
+          );
+        }
+      } catch (error) {
+        console.warn("[PedidoNotificacionService] No se pudo obtener la notificación inicial:", error);
+      }
 
       this.inicializado = true;
       console.log("[PedidoNotificacionService] Servicio inicializado");
@@ -65,11 +86,14 @@ class PedidoNotificacionService {
   static registrarBackgroundHandler(): void {
     notifee.onBackgroundEvent(async ({ type, detail }) => {
       const { notification } = detail || {};
-      if (type === EventType.PRESS && notification?.data) {
+      if (
+        (type === EventType.PRESS || type === EventType.ACTION_PRESS) &&
+        notification?.data
+      ) {
         const data = notification.data as any;
         // Guardar intención de navegación para cuando la app se inicie
         try {
-          await AsyncStorage.setItem("@xallapan/pedido_pendiente_navegacion", JSON.stringify(data));
+          await AsyncStorage.setItem(PENDING_NAVIGATION_KEY, JSON.stringify(data));
         } catch (e) {
           console.warn("[PedidoNotificacionService] No se pudo guardar intención de navegación:", e);
         }
@@ -94,19 +118,32 @@ class PedidoNotificacionService {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (!pedido) continue;
 
-        // Solo notificar pedidos programados, aun no notificados ni cerrados
+        // Solo notificar pedidos confirmados, aun no notificados ni cerrados
         const ESTATUS_FINALES_NOTIF = [
           ESTATUS_PEDIDO.ENTREGADO,
           ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
           ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
           ESTATUS_PEDIDO.CANCELADO,
         ];
+        if (pedido.estatus !== ESTATUS_PEDIDO.CONFIRMADO) {
+          console.log(
+            `[PedidoNotificacionService] Folio ${folio} tiene estatus ${pedido.estatus}, no es un pedido confirmado`,
+          );
+          continue;
+        }
         if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO || ESTATUS_FINALES_NOTIF.includes(pedido.estatus)) {
           console.log(`[PedidoNotificacionService] Folio ${folio} ya notificado o atendido, omitiendo`);
           continue;
         }
 
-        await this.mostrarNotificacionPedido(pedido);
+        const notificacionMostrada = await this.mostrarNotificacionPedido(pedido);
+        if (!notificacionMostrada) {
+          console.warn(
+            `[PedidoNotificacionService] No se marcara como NOTIFICADO el folio ${folio} porque la notificación no pudo mostrarse`,
+          );
+          continue;
+        }
+
         await this.registrarVisitaFueraAgenda(pedido);
 
         // Marcar como notificado para evitar duplicados en futuras sincronizaciones
@@ -117,8 +154,9 @@ class PedidoNotificacionService {
     }
   }
 
-  async mostrarNotificacionPedido(pedido: Pedido): Promise<void> {
+  async mostrarNotificacionPedido(pedido: Pedido): Promise<boolean> {
     try {
+      await this.asegurarCanalNotificacion();
       const cliente = this.realm?.objectForPrimaryKey("ClienteFull", pedido.cliente) as any;
       const clienteNombre = cliente?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`;
       const clienteDireccion = cliente?.domicilio || pedido.clienteDomicilio || "Sin dirección";
@@ -144,37 +182,134 @@ class PedidoNotificacionService {
         },
       });
       console.log(`[PedidoNotificacionService] Notificación mostrada para folio ${pedido.folio}`);
+      return true;
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al mostrar notificación:", error);
+      return false;
     }
   }
 
   private async manejarToqueNotificacion(data: any): Promise<void> {
-    const folio = data?.folio ? parseInt(data.folio) : null;
+    const folio = data?.folio ? parseInt(String(data.folio), 10) : null;
     if (!folio) return;
 
     try {
-      const pedidosService = PedidosService.getInstance();
-      if (this.realm) {
-        pedidosService.setRealm(this.realm);
-      }
-      const result = pedidosService.iniciarAtencionPedido(folio);
-      console.log(`[PedidoNotificacionService] Iniciar atencion folio ${folio}: ${result}`);
-
-      // Enviar arrastre de bitacoras pendientes al tocar la notificacion
-      AuthService.restoreSession().then((user) => {
-        if (!user) return;
-        const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
-        FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
-          .then((r) => console.log(`[PedidoNotificacionService] Arrastre bitacora pedidos folio ${folio}:`, r))
-          .catch((e) => console.warn("[PedidoNotificacionService] Error arrastre bitacora pedidos:", e));
-      }).catch((e) => console.warn("[PedidoNotificacionService] Error obteniendo sesion:", e));
+      await AsyncStorage.setItem(PENDING_NAVIGATION_KEY, JSON.stringify(data));
+      await this.procesarNavegacionPendiente();
     } catch (error) {
-      console.error("[PedidoNotificacionService] Error al iniciar atencion:", error);
+      console.error("[PedidoNotificacionService] Error al procesar toque de notificación:", error);
+    }
+  }
+
+  async procesarNavegacionPendiente(): Promise<boolean> {
+    if (this.navegacionPendienteEnCurso) {
+      return this.navegacionPendienteEnCurso;
     }
 
-    console.log(`[PedidoNotificacionService] Navegando a pedido ${folio}`);
-    navigate("PedidoDetalle", { folio, soloLectura: false });
+    const proceso = this.procesarNavegacionPendienteInterno();
+    this.navegacionPendienteEnCurso = proceso;
+
+    try {
+      return await proceso;
+    } finally {
+      if (this.navegacionPendienteEnCurso === proceso) {
+        this.navegacionPendienteEnCurso = null;
+      }
+    }
+  }
+
+  private async procesarNavegacionPendienteInterno(): Promise<boolean> {
+    try {
+      const pending = await AsyncStorage.getItem(PENDING_NAVIGATION_KEY);
+      if (!pending) return false;
+
+      let data: any;
+      try {
+        data = JSON.parse(pending);
+      } catch (error) {
+        console.warn("[PedidoNotificacionService] Intención de navegación inválida:", error);
+        await AsyncStorage.removeItem(PENDING_NAVIGATION_KEY);
+        return false;
+      }
+
+      const folio = data?.folio ? parseInt(String(data.folio), 10) : null;
+      if (!folio) {
+        await AsyncStorage.removeItem(PENDING_NAVIGATION_KEY);
+        return false;
+      }
+
+      const user = await AuthService.restoreSession();
+      if (!user) {
+        console.log("[PedidoNotificacionService] Se conserva la intención: no hay sesión activa");
+        return false;
+      }
+
+      const navegacionLista = await this.esperarNavegacionLista();
+      if (!navegacionLista) {
+        console.warn("[PedidoNotificacionService] El navegador no quedó listo para abrir el pedido");
+        return false;
+      }
+
+      const realm = this.realm || (FullSyncService as any).realm;
+      if (!realm) {
+        console.warn("[PedidoNotificacionService] Realm no disponible para abrir el pedido");
+        return false;
+      }
+
+      const pedidosService = PedidosService.getInstance();
+      pedidosService.setRealm(realm);
+      let pedido = pedidosService.getPedidoByFolio(folio);
+
+      if (!pedido) {
+        const sucursal = Number(user?.sucursal_origen || user?.sucursal || 1);
+        await pedidosService.syncPedidos(sucursal);
+        pedido = pedidosService.getPedidoByFolio(folio);
+      }
+
+      if (!pedido) {
+        console.warn(`[PedidoNotificacionService] Pedido ${folio} no disponible en Realm`);
+        return false;
+      }
+
+      if (
+        pedido.estatus !== ESTATUS_PEDIDO.EN_ATENCION &&
+        pedido.estatus !== ESTATUS_PEDIDO.EN_CAPTURA
+      ) {
+        const iniciado = pedidosService.iniciarAtencionPedido(folio);
+        if (!iniciado) {
+          console.warn(`[PedidoNotificacionService] No se pudo iniciar atención del pedido ${folio}`);
+          return false;
+        }
+      }
+
+      navigationRef.navigate("PedidoDetalle", { folio, soloLectura: false });
+      await AsyncStorage.removeItem(PENDING_NAVIGATION_KEY);
+
+      const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
+      const bitacoraResult = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
+      console.log(`[PedidoNotificacionService] Bitácora del pedido ${folio}:`, bitacoraResult);
+      return true;
+    } catch (error) {
+      console.error("[PedidoNotificacionService] Error al procesar navegación pendiente:", error);
+      return false;
+    }
+  }
+
+  private async esperarNavegacionLista(timeoutMs: number = 10000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      if (navigationRef.isReady()) {
+        const routeName = navigationRef.getCurrentRoute()?.name;
+        if (routeName && routeName !== "Login") {
+          return true;
+        }
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    }
+
+    return false;
   }
 
   /**
@@ -196,12 +331,24 @@ class PedidoNotificacionService {
       return;
     }
 
+    if (pedido.estatus !== ESTATUS_PEDIDO.CONFIRMADO) {
+      console.log(`[PedidoNotificacionService] Push para folio ${folio} con estatus ${pedido.estatus}, ignorando`);
+      return;
+    }
+
     if (pedido.estatus >= ESTATUS_PEDIDO.NOTIFICADO) {
       console.log(`[PedidoNotificacionService] Push duplicada para folio ${folio}, ignorando`);
       return;
     }
 
-    await this.mostrarNotificacionPedido(pedido);
+    const notificacionMostrada = await this.mostrarNotificacionPedido(pedido);
+    if (!notificacionMostrada) {
+      console.warn(
+        `[PedidoNotificacionService] No se marcara como NOTIFICADO el folio ${folio} porque la notificación no pudo mostrarse`,
+      );
+      return;
+    }
+
     await this.registrarVisitaFueraAgenda(pedido);
     this.marcarPedidoNotificado(folio);
   }

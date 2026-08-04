@@ -607,7 +607,10 @@ class PedidosService {
         return { success: false };
       }
 
-      const idMovil = this.getNextIdMovil();
+      const idMovilExistente = Number((renglones[0] as any).id_movil);
+      const idMovil = Number.isFinite(idMovilExistente) && idMovilExistente >= MOVIL_ID_BASE
+        ? idMovilExistente
+        : this.getNextIdMovil();
 
       // Asignar id_movil ANTES de cambiar estatus para que la bitacora lo registre
       realm.write(() => {
@@ -671,14 +674,31 @@ class PedidosService {
   private marcarVisitaFueraAgendaComoVisitada(folio: number): void {
     try {
       const realm = this.getRealm();
-      const hoy = new Date();
-      hoy.setHours(0, 0, 0, 0);
-      const idCompuesto = `pedido-${folio}-${hoy.toISOString().split("T")[0]}`;
-      const visita = realm.objectForPrimaryKey("Visita", idCompuesto) as any;
-      if (visita) {
-        visita.visitado = 1;
-        console.log(`[PedidosService] Visita fuera de agenda ${idCompuesto} marcada como visitada`);
+      const renglones = realm.objects("Pedido").filtered("folio = $0", folio);
+      const clienteId = renglones.length > 0 ? (renglones[0] as any).cliente : null;
+      const inicioDia = new Date();
+      inicioDia.setHours(0, 0, 0, 0);
+      const finDia = new Date(inicioDia);
+      finDia.setHours(23, 59, 59, 999);
+
+      if (clienteId !== null && clienteId !== undefined) {
+        const visitasDelCliente = realm
+          .objects("Visita")
+          .filtered("idCliente == $0 AND fecha >= $1 AND fecha <= $2", clienteId, inicioDia, finDia);
+        visitasDelCliente.forEach((visita: any) => {
+          if (visita.visitado === 0) {
+            visita.visitado = 1;
+          }
+        });
       }
+
+      const idCompuesto = `pedido-${folio}-${inicioDia.toISOString().split("T")[0]}`;
+      const visitaFueraAgenda = realm.objectForPrimaryKey("Visita", idCompuesto) as any;
+      if (visitaFueraAgenda && visitaFueraAgenda.visitado === 0) {
+        visitaFueraAgenda.visitado = 1;
+      }
+
+      console.log(`[PedidosService] Visitas del pedido ${folio} marcadas como visitadas`);
     } catch (error) {
       console.warn("[PedidosService] Error al marcar visita fuera de agenda:", error);
     }
@@ -698,20 +718,24 @@ class PedidosService {
       if (renglones.length === 0) return;
 
       const primerRenglon = renglones[0] as any;
+      const idPedido = Number(primerRenglon.folio ?? data.folio);
+      const idMovilPedido = primerRenglon.id_movil ?? this.getNextIdMovil();
       const ahora = new Date();
 
       realm.write(() => {
         Array.from(renglones).forEach((renglon: any, index: number) => {
-          const idMovil = renglon.id_movil ?? this.getNextIdMovil();
+          if (renglon.id_movil !== idMovilPedido) {
+            renglon.id_movil = idMovilPedido;
+          }
           const idLocal = `${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`;
 
           realm.create(
             "PedidoBitacora",
             {
               id: idLocal,
-              idPedido: data.folio,
-              id_movil: idMovil,
-              folio: data.folio,
+              idPedido,
+              id_movil: idMovilPedido,
+              folio: idPedido,
               fecha: ahora,
               ruta: renglon.ruta,
               cliente: renglon.cliente,
@@ -773,6 +797,7 @@ class PedidosService {
       const renglon = realm.objectForPrimaryKey("Pedido", id) as any;
       if (!renglon) return;
 
+      const idPedido = Number(renglon.folio ?? data.folio);
       const ahora = new Date();
       const idLocal = `${Date.now()}-det-${Math.random().toString(36).substr(2, 5)}`;
 
@@ -781,9 +806,9 @@ class PedidosService {
           "PedidoBitacora",
           {
             id: idLocal,
-            idPedido: data.folio,
+            idPedido,
             id_movil: renglon.id_movil ?? this.getNextIdMovil(),
-            folio: data.folio,
+            folio: idPedido,
             fecha: ahora,
             ruta: renglon.ruta,
             cliente: renglon.cliente,

@@ -21,7 +21,6 @@ import {
   AppState,
   AppStateStatus,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Icon } from "react-native-elements";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
@@ -54,7 +53,6 @@ import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
 import PedidoNotificacionService from "./services/PedidoNotificacionService";
-import PedidosService from "./services/PedidosService";
 import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
@@ -150,6 +148,9 @@ function App() {
             if (hasPermission) return "granted";
             return prev === "blocked" ? "blocked" : "denied";
           });
+          PedidoNotificacionService.procesarNavegacionPendiente().catch((error) =>
+            console.warn("[App] Error procesando pedido pendiente al volver a la app:", error),
+          );
         } catch (error) {
         } finally {
           isCheckingRef.current = false;
@@ -185,43 +186,7 @@ function App() {
           PedidoNotificacionService.setRealm(realm);
           await PedidoNotificacionService.inicializar();
 
-          // Si la app se abrió desde una notificación (background/killed), navegar al pedido
-          const pending = await AsyncStorage.getItem("@xallapan/pedido_pendiente_navegacion");
-          if (pending) {
-            const data = JSON.parse(pending);
-            const folio = data?.folio ? parseInt(data.folio) : null;
-            if (folio) {
-              const navegarAPedido = () => {
-                const pedidosService = PedidosService.getInstance();
-                pedidosService.setRealm(realm);
-                pedidosService.iniciarAtencionPedido(folio);
-                navigationRef.navigate("PedidoDetalle", { folio, soloLectura: false });
-                AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
-
-                AuthService.restoreSession().then((user) => {
-                  if (!user) return;
-                  const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
-                  FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
-                    .then((r) => console.log(`[App] Arrastre bitacora pedidos folio ${folio}:`, r))
-                    .catch((e) => console.warn("[App] Error arrastre bitacora pedidos:", e));
-                }).catch((e) => console.warn("[App] Error obteniendo sesion:", e));
-              };
-
-              if (navigationRef.isReady()) {
-                navegarAPedido();
-              } else {
-                const timer = setInterval(() => {
-                  if (navigationRef.isReady()) {
-                    clearInterval(timer);
-                    navegarAPedido();
-                  }
-                }, 200);
-                setTimeout(() => clearInterval(timer), 5000);
-              }
-            } else {
-              await AsyncStorage.removeItem("@xallapan/pedido_pendiente_navegacion");
-            }
-          }
+          await PedidoNotificacionService.procesarNavegacionPendiente();
         } catch (notifError) {
           console.error("[App] Error al inicializar notificaciones de pedidos:", notifError);
         }
@@ -797,12 +762,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
   const isAdmin = currentUser?.id === 4;
 
-  // Menús ocultos por usuario (por id)
-  const hiddenMenusForUser: Record<number, string[]> = {
-    4: ["pedidos"],
-  };
-  const userHiddenMenus = currentUser?.id != null ? hiddenMenusForUser[currentUser.id] : [];
-
   const allMenuItems = [
     {
       id: "sales",
@@ -919,12 +878,9 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   // Menús ocultos del panel principal (siguen registrados/navegables desde otras pantallas)
   const hiddenMenus = ["sales"];
 
-  // Filtrar menús de admin, menús ocultos y menús ocultos para el usuario conectado
+  // Filtrar menús de admin y menús ocultos del panel principal
   const filteredItems = allMenuItems.filter(
-    (item) =>
-      (!adminOnlyMenus.includes(item.id) || isAdmin) &&
-      !hiddenMenus.includes(item.id) &&
-      !userHiddenMenus?.includes(item.id),
+    (item) => (!adminOnlyMenus.includes(item.id) || isAdmin) && !hiddenMenus.includes(item.id),
   );
 
   // Ordenar: primero los de prioridad, luego el resto

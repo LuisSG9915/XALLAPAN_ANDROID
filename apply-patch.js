@@ -173,30 +173,19 @@ const codegenFile = path.join(__dirname, 'node_modules', '@react-native', 'codeg
 if (fs.existsSync(codegenFile)) {
   let codegenSrc = fs.readFileSync(codegenFile, 'utf8');
   if (codegenSrc.includes('mkdirpSync(outDir)')) {
+    codegenSrc = codegenSrc.replace(
+      /const outDir = path\.dirname\(outfile\);\n  const mkdirpSync = \(dir\) => \{[\s\S]*?\n  \};\n  mkdirpSync\(outDir\);/,
+      'const outDir = path.dirname(outfile);\n  fs.mkdirSync(outDir, { recursive: true });'
+    );
+    fs.writeFileSync(codegenFile, codegenSrc, 'utf8');
+    console.log('Parche de codegen actualizado para usar mkdir recursivo seguro.');
+  } else if (codegenSrc.includes('fs.mkdirSync(outDir, { recursive: true })')) {
     console.log('El parche de codegen ya está aplicado.');
   } else {
-    const mkdirpPatch = `const mkdirpSync = (dir) => {
-    const parent = path.dirname(dir);
-    if (parent !== dir && !fs.existsSync(parent)) {
-      mkdirpSync(parent);
-    }
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir);
-    }
-  };
-  mkdirpSync(outDir);`;
-
-    if (codegenSrc.includes('fs.mkdirSync(outDir, { recursive: true })')) {
-      codegenSrc = codegenSrc.replace(
-        'fs.mkdirSync(outDir, { recursive: true });',
-        mkdirpPatch
-      );
-    } else {
-      codegenSrc = codegenSrc.replace(
-        "const formattedSchema = JSON.stringify(combined);\n  fs.writeFileSync(outfile, formattedSchema);",
-        `const formattedSchema = JSON.stringify(combined);\n  const outDir = path.dirname(outfile);\n  ${mkdirpPatch}\n  fs.writeFileSync(outfile, formattedSchema);`
-      );
-    }
+    codegenSrc = codegenSrc.replace(
+      "const formattedSchema = JSON.stringify(combined);\n  fs.writeFileSync(outfile, formattedSchema);",
+      "const formattedSchema = JSON.stringify(combined);\n  const outDir = path.dirname(outfile);\n  fs.mkdirSync(outDir, { recursive: true });\n  fs.writeFileSync(outfile, formattedSchema);"
+    );
     fs.writeFileSync(codegenFile, codegenSrc, 'utf8');
     console.log('Parche de codegen aplicado correctamente en', codegenFile);
   }

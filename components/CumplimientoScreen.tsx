@@ -23,6 +23,28 @@ import LocationService, { LocationCoordinates, calcularDistancia } from "../serv
 import ReubicacionService from "../services/ReubicacionService";
 import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
 
+const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
+  if (!fechaEntrega) return false;
+
+  const fecha = fechaEntrega instanceof Date ? fechaEntrega : new Date(String(fechaEntrega));
+  if (Number.isNaN(fecha.getTime())) return false;
+
+  const hoy = new Date();
+  return (
+    fecha.getFullYear() === hoy.getFullYear() &&
+    fecha.getMonth() === hoy.getMonth() &&
+    fecha.getDate() === hoy.getDate()
+  );
+};
+
+const pedidoTieneFechaEntregaHoy = (folio: number): boolean => {
+  const realm = (FullSyncService as any).realm;
+  if (!realm || !Number.isFinite(folio)) return false;
+
+  const pedidos = realm.objects("Pedido").filtered("folio == $0", folio);
+  return Array.from(pedidos).some((pedido: any) => esFechaDeHoy(pedido.fechaEntrega));
+};
+
 interface Visita {
   id: string;
   idOriginal: number;
@@ -89,7 +111,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         }
 
         setCurrentSucursal(sucursal);
-        setCurrentUserId(user.id ? Number(user.id) : null);
 
         // Cargar lista completa de clientes (para tabs Cercanos / Todos)
         cargarClientes();
@@ -120,18 +141,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [userMetros, setUserMetros] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostrarVisitadas, setMostrarVisitadas] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const ocultarFolios = currentUserId === 4;
 
   // Tabs: 'agendados' (visitas del día) | 'cercanos' (GPS) | 'folios' (pedidos central) | 'todos' (todos los clientes)
   const [clienteTab, setClienteTab] = useState<"agendados" | "cercanos" | "folios" | "todos">("agendados");
-
-  // Si se oculta el tab folios, evitar que quede seleccionado
-  useEffect(() => {
-    if (ocultarFolios && clienteTab === "folios") {
-      setClienteTab("agendados");
-    }
-  }, [ocultarFolios, clienteTab]);
 
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [nearestClientes, setNearestClientes] = useState<(ClienteLite & { distanciaMetros: number })[]>([]);
@@ -162,8 +174,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         console.log("[Cumplimiento] cargarDatos -> visitadosHoy:", Array.from(visitadosHoy), "sucursal:", sucursal, "fecha:", fecha.toISOString());
         setClientesVisitadosHoy(visitadosHoy);
 
+        const visitasDelDiaFiltradas = visitasDelDia.filter(
+          (visita: any) => Number(visita.tipo) !== 99 || pedidoTieneFechaEntregaHoy(Number(visita.idOriginal)),
+        );
+
         // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
-        const visitasConNombres = visitasDelDia.map((visita: any) => {
+        const visitasConNombres = visitasDelDiaFiltradas.map((visita: any) => {
           const idClienteNum = Number(visita.idCliente);
           const cliente = FullSyncService.getClienteFullById(idClienteNum);
           return {
@@ -1128,14 +1144,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         >
           <Text style={[styles.tabItemText, clienteTab === "cercanos" && styles.tabItemTextActive]}>Cercanos</Text>
         </TouchableOpacity>
-        {!ocultarFolios && (
-          <TouchableOpacity
-            style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
-            onPress={() => setClienteTab("folios")}
-          >
-            <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Pedido</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
+          onPress={() => setClienteTab("folios")}
+        >
+          <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Pedido</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabItem, clienteTab === "todos" && styles.tabItemActive]}
           onPress={() => setClienteTab("todos")}
@@ -1209,7 +1223,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </View>
           }
         />
-      ) : clienteTab === "folios" && !ocultarFolios ? (
+      ) : clienteTab === "folios" ? (
         <FlatList
           data={visitasFolios}
           renderItem={renderVisita}

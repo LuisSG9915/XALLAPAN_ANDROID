@@ -2589,6 +2589,8 @@ export default function SalesScreen({ route }: { route?: any }) {
             latitud: coordinates?.latitude ?? null,
             longitud: coordinates?.longitude ?? null,
             observacion: observacionVenta,
+            idPedido: null,
+            idLista: item.usandoPrecioDefault ? 13 : client.listaPrecio ?? null,
           };
         }),
       );

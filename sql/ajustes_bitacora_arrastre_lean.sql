@@ -178,7 +178,12 @@ BEGIN
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        THROW;
+
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+
+        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
     END CATCH
 END
 GO
@@ -220,7 +225,7 @@ BEGIN
 
         IF ISJSON(@json) <> 1
         BEGIN
-            THROW 50001, 'El formato del JSON es inválido.', 1;
+            RAISERROR (N'El formato del JSON es inválido.', 16, 1);
         END
 
         DECLARE @Ids TABLE (id INT);

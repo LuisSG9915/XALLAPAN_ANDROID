@@ -48,11 +48,12 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
         const b = bitacora as any;
         try {
           const payload = {
-            id_pedido: b.idPedido,
+            id_pedido: Number(b.idPedido ?? b.folio),
             id_movil: b.id_movil ?? null,
             folio: b.folio,
             fecha: b.fecha ? new Date(b.fecha).toISOString() : null,
             ruta: b.ruta,
+            cliente: b.cliente,
             fechaAtencion: b.fechaAtencion ? new Date(b.fechaAtencion).toISOString() : null,
             idVendedor: b.idVendedor,
             idProducto: b.idProducto ?? null,

@@ -11,6 +11,8 @@ import { fetchWithTimeout } from "./fetchWithTimeout";
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
 
+const ESTATUS_PEDIDO_CONFIRMADO = 3;
+
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
@@ -26,8 +28,13 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 55,
+        schemaVersion: 56,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          // Migración v56: Agregar idPedido e idLista a Venta.
+          if (oldRealm.schemaVersion < 56) {
+            console.log("[Migration v56] Agregando idPedido e idLista a Venta");
+          }
+
           // Migración v55: Agregar syncedAr a Usuario y Producto para sincronización parcial.
           // Los campos son opcionales; Realm los inicializa en null. No es necesario copiar datos.
           if (oldRealm.schemaVersion < 55) {
@@ -334,6 +341,24 @@ class FullSyncService {
     const collection: any = this.realm.objects(tableName);
     if (!collection || collection.length === 0) return null;
 
+    const firstWithSyncedAr = Array.from(collection).find((record: any) => record?.syncedAr != null) as any;
+    if (!firstWithSyncedAr) return null;
+
+    if (typeof firstWithSyncedAr.syncedAr === "string") {
+      let maxDate: Date | null = null;
+      for (const record of collection) {
+        const value = record?.syncedAr;
+        if (!value) continue;
+
+        const candidate = value instanceof Date ? value : new Date(String(value));
+        if (Number.isNaN(candidate.getTime())) continue;
+        if (!maxDate || candidate.getTime() > maxDate.getTime()) {
+          maxDate = candidate;
+        }
+      }
+      return maxDate;
+    }
+
     const maxDate = collection.max("syncedAr") as Date | null;
     return maxDate || null;
   }
@@ -358,6 +383,202 @@ class FullSyncService {
     const mm = String(date.getMonth() + 1).padStart(2, "0");
     const dd = String(date.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
+  }
+
+  private async syncPedidosIncrementalEndpoint(
+    tableName: string,
+    endpointPath: string,
+    tipo: "pedidos" | "diferencias" | "noAtencion" | "estatus",
+    idUsuario?: number,
+    sucursal?: number,
+    lastSyncedAr?: Date,
+    ruta?: number,
+  ): Promise<{
+    tabla: string;
+    endpoint: string;
+    registrosLeidos: number;
+    registrosGuardados: number;
+    registrosActualizados: number;
+  }> {
+    const last = lastSyncedAr ?? new Date("1900-01-01T00:00:00");
+    const fechaInicial = this.formatDateTimeForApi(last);
+    const url = tipo === "pedidos"
+      ? `${this.apiBaseUrl}${endpointPath}/${encodeURIComponent(String(ruta))}?fechaInicial=${encodeURIComponent(fechaInicial)}`
+      : `${this.apiBaseUrl}${endpointPath}?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+    const idBitacora = await BitacoraService.registrarInicioSync(
+      tableName,
+      "incremental",
+      "background",
+      idUsuario,
+      sucursal,
+      url,
+    );
+
+    try {
+      console.log(`[Incremental] ${tableName} desde`, fechaInicial, url);
+      const response = await fetchWithTimeout(url, {
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${tableName}`);
+      }
+
+      const rows = response.status === 204 || response.status === 205 ? [] : await response.json();
+      if (!Array.isArray(rows)) {
+        throw new Error(`La respuesta de ${tableName} no es un array`);
+      }
+
+      const registrosLeidos = rows.length;
+      let registrosGuardados = 0;
+      let registrosActualizados = 0;
+      const foliosParaNotificar = new Set<number>();
+      const syncedAr = this.getMexicoNow();
+
+      this.realm!.write(() => {
+        for (const row of rows) {
+          const folio = Number(row.folio ?? row.idPedido ?? row.id_pedido);
+          if (!Number.isFinite(folio)) continue;
+
+          const idProductoValue = row.idProducto ?? row.id_producto;
+          const estatusServidor = row.estatus ?? row.estado;
+          const esPedidoConfirmado = Number(estatusServidor) === ESTATUS_PEDIDO_CONFIRMADO;
+          const pedidos = idProductoValue === undefined || idProductoValue === null
+            ? this.realm!.objects("Pedido").filtered("folio == $0", folio)
+            : this.realm!.objects("Pedido").filtered("folio == $0 AND idProducto == $1", folio, Number(idProductoValue));
+
+          if (tipo === "pedidos" && pedidos.length === 0 && idProductoValue !== undefined && idProductoValue !== null) {
+            this.realm!.create("Pedido", {
+              id: `${folio}-${Number(idProductoValue)}`,
+              idPedido: folio,
+              id_movil: null,
+              folio,
+              fecha: row.fecha ? new Date(row.fecha) : null,
+              ruta: Number(row.ruta ?? ruta ?? 0),
+              cliente: Number(row.cliente ?? 0),
+              clienteNombre: null,
+              clienteDomicilio: null,
+              idCanal: null,
+              fechaAtencion: null,
+              idVendedor: Number(row.idVendedor ?? row.id_vendedor ?? 0),
+              numeroProductos: Number(row.numeroProductos ?? row.numero_productos ?? 1),
+              cantPedido: Number(row.cantPedido ?? row.cant_pedido ?? 0),
+              listaPrecio: row.listaPrecio ?? row.lista_precio ?? null,
+              fechaEntrega: row.fechaEntrega ? new Date(row.fechaEntrega) : null,
+              estatus: Number(row.estatus ?? 0),
+              estatusDescripcion: null,
+              fueraAgenda: row.fueraAgenda ?? row.fuera_agenda ?? null,
+              observaciones: row.observaciones ?? null,
+              no_venta: row.noVenta ?? row.no_venta ?? null,
+              tieneDiferencia: false,
+              causaNoAtencion: null,
+              obserNoAtencion: null,
+              syncedAt: syncedAr,
+              syncedAr,
+              modificadoLocal: false,
+              idProducto: Number(idProductoValue),
+              productoNombre: null,
+              cantAtencion: null,
+              precio: row.precio ?? null,
+              precioAtencion: null,
+              causaDiferencia: null,
+              causaDiferenciaDesc: null,
+              obserDiferencia: null,
+              atendido: false,
+            });
+            registrosGuardados++;
+            if (esPedidoConfirmado) {
+              foliosParaNotificar.add(folio);
+            }
+            continue;
+          }
+
+          for (const pedido of pedidos as any) {
+            if (tipo === "pedidos") {
+              const preservarLocal = pedido.modificadoLocal === true;
+              pedido.fecha = row.fecha ? new Date(row.fecha) : pedido.fecha;
+              pedido.ruta = Number(row.ruta ?? ruta ?? pedido.ruta);
+              pedido.cliente = Number(row.cliente ?? pedido.cliente);
+              pedido.idVendedor = Number(row.idVendedor ?? row.id_vendedor ?? pedido.idVendedor);
+              pedido.numeroProductos = Number(row.numeroProductos ?? row.numero_productos ?? pedido.numeroProductos);
+              pedido.cantPedido = Number(row.cantPedido ?? row.cant_pedido ?? pedido.cantPedido);
+              pedido.listaPrecio = row.listaPrecio ?? row.lista_precio ?? pedido.listaPrecio;
+              pedido.fechaEntrega = row.fechaEntrega ? new Date(row.fechaEntrega) : pedido.fechaEntrega;
+              pedido.fueraAgenda = row.fueraAgenda ?? row.fuera_agenda ?? pedido.fueraAgenda;
+              pedido.observaciones = row.observaciones ?? pedido.observaciones;
+              pedido.no_venta = row.noVenta ?? row.no_venta ?? pedido.no_venta;
+              pedido.precio = row.precio ?? pedido.precio;
+              if (!preservarLocal) {
+                pedido.estatus = Number(row.estatus ?? pedido.estatus);
+                pedido.estatusDescripcion = row.estatusDescripcion ?? row.estatus_descripcion ?? pedido.estatusDescripcion;
+                if (esPedidoConfirmado) {
+                  foliosParaNotificar.add(folio);
+                }
+              }
+            } else if (tipo === "diferencias") {
+              const cantAtencion = row.cantAtencion ?? row.cant_atencion;
+              pedido.cantAtencion = cantAtencion ?? pedido.cantAtencion;
+              pedido.precioAtencion = row.precioAtencion ?? row.precio_atencion ?? pedido.precioAtencion;
+              pedido.causaDiferencia = row.causaDiferencia ?? row.causa_diferencia ?? pedido.causaDiferencia;
+              pedido.obserDiferencia = row.obserDiferencia ?? row.obser_diferencia ?? pedido.obserDiferencia;
+              pedido.tieneDiferencia = pedido.cantAtencion !== null &&
+                pedido.cantAtencion !== undefined &&
+                pedido.cantAtencion < pedido.cantPedido;
+              pedido.atendido = pedido.cantAtencion !== null &&
+                pedido.cantAtencion !== undefined &&
+                pedido.cantAtencion > 0;
+            } else if (tipo === "noAtencion") {
+              pedido.causaNoAtencion = row.causaNoAtencion ?? row.causa_no_atencion ?? pedido.causaNoAtencion;
+              pedido.obserNoAtencion = row.obserNoAtencion ?? row.obser_no_atencion ?? pedido.obserNoAtencion;
+            } else {
+              const preservarLocal = pedido.modificadoLocal === true;
+              const estatus = row.estatus ?? row.estado;
+              if (estatus !== undefined && estatus !== null && !preservarLocal) {
+                pedido.estatus = Number(estatus);
+                pedido.estatusDescripcion = row.estatusDescripcion ?? row.estatus_descripcion ?? pedido.estatusDescripcion;
+                if (Number(estatus) === ESTATUS_PEDIDO_CONFIRMADO) {
+                  foliosParaNotificar.add(folio);
+                }
+              }
+            }
+
+            pedido.syncedAt = syncedAr;
+            pedido.syncedAr = syncedAr;
+            registrosActualizados++;
+          }
+        }
+      });
+
+      if (foliosParaNotificar.size > 0) {
+        try {
+          const PedidoNotificacionService = (await import("./PedidoNotificacionService")).default;
+          PedidoNotificacionService.setRealm(this.realm);
+          await PedidoNotificacionService.procesarPedidosSincronizados(Array.from(foliosParaNotificar));
+        } catch (notificationError) {
+          console.warn("[Incremental] Error al notificar pedidos confirmados:", notificationError);
+        }
+      }
+
+      await BitacoraService.registrarFinSync(idBitacora, {
+        exitoso: true,
+        registrosLeidos,
+      });
+
+      return {
+        tabla: tableName,
+        endpoint: url,
+        registrosLeidos,
+        registrosGuardados,
+        registrosActualizados,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      await BitacoraService.registrarFinSync(idBitacora, {
+        exitoso: false,
+        error: errorMsg,
+        errorCode: "500",
+      });
+      throw error;
+    }
   }
 
   /**
@@ -550,6 +771,7 @@ class FullSyncService {
    * - Precios   -> /api/MovilesVentas/precios?fechaInicial=YYYY-MM-DD HH:mm
    * - Cartera   -> /api/MovilesVentas/cartera?fechaInicial=YYYY-MM-DD
    * - Ventas    -> /api/MovilesVentas/ventas-erp-movil?fechaInicial=YYYY-MM-DD HH:mm&sucursal=...
+   * - Pedidos   -> sp_MovilesPedidos, sp_MovilesPedidosDiferenciasIncremental, sp_MovilesPedidosNoAtencionIncremental y sp_MovilesPedidosEstatusIncremental
    */
   async syncIncremental(
     sucursal: number = 1,
@@ -837,6 +1059,12 @@ class FullSyncService {
 
     const errors: string[] = [];
     const nowMexico = this.getMexicoNow();
+    const pedidosIncrementalSince = this.getLastSyncedAr("Pedido") ?? new Date("1900-01-01T00:00:00");
+    const usuarioSync = idUsuario ? (this.realm.objectForPrimaryKey("Usuario", idUsuario) as any) : null;
+    const usuarioConRuta = usuarioSync?.ruta
+      ? usuarioSync
+      : (this.realm.objects("Usuario").filtered("ruta != null && ruta != \"\"")[0] as any);
+    const rutaPedido = Number(usuarioConRuta?.ruta ?? 0);
 
     const notify = (
       entity: string,
@@ -1084,6 +1312,55 @@ class FullSyncService {
             throw error;
           }
         },
+      },
+      {
+        name: "PedidosIncremental",
+        run: () =>
+          this.syncPedidosIncrementalEndpoint(
+            "Pedido",
+            "/api/MovilesVentas/sp_MovilesPedidos",
+            "pedidos",
+            idUsuario,
+            sucursal,
+            pedidosIncrementalSince,
+            rutaPedido,
+          ),
+      },
+      {
+        name: "PedidosDiferenciasIncremental",
+        run: () =>
+          this.syncPedidosIncrementalEndpoint(
+            "PedidoDiferencias",
+            "/api/MovilesVentas/sp_MovilesPedidosDiferenciasIncremental",
+            "diferencias",
+            idUsuario,
+            sucursal,
+            pedidosIncrementalSince,
+          ),
+      },
+      {
+        name: "PedidosNoAtencionIncremental",
+        run: () =>
+          this.syncPedidosIncrementalEndpoint(
+            "PedidoNoAtencion",
+            "/api/MovilesVentas/sp_MovilesPedidosNoAtencionIncremental",
+            "noAtencion",
+            idUsuario,
+            sucursal,
+            pedidosIncrementalSince,
+          ),
+      },
+      {
+        name: "PedidosEstatusIncremental",
+        run: () =>
+          this.syncPedidosIncrementalEndpoint(
+            "PedidoEstatus",
+            "/api/MovilesVentas/sp_MovilesPedidosEstatusIncremental",
+            "estatus",
+            idUsuario,
+            sucursal,
+            pedidosIncrementalSince,
+          ),
       },
       {
         name: "ProductosIncremental",
@@ -1587,7 +1864,11 @@ class FullSyncService {
         name: "VisitasIncrementalSucursalPibote",
         run: async () => {
           const tableName = "Visita";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-pibote/${sucursal}`;
+          const last = this.getLastSyncedAr(tableName) ?? new Date("1900-01-01T00:00:00");
+          const fechaInicial = this.formatDateTimeForApi(last);
+          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-pibote-incremental/${sucursal}?fechaInicial=${encodeURIComponent(
+            fechaInicial,
+          )}`;
           const idBitacora = await BitacoraService.registrarInicioSync(
             tableName,
             "incremental",
@@ -2508,6 +2789,8 @@ class FullSyncService {
       latitud?: number | null;
       longitud?: number | null;
       observacion?: string | null;
+      idPedido?: number | null;
+      idLista?: number | null;
     }[],
   ): Promise<void> {
     if (!this.isInitialized) {
@@ -2538,6 +2821,8 @@ class FullSyncService {
           latitud: v.latitud ?? null,
           longitud: v.longitud ?? null,
           observacion: v.observacion ?? null,
+          idPedido: v.idPedido ?? null,
+          idLista: v.idLista ?? null,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -4084,6 +4369,8 @@ class FullSyncService {
           id_movil: venta.idMovil,
           fechaTransfer: fechaTransferFormateada,
           observacion: venta.observacion ?? "",
+          id_pedido: venta.idPedido ?? null,
+          idLista: venta.idLista ?? null,
           folio_movto: 1,
         };
       });
@@ -4241,11 +4528,12 @@ class FullSyncService {
       };
 
       const payload = Array.from(bitacorasPendientes).map((b: any) => ({
-        id_pedido: b.idPedido ?? null,
+        id_pedido: Number(b.idPedido ?? b.folio),
         id_movil: b.id_movil ?? null,
-        folio: b.folio,
+        folio: Number(b.folio),
         fecha: formatDate(b.fecha),
         ruta: b.ruta,
+        cliente: b.cliente,
         fechaAtencion: formatDate(b.fechaAtencion),
         idVendedor: b.idVendedor,
         idProducto: b.idProducto ?? null,
