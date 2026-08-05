@@ -90,6 +90,81 @@ if (__DEV__) {
 
 const Stack = createNativeStackNavigator();
 
+const normalizarRuta = (valor: any): number => {
+  const ruta = Number.parseInt(String(valor ?? ""), 10);
+  return Number.isFinite(ruta) && ruta > 0 ? ruta : 0;
+};
+
+const esFechaEntregaDeHoy = (valor: any): boolean => {
+  if (!valor) return false;
+
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return false;
+
+  const hoy = new Date();
+  return (
+    fecha.getFullYear() === hoy.getFullYear() &&
+    fecha.getMonth() === hoy.getMonth() &&
+    fecha.getDate() === hoy.getDate()
+  );
+};
+
+const resolverRutaParaCierre = (
+  user: any,
+  realm: any,
+): { ruta: number; origen: string } => {
+  const rutaDeSesion = normalizarRuta(user?.ruta);
+  if (rutaDeSesion > 0) {
+    return { ruta: rutaDeSesion, origen: "sesión" };
+  }
+
+  if (!realm || typeof realm.objects !== "function") {
+    return { ruta: 0, origen: "sin Realm" };
+  }
+
+  try {
+    const idVendedor = Number(user?.id);
+    if (Number.isFinite(idVendedor) && idVendedor > 0) {
+      const pedidos = Array.from(realm.objects("Pedido")) as any[];
+      const rutasDePedidos = new Map<number, number>();
+
+      pedidos.forEach((pedido) => {
+        const ruta = normalizarRuta(pedido.ruta);
+        if (Number(pedido.idVendedor) === idVendedor && ruta > 0 && esFechaEntregaDeHoy(pedido.fechaEntrega)) {
+          rutasDePedidos.set(ruta, (rutasDePedidos.get(ruta) || 0) + 1);
+        }
+      });
+
+      const rutaDePedidos = Array.from(rutasDePedidos.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 0;
+      if (rutaDePedidos > 0) {
+        return { ruta: rutaDePedidos, origen: "pedidos de hoy" };
+      }
+    }
+
+    const usuarios = Array.from(realm.objects("Usuario")) as any[];
+    const usuarioActual = usuarios.find(
+      (usuario) =>
+        (user?.id != null && Number(usuario.id) === Number(user.id)) ||
+        (user?.claveEmpleado && usuario.claveEmpleado === user.claveEmpleado),
+    );
+    const rutaDelUsuario = normalizarRuta(usuarioActual?.ruta);
+    if (rutaDelUsuario > 0) {
+      return { ruta: rutaDelUsuario, origen: "Usuario en Realm" };
+    }
+
+    const rutaDeCualquierUsuario = normalizarRuta(
+      usuarios.find((usuario) => normalizarRuta(usuario.ruta) > 0)?.ruta,
+    );
+    if (rutaDeCualquierUsuario > 0) {
+      return { ruta: rutaDeCualquierUsuario, origen: "usuario de Realm" };
+    }
+  } catch (error) {
+    console.warn("[App] No se pudo resolver la ruta desde Realm:", error);
+  }
+
+  return { ruta: 0, origen: "no encontrada" };
+};
+
 function App() {
   const isDarkMode = useColorScheme() === "dark";
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null);
@@ -675,9 +750,29 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     const sucursal = currentUser.sucursal_origen || currentUser.sucursal || 1;
     const vendedor = currentUser.id || 0;
-    const ruta = currentUser.ruta ? parseInt(currentUser.ruta) : 0;
+    const { ruta, origen: origenRuta } = resolverRutaParaCierre(
+      currentUser,
+      (FullSyncService as any).realm,
+    );
+    console.log(`[App] Ruta para validar cierre: ${ruta || "no encontrada"} (origen: ${origenRuta})`);
+
+    if (!Number.isFinite(ruta) || ruta <= 0) {
+      Alert.alert(
+        "No se puede cerrar la ruta",
+        "No se encontró una ruta válida para validar los pedidos.",
+      );
+      return;
+    }
 
     const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
+
+    if (validacionPedidos.error) {
+      Alert.alert(
+        "No se puede cerrar la ruta",
+        "No fue posible validar los pedidos de hoy. La ruta permanecerá abierta; intente nuevamente.",
+      );
+      return;
+    }
 
     if (!validacionPedidos.permitido) {
       const listaPedidos = validacionPedidos.pedidosBloqueantes
@@ -686,7 +781,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
       Alert.alert(
         "⚠️ No se puede cerrar la ruta",
-        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendientes:\n\n${listaPedidos}\n\nDebe atender todos los pedidos antes de cerrar la ruta.`,
+        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendientes de hoy:\n\n${listaPedidos}\n\nDebe atender todos los pedidos de hoy antes de cerrar la ruta.`,
         [
           { text: "Entendido" },
           {
@@ -707,6 +802,24 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           text: "Sí, cerrar",
           style: "destructive",
           onPress: async () => {
+            const validacionFinal = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
+
+            if (validacionFinal.error) {
+              Alert.alert(
+                "No se puede cerrar la ruta",
+                "No fue posible validar los pedidos de hoy. La ruta permanecerá abierta; intente nuevamente.",
+              );
+              return;
+            }
+
+            if (!validacionFinal.permitido) {
+              Alert.alert(
+                "No se puede cerrar la ruta",
+                "La ruta tiene pedidos pendientes de hoy. Atienda todos los pedidos y vuelva a intentarlo.",
+              );
+              return;
+            }
+
             await CierreRutaService.setRutaCerrada(sucursal, vendedor, true);
             setRutaCerrada(true);
             await syncRouteTracking(true);

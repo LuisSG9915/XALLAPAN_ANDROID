@@ -38,6 +38,18 @@ const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
   );
 };
 
+const formatearMoneda = (valor?: number): string =>
+  `$${Number(valor ?? 0).toLocaleString("es-MX", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatearDistancia = (distancia?: number | null): string => {
+  if (distancia == null) return "No disponible";
+  if (distancia >= 1000) return `${(distancia / 1000).toFixed(1)} km`;
+  return `${Math.round(distancia)} m`;
+};
+
 export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [pedidos, setPedidos] = useState<PedidoAgrupado[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,11 +160,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   };
 
   const handleRefresh = () => {
+    if (refreshing) return;
     setRefreshing(true);
     cargarPedidos();
   };
 
   const handleSyncPedidos = async () => {
+    if (refreshing) return;
     setRefreshing(true);
     try {
       const pedidosService = PedidosService.getInstance();
@@ -282,12 +296,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     }
   };
 
+  const query = searchQuery.trim().toLowerCase();
   const pedidosFiltrados = pedidos.filter((p) => {
     const coincideBusqueda =
-      !searchQuery.trim() ||
-      (p.clienteNombre || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(p.folio).includes(searchQuery) ||
-      String(p.cliente).includes(searchQuery);
+      !query ||
+      (p.clienteNombre || "").toLowerCase().includes(query) ||
+      String(p.folio).includes(query) ||
+      String(p.cliente).includes(query);
 
     const coincideEstatus = filtroEstatus === null || p.estatus === filtroEstatus;
 
@@ -300,14 +315,31 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       p.estatus !== ESTATUS_PEDIDO.CANCELADO &&
       p.estatus !== ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
   ).length;
+  const totalSinCausa = pedidos.filter((p) => p.estatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA).length;
+  const totalEnAtencion = pedidos.filter((p) => p.estatus === ESTATUS_PEDIDO.EN_ATENCION).length;
+  const filtrosActivos = Boolean(query || filtroEstatus !== null);
+
+  const limpiarFiltros = () => {
+    setSearchQuery("");
+    setFiltroEstatus(null);
+  };
 
   const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
     const clienteFull = buscarClienteEnRealm(Number(item.cliente));
     const clienteNombre = item.clienteNombre || `Cliente #${item.cliente}`;
     const clienteDomicilio = item.clienteDomicilio || "";
     const estatusColor = getEstatusColor(item.estatus);
+    const estatusDescripcion = item.estatusDescripcion || "Estatus desconocido";
+    const soloLectura =
+      item.estatus === ESTATUS_PEDIDO.ENTREGADO ||
+      item.estatus === ESTATUS_PEDIDO.CANCELADO ||
+      item.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
+      item.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA;
+    const accionPedido = soloLectura ? "Ver detalles" : "Atender pedido";
+    const inicialCliente = clienteNombre.trim().charAt(0).toUpperCase() || "C";
 
-    let distanciaTexto = "--- M";
+    let distanciaTexto = "No disponible";
+    let distanciaDisponible = false;
     if (ubicacion && clienteFull?.latitud != null && clienteFull?.longitud != null) {
       const dist = calcularDistancia(
         ubicacion.latitude,
@@ -315,66 +347,112 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         clienteFull.latitud,
         clienteFull.longitud,
       );
-      distanciaTexto = `${Math.round(dist)} M`;
+      distanciaTexto = formatearDistancia(dist);
+      distanciaDisponible = true;
     }
 
     return (
       <View style={styles.card}>
+        <View style={[styles.statusStrip, { backgroundColor: estatusColor }]} />
         <View style={styles.cardHeader}>
-          <View style={styles.folioContainer}>
-            <Icon name="receipt" type="material" size={18} color={COLORS.primary} />
-            <Text style={styles.folioText}>Folio: {item.folio}</Text>
+          <View style={styles.orderIdentity}>
+            <Text style={styles.cardEyebrow}>PEDIDO</Text>
+            <View style={styles.folioContainer}>
+              <Icon name="receipt" type="material" size={18} color={COLORS.primary} />
+              <Text style={styles.folioText}>#{item.folio}</Text>
+            </View>
           </View>
-          <View style={[styles.estatusBadge, { backgroundColor: estatusColor }]}>
-            <Text style={styles.estatusText}>{item.estatusDescripcion || "N/A"}</Text>
+          <View style={[styles.estatusBadge, { borderColor: estatusColor }]}>
+            <Icon name={getEstatusIcon(item.estatus)} type="material" size={15} color={estatusColor} />
+            <Text style={[styles.estatusText, { color: estatusColor }]} numberOfLines={1}>
+              {estatusDescripcion}
+            </Text>
           </View>
         </View>
 
         <View style={styles.cardBody}>
           <View style={styles.clienteRow}>
             <View style={styles.clienteAvatar}>
-              <Text style={styles.clienteAvatarText}>{clienteNombre.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.clienteAvatarText}>{inicialCliente}</Text>
             </View>
             <View style={styles.clienteInfo}>
               <Text style={styles.clienteNombre} numberOfLines={1}>
                 {clienteNombre}
               </Text>
               <View style={styles.direccionRow}>
-                <Icon name="place" type="material" size={14} color={COLORS.muted} />
-                <Text style={styles.direccionText} numberOfLines={1}>
-                  {clienteDomicilio || "Sin dirección"}
+                <Icon name="place" type="material" size={15} color={COLORS.muted} />
+                <Text style={styles.direccionText} numberOfLines={2}>
+                  {clienteDomicilio || "Sin dirección registrada"}
                 </Text>
               </View>
             </View>
           </View>
 
-          <View style={styles.badgesRow}>
-            <View style={styles.badge}>
-              <Icon name="inventory-2" type="material" size={14} color={COLORS.primary} />
-              <Text style={styles.badgeText}>{item.numeroProductos} productos</Text>
+          <View style={styles.metricsRow}>
+            <View style={styles.metricItem}>
+              <View style={styles.metricIcon}>
+                <Icon name="inventory-2" type="material" size={16} color={COLORS.primary} />
+              </View>
+              <View style={styles.metricCopy}>
+                <Text style={styles.metricLabel}>Productos</Text>
+                <Text style={styles.metricValue}>{item.numeroProductos}</Text>
+              </View>
             </View>
-            <View style={[styles.badge, styles.badgeDistancia]}>
-              <Icon name="location-on" type="material" size={14} color={COLORS.success} />
-              <Text style={[styles.badgeText, styles.badgeDistanciaText]}>{distanciaTexto}</Text>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <View style={[styles.metricIcon, distanciaDisponible ? styles.metricIconSuccess : styles.metricIconMuted]}>
+                <Icon
+                  name="location-on"
+                  type="material"
+                  size={16}
+                  color={distanciaDisponible ? COLORS.success : COLORS.muted}
+                />
+              </View>
+              <View style={styles.metricCopy}>
+                <Text style={styles.metricLabel}>Distancia</Text>
+                <Text style={styles.metricValue} numberOfLines={1}>
+                  {distanciaTexto}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <View style={[styles.metricIcon, styles.metricIconSuccess]}>
+                <Icon name="attach-money" type="material" size={16} color={COLORS.success} />
+              </View>
+              <View style={styles.metricCopy}>
+                <Text style={styles.metricLabel}>Importe</Text>
+                <Text style={styles.metricValue} numberOfLines={1}>
+                  {formatearMoneda(item.total)}
+                </Text>
+              </View>
             </View>
           </View>
 
           {item.observaciones ? (
             <View style={styles.observacionesContainer}>
-              <Icon name="notes" type="material" size={14} color={COLORS.warning} />
-              <Text style={styles.observacionesText} numberOfLines={1}>
+              <Icon name="notes" type="material" size={15} color={COLORS.warning} />
+              <Text style={styles.observacionesText} numberOfLines={2}>
                 {item.observaciones}
               </Text>
             </View>
           ) : null}
 
           <TouchableOpacity
-            style={styles.irABtn}
+            style={[styles.irABtn, soloLectura && styles.irABtnSecondary]}
             onPress={() => handleAbrirPedido(item)}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`${accionPedido}, folio ${item.folio}`}
           >
-            <Icon name="arrow-forward" type="material" size={18} color="#fff" style={{ marginRight: SPACING.xs }} />
-            <Text style={styles.irABtnText}>IR A PEDIDO</Text>
+            <Icon
+              name={soloLectura ? "visibility" : "arrow-forward"}
+              type="material"
+              size={18}
+              color={soloLectura ? COLORS.primary : "#fff"}
+              style={{ marginRight: SPACING.xs }}
+            />
+            <Text style={[styles.irABtnText, soloLectura && styles.irABtnTextSecondary]}>{accionPedido}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -394,8 +472,23 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.titulo}>Pedidos de Central</Text>
-          <TouchableOpacity onPress={handleSyncPedidos} style={styles.syncBtn}>
+          <View style={styles.titleBlock}>
+            <Text style={styles.titulo}>Pedidos de Central</Text>
+            <View style={styles.subtituloRow}>
+              <Icon name="route" type="material" size={15} color="rgba(255,255,255,0.72)" />
+              <Text style={styles.subtitulo}>
+                {currentRuta > 0 ? `Ruta ${currentRuta}` : "Ruta no asignada"} · Entregas de hoy
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            onPress={handleSyncPedidos}
+            style={styles.syncBtn}
+            disabled={refreshing}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Sincronizar pedidos"
+          >
             {refreshing ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
@@ -406,41 +499,74 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
 
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{pedidos.length}</Text>
-            <Text style={styles.statLabel}>Total</Text>
+            <View style={styles.statIcon}>
+              <Icon name="receipt" type="material" size={18} color="#fff" />
+            </View>
+            <View>
+              <Text style={styles.statNumber}>{pedidos.length}</Text>
+              <Text style={styles.statLabel}>Pedidos de hoy</Text>
+            </View>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.warning }]}>{totalPendientes}</Text>
-            <Text style={styles.statLabel}>Pendientes</Text>
+            <View style={[styles.statIcon, styles.statIconWarning]}>
+              <Icon name="schedule" type="material" size={18} color={COLORS.warning} />
+            </View>
+            <View>
+              <Text style={[styles.statNumber, { color: "#FFD08A" }]}>{totalPendientes}</Text>
+              <Text style={styles.statLabel}>Por atender</Text>
+            </View>
           </View>
         </View>
       </View>
 
       <View style={styles.searchContainer}>
-        <Icon name="search" type="material" size={20} color={COLORS.muted} />
+        <Icon name="search" type="material" size={21} color={COLORS.primary} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar por cliente, folio..."
+          placeholder="Buscar cliente o folio"
           placeholderTextColor={COLORS.muted}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Buscar pedidos"
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery("")}>
+          <TouchableOpacity
+            onPress={() => setSearchQuery("")}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Limpiar búsqueda"
+          >
             <Icon name="close" type="material" size={20} color={COLORS.muted} />
           </TouchableOpacity>
         )}
+      </View>
+
+      <View style={styles.filterHeading}>
+        <Text style={styles.filterLabel}>FILTRAR POR ESTATUS</Text>
+        <Text style={styles.filterResultText}>
+          {pedidosFiltrados.length} {pedidosFiltrados.length === 1 ? "resultado" : "resultados"}
+        </Text>
       </View>
 
       <View style={styles.filterContainer}>
         <TouchableOpacity
           style={[styles.filterBtn, filtroEstatus === null && styles.filterBtnActive]}
           onPress={() => setFiltroEstatus(null)}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: filtroEstatus === null }}
         >
-          <Text style={[styles.filterText, filtroEstatus === null && styles.filterTextActive]}>
-            Todos
-          </Text>
+          <Icon name="view-list" type="material" size={16} color={filtroEstatus === null ? "#fff" : COLORS.textSecondary} />
+          <Text style={[styles.filterText, filtroEstatus === null && styles.filterTextActive]}>Todos</Text>
+          <View style={[styles.filterCount, filtroEstatus === null && styles.filterCountActive]}>
+            <Text style={[styles.filterCountText, filtroEstatus === null && styles.filterCountTextActive]}>
+              {pedidos.length}
+            </Text>
+          </View>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterBtn, filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterBtnActive]}
@@ -449,45 +575,127 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
               filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ? null : ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA,
             )
           }
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA }}
         >
+          <Icon
+            name="error-outline"
+            type="material"
+            size={16}
+            color={filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ? "#fff" : COLORS.error}
+          />
           <Text
             style={[
               styles.filterText,
               filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterTextActive,
             ]}
           >
-            Sin Causa
+            Sin causa
           </Text>
+          <View
+            style={[
+              styles.filterCount,
+              filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterCountActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterCountText,
+                filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterCountTextActive,
+              ]}
+            >
+              {totalSinCausa}
+            </Text>
+          </View>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterBtn, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterBtnActive]}
           onPress={() =>
             setFiltroEstatus(filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION ? null : ESTATUS_PEDIDO.EN_ATENCION)
           }
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION }}
         >
+          <Icon
+            name="edit"
+            type="material"
+            size={16}
+            color={filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION ? "#fff" : COLORS.warning}
+          />
           <Text
-            style={[
-              styles.filterText,
-              filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterTextActive,
-            ]}
+            style={[styles.filterText, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterTextActive]}
           >
-            En Atención
+            En atención
           </Text>
+          <View
+            style={[styles.filterCount, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterCountActive]}
+          >
+            <Text
+              style={[
+                styles.filterCountText,
+                filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterCountTextActive,
+              ]}
+            >
+              {totalEnAtencion}
+            </Text>
+          </View>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.resultsRow}>
+        <View>
+          <Text style={styles.sectionTitle}>Pedidos de hoy</Text>
+          <Text style={styles.resultsText}>
+            {pedidosFiltrados.length} de {pedidos.length} visibles en tu ruta
+          </Text>
+        </View>
+        {filtrosActivos && (
+          <TouchableOpacity
+            style={styles.clearResultsBtn}
+            onPress={limpiarFiltros}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Limpiar filtros"
+          >
+            <Icon name="clear" type="material" size={16} color={COLORS.primary} />
+            <Text style={styles.clearResultsText}>Limpiar</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <FlatList
         data={pedidosFiltrados}
         renderItem={renderPedido}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item) => String(item.folioKey)}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[COLORS.primary]}
+            tintColor={COLORS.primary}
+          />
+        }
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Icon name="inventory" type="material" size={64} color={COLORS.muted} />
+            <View style={styles.emptyIcon}>
+              <Icon name={filtrosActivos ? "search" : "inventory-2"} type="material" size={34} color={COLORS.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>{filtrosActivos ? "No encontramos pedidos" : "Tu ruta está al día"}</Text>
             <Text style={styles.emptyText}>
-              {searchQuery || filtroEstatus !== null ? "Sin resultados" : "No hay pedidos"}
+              {filtrosActivos
+                ? "Prueba con otro cliente, folio o estatus."
+                : "No hay pedidos programados para entregar hoy."}
             </Text>
+            {filtrosActivos && (
+              <TouchableOpacity style={styles.emptyAction} onPress={limpiarFiltros} activeOpacity={0.8}>
+                <Text style={styles.emptyActionText}>Limpiar filtros</Text>
+              </TouchableOpacity>
+            )}
           </View>
         }
       />
@@ -498,13 +706,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F2F2F7",
+    backgroundColor: "#F6F7FB",
   },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F2F2F7",
+    backgroundColor: "#F6F7FB",
   },
   loadingText: {
     ...TYPOGRAPHY.body,
@@ -522,79 +730,141 @@ const styles = StyleSheet.create({
   },
   headerTop: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.l,
+  },
+  titleBlock: {
+    flex: 1,
+    marginRight: SPACING.m,
   },
   titulo: {
     ...TYPOGRAPHY.h2,
     color: "#fff",
-    fontSize: 22,
+    fontSize: 23,
+  },
+  subtituloRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: SPACING.xs,
+    gap: SPACING.xs,
+  },
+  subtitulo: {
+    ...TYPOGRAPHY.caption,
+    flexShrink: 1,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
   },
   syncBtn: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    padding: SPACING.s,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
     borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
   statsContainer: {
     flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: BORDER_RADIUS.m,
-    padding: SPACING.m,
+    paddingVertical: SPACING.s,
   },
   statItem: {
+    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: SPACING.l,
+    justifyContent: "center",
+    paddingHorizontal: SPACING.s,
+    gap: SPACING.s,
+  },
+  statIcon: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  statIconWarning: {
+    backgroundColor: "#FFF1DC",
   },
   statNumber: {
-    fontSize: 28,
+    fontSize: 23,
+    lineHeight: 26,
     fontWeight: "bold",
     color: "#fff",
   },
   statLabel: {
     ...TYPOGRAPHY.caption,
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 11,
   },
   statDivider: {
     width: 1,
-    height: 30,
-    backgroundColor: "rgba(255,255,255,0.3)",
+    height: 34,
+    backgroundColor: "rgba(255,255,255,0.25)",
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: 54,
     backgroundColor: "#fff",
     marginHorizontal: SPACING.m,
-    marginTop: SPACING.m,
+    marginTop: -SPACING.s,
     paddingHorizontal: SPACING.m,
-    borderRadius: BORDER_RADIUS.m,
+    borderRadius: BORDER_RADIUS.l,
+    borderWidth: 1,
+    borderColor: "#E7E8F0",
+    zIndex: 2,
     ...SHADOWS.small,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: SPACING.m,
+    paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.s,
     fontSize: 16,
     color: COLORS.textPrimary,
   },
+  filterHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: SPACING.l,
+    marginHorizontal: SPACING.m,
+  },
+  filterLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: COLORS.textSecondary,
+  },
+  filterResultText: {
+    ...TYPOGRAPHY.small,
+    color: COLORS.muted,
+  },
   filterContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    paddingTop: SPACING.s,
     gap: SPACING.s,
   },
   filterBtn: {
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 38,
+    paddingHorizontal: SPACING.s,
     borderRadius: BORDER_RADIUS.round,
     backgroundColor: "#fff",
-    ...SHADOWS.small,
+    borderWidth: 1,
+    borderColor: "#E5E6ED",
+    gap: SPACING.xs,
   },
   filterBtnActive: {
     backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   filterText: {
     ...TYPOGRAPHY.caption,
@@ -604,8 +874,60 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: "#fff",
   },
+  filterCount: {
+    minWidth: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+    borderRadius: BORDER_RADIUS.round,
+    backgroundColor: "#F0F1F6",
+  },
+  filterCountActive: {
+    backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  filterCountText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  filterCountTextActive: {
+    color: "#fff",
+  },
+  resultsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.m,
+  },
+  sectionTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 17,
+    color: COLORS.textPrimary,
+  },
+  resultsText: {
+    ...TYPOGRAPHY.small,
+    marginTop: 2,
+    color: COLORS.muted,
+  },
+  clearResultsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: COLORS.primaryLight,
+    gap: SPACING.xs,
+  },
+  clearResultsText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
   list: {
-    padding: SPACING.m,
+    flexGrow: 1,
+    paddingHorizontal: SPACING.m,
     paddingBottom: SPACING.xxl,
   },
   card: {
@@ -613,7 +935,13 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.l,
     marginBottom: SPACING.m,
     overflow: "hidden",
-    ...SHADOWS.medium,
+    borderWidth: 1,
+    borderColor: "#ECEEF4",
+    ...SHADOWS.small,
+  },
+  statusStrip: {
+    height: 4,
+    width: "100%",
   },
   row: {
     flexDirection: "row",
@@ -649,26 +977,45 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   irABtn: {
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: COLORS.primary,
     paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.m,
+  },
+  irABtnSecondary: {
+    backgroundColor: COLORS.primaryLight,
   },
   irABtnText: {
     color: "#fff",
     fontSize: 14,
     fontWeight: "bold",
   },
+  irABtnTextSecondary: {
+    color: COLORS.primary,
+  },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    paddingTop: SPACING.m,
+    paddingBottom: SPACING.s,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+    borderBottomColor: "#F0F1F5",
+  },
+  orderIdentity: {
+    flex: 1,
+    marginRight: SPACING.s,
+  },
+  cardEyebrow: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1,
+    color: COLORS.muted,
+    marginBottom: SPACING.xs,
   },
   folioContainer: {
     flexDirection: "row",
@@ -676,22 +1023,25 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   folioText: {
-    ...TYPOGRAPHY.body,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
     color: COLORS.primary,
   },
   estatusBadge: {
+    maxWidth: "58%",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: SPACING.s,
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.round,
+    borderWidth: 1,
+    backgroundColor: "#F8F9FC",
     gap: SPACING.xs,
   },
   estatusText: {
-    color: "#fff",
+    flexShrink: 1,
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   cardBody: {
     padding: SPACING.m,
@@ -702,16 +1052,16 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.m,
   },
   clienteAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.primary,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: COLORS.primaryLight,
     alignItems: "center",
     justifyContent: "center",
     marginRight: SPACING.m,
   },
   clienteAvatarText: {
-    color: "#fff",
+    color: COLORS.primary,
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -720,46 +1070,71 @@ const styles = StyleSheet.create({
   },
   clienteNombre: {
     ...TYPOGRAPHY.h3,
-    fontSize: 16,
+    fontSize: 17,
     color: COLORS.textPrimary,
     marginBottom: SPACING.xs,
   },
   direccionRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: SPACING.xs,
   },
   direccionText: {
     ...TYPOGRAPHY.caption,
     fontSize: 13,
+    lineHeight: 18,
     color: COLORS.textSecondary,
     flex: 1,
   },
-  badgesRow: {
+  metricsRow: {
     flexDirection: "row",
-    gap: SPACING.s,
+    alignItems: "stretch",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#EFF0F4",
+    paddingVertical: SPACING.s,
     marginBottom: SPACING.m,
   },
-  badge: {
+  metricItem: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F2F2F7",
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderRadius: BORDER_RADIUS.round,
+    paddingHorizontal: SPACING.xs,
     gap: SPACING.xs,
   },
-  badgeText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
+  metricIcon: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: COLORS.primaryLight,
+  },
+  metricIconSuccess: {
+    backgroundColor: "#EAF6E6",
+  },
+  metricIconMuted: {
+    backgroundColor: "#F0F1F5",
+  },
+  metricCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: COLORS.muted,
+    marginBottom: 2,
+  },
+  metricValue: {
+    fontSize: 13,
+    fontWeight: "700",
     color: COLORS.textPrimary,
-    fontWeight: "600",
   },
-  badgeDistancia: {
-    backgroundColor: "#E8F5E9",
-  },
-  badgeDistanciaText: {
-    color: COLORS.success,
+  metricDivider: {
+    width: 1,
+    marginVertical: SPACING.xs,
+    backgroundColor: "#EFF0F4",
   },
   infoRow: {
     flexDirection: "row",
@@ -784,14 +1159,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF8E1",
     padding: SPACING.s,
     borderRadius: BORDER_RADIUS.s,
-    marginTop: SPACING.s,
+    marginBottom: SPACING.m,
   },
   observacionesText: {
     ...TYPOGRAPHY.caption,
     flex: 1,
     fontSize: 12,
-    color: COLORS.warning,
-    fontStyle: "italic",
+    lineHeight: 17,
+    color: "#A56600",
   },
   fueraAgendaBadge: {
     flexDirection: "row",
@@ -810,11 +1185,42 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.xxl,
+  },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 36,
+    backgroundColor: COLORS.primaryLight,
+    marginBottom: SPACING.m,
+  },
+  emptyTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 18,
+    textAlign: "center",
+    color: COLORS.textPrimary,
   },
   emptyText: {
     ...TYPOGRAPHY.body,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
     color: COLORS.muted,
+    marginTop: SPACING.s,
+  },
+  emptyAction: {
     marginTop: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    backgroundColor: COLORS.primary,
+  },
+  emptyActionText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

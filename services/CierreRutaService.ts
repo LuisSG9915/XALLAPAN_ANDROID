@@ -5,6 +5,12 @@ import { allSchemas } from "./RealmSchemas";
 // 2=ENTREGADO, 6=ENTREGADO PARCIAL
 const ESTATUS_PEDIDO_PERMITE_CIERRE = [2, 6] as const;
 
+type ResultadoValidacionPedidos = {
+  permitido: boolean;
+  pedidosBloqueantes: any[];
+  error?: boolean;
+};
+
 class CierreRutaService {
   private realm: Realm | null = null;
 
@@ -32,7 +38,7 @@ class CierreRutaService {
     return cierreRuta?.rutaCerrada ?? false;
   }
 
-  validarPedidosPendientesSinCausa(ruta: number): { permitido: boolean; pedidosBloqueantes: any[] } {
+  validarPedidosPendientesSinCausa(ruta: number): ResultadoValidacionPedidos {
     try {
       const realm = this.getRealm();
       const inicioDelDia = new Date();
@@ -42,33 +48,41 @@ class CierreRutaService {
 
       // Solo se validan los pedidos de hoy. Cualquier estado distinto de
       // ENTREGADO (2) o ENTREGADO PARCIAL (6) bloquea el cierre.
-      const pedidos = realm
-        .objects("Pedido")
-        .filtered(
-          "ruta == $0 AND fechaEntrega >= $1 AND fechaEntrega < $2 AND estatus != $3 AND estatus != $4",
-          ruta,
-          inicioDelDia,
-          inicioDelDiaSiguiente,
-          ESTATUS_PEDIDO_PERMITE_CIERRE[0],
-          ESTATUS_PEDIDO_PERMITE_CIERRE[1]
-        );
+      const pedidosDeLaRuta = realm.objects("Pedido").filtered("ruta == $0", ruta);
+      const pedidosArray = Array.from(pedidosDeLaRuta)
+        .filter((p: any) => {
+          if (!p.fechaEntrega) return false;
 
-      const pedidosArray = Array.from(pedidos).map((p: any) => ({
-        id: p.id,
-        folio: p.folio,
-        cliente: p.cliente,
-        clienteNombre: p.clienteNombre,
-        estatus: p.estatus,
-        estatusDescripcion: p.estatusDescripcion,
-      }));
+          const fechaEntrega = new Date(p.fechaEntrega);
+          const estatus = Number(p.estatus);
+
+          return (
+            !Number.isNaN(fechaEntrega.getTime()) &&
+            fechaEntrega >= inicioDelDia &&
+            fechaEntrega < inicioDelDiaSiguiente &&
+            !ESTATUS_PEDIDO_PERMITE_CIERRE.includes(estatus as (typeof ESTATUS_PEDIDO_PERMITE_CIERRE)[number])
+          );
+        })
+        .map((p: any) => ({
+          id: p.id,
+          folio: p.folio,
+          cliente: p.cliente,
+          clienteNombre: p.clienteNombre,
+          estatus: Number(p.estatus),
+          estatusDescripcion: p.estatusDescripcion,
+        }));
+
+      console.log(
+        `[CierreRutaService] Validación ruta ${ruta}: ${pedidosArray.length} pedido(s) bloqueante(s) de hoy`,
+      );
 
       return {
         permitido: pedidosArray.length === 0,
         pedidosBloqueantes: pedidosArray,
       };
     } catch (error) {
-      console.warn("[CierreRutaService] No se pudo validar pedidos (tabla no existe aún):", error);
-      return { permitido: true, pedidosBloqueantes: [] };
+      console.error("[CierreRutaService] No se pudo validar pedidos; se bloqueará el cierre:", error);
+      return { permitido: false, pedidosBloqueantes: [], error: true };
     }
   }
 
