@@ -49,7 +49,8 @@ class CierreRutaService {
       // Solo se validan los pedidos de hoy. Cualquier estado distinto de
       // ENTREGADO (2) o ENTREGADO PARCIAL (6) bloquea el cierre.
       const pedidosDeLaRuta = realm.objects("Pedido").filtered("ruta == $0", ruta);
-      const pedidosArray = Array.from(pedidosDeLaRuta)
+      const pedidosPorFolio = new Map<number, any>();
+      Array.from(pedidosDeLaRuta)
         .filter((p: any) => {
           if (!p.fechaEntrega) return false;
 
@@ -63,14 +64,20 @@ class CierreRutaService {
             !ESTATUS_PEDIDO_PERMITE_CIERRE.includes(estatus as (typeof ESTATUS_PEDIDO_PERMITE_CIERRE)[number])
           );
         })
-        .map((p: any) => ({
-          id: p.id,
-          folio: p.folio,
-          cliente: p.cliente,
-          clienteNombre: p.clienteNombre,
-          estatus: Number(p.estatus),
-          estatusDescripcion: p.estatusDescripcion,
-        }));
+        .forEach((p: any) => {
+          if (!pedidosPorFolio.has(Number(p.folio))) {
+            pedidosPorFolio.set(Number(p.folio), {
+              id: p.id,
+              folio: p.folio,
+              cliente: p.cliente,
+              clienteNombre: p.clienteNombre,
+              clienteDomicilio: p.clienteDomicilio,
+              estatus: Number(p.estatus),
+              estatusDescripcion: p.estatusDescripcion,
+            });
+          }
+        });
+      const pedidosArray = Array.from(pedidosPorFolio.values());
 
       console.log(
         `[CierreRutaService] Validación ruta ${ruta}: ${pedidosArray.length} pedido(s) bloqueante(s) de hoy`,

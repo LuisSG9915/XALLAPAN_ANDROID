@@ -776,7 +776,12 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     if (!validacionPedidos.permitido) {
       const listaPedidos = validacionPedidos.pedidosBloqueantes
-        .map((p: any) => `• Folio ${p.folio} - ${p.clienteNombre || `Cliente #${p.cliente}`}`)
+        .map(
+          (p: any) =>
+            `• Folio ${p.folio} - Cte ${p.clienteNombre || `#${p.cliente}`} - Domicilio: ${
+              p.clienteDomicilio || "Sin domicilio registrado"
+            }`,
+        )
         .join("\n");
 
       Alert.alert(
@@ -872,7 +877,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const priorityOrder = ["cumplimiento", "pedidos", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
-  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
+  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa","pedidos"];
   const isAdmin = currentUser?.id === 4;
 
   const allMenuItems = [

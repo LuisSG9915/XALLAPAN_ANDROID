@@ -100,10 +100,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           if (clientes.length > 0) clienteObj = clientes[0];
         }
 
-        const nombreCliente =
-          clienteObj?.nombre ||
-          pedidoData.clienteNombre ||
-          `Cliente #${pedidoData.cliente}`;
+        const nombreCliente = pedidoData.clienteNombre || `Cliente #${pedidoData.cliente}`;
         const domicilioCliente =
           clienteObj?.domicilio || pedidoData.clienteDomicilio || "Sin dirección";
 
@@ -400,6 +397,84 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     }
   };
 
+  const validarInventarioPedido = (
+    productosEntregados: Pedido[],
+    sucursal: number,
+  ): {
+    permitido: boolean;
+    faltantes: { nombre: string; disponible: number; solicitado: number }[];
+  } => {
+    const inventarioPorClave = new Map<number, number>();
+    FullSyncService.getInventario()
+      .filter((item: any) => Number(item.sucursal) === sucursal && Number(item.id) < 10000)
+      .forEach((item: any) => {
+        const clave = Number(item.claveProd);
+        const saldo = Number(item.saldo || 0);
+        if (!Number.isFinite(clave) || !Number.isFinite(saldo)) return;
+        inventarioPorClave.set(clave, (inventarioPorClave.get(clave) || 0) + saldo);
+      });
+
+    const productosPorId = new Map<number, any>();
+    FullSyncService.getProductos(100000).forEach((producto: any) => {
+      productosPorId.set(Number(producto.id), producto);
+    });
+
+    const kitsPorProducto = new Map<number, any[]>();
+    FullSyncService.getKits(50000).forEach((kit: any) => {
+      const idProducto = Number(kit.idProducto);
+      if (!Number.isFinite(idProducto)) return;
+      const componentes = kitsPorProducto.get(idProducto) || [];
+      componentes.push(kit);
+      kitsPorProducto.set(idProducto, componentes);
+    });
+
+    const calcularExistencia = (idProducto: number): number => {
+      const productoCatalogo = productosPorId.get(idProducto);
+      const esKit = Boolean(productoCatalogo?.esKit);
+      const inventariable = Boolean(productoCatalogo?.inventariable);
+
+      if (esKit && !inventariable) {
+        const componentes = kitsPorProducto.get(idProducto) || [];
+        if (!componentes.length) return 0;
+
+        let minimo = Infinity;
+        for (const componente of componentes) {
+          if (componente.noRecuperaEnvase) continue;
+
+          const cantidadInsumo = Number(componente.cantidad || 0);
+          const claveInsumo = Number(componente.idInsumo);
+          if (cantidadInsumo <= 0 || !Number.isFinite(claveInsumo)) return 0;
+
+          const saldo = inventarioPorClave.get(claveInsumo) || 0;
+          minimo = Math.min(minimo, Math.floor(saldo / cantidadInsumo));
+        }
+
+        return minimo === Infinity ? 0 : minimo;
+      }
+
+      return inventarioPorClave.get(idProducto) || 0;
+    };
+
+    const faltantes = productosEntregados.reduce<
+      { nombre: string; disponible: number; solicitado: number }[]
+    >((resultado, producto) => {
+      const solicitado = Number(producto.cantAtencion ?? 0);
+      if (!Number.isFinite(solicitado) || solicitado <= 0) return resultado;
+
+      const disponible = calcularExistencia(Number(producto.idProducto));
+      if (disponible < solicitado) {
+        resultado.push({
+          nombre: producto.productoNombre || `Producto #${producto.idProducto}`,
+          disponible,
+          solicitado,
+        });
+      }
+      return resultado;
+    }, []);
+
+    return { permitido: faltantes.length === 0, faltantes };
+  };
+
   const confirmarEntrega = () => {
     const productosConDiferencia = productos.filter((p) => {
       const cantAtencion = p.cantAtencion ?? 0;
@@ -447,6 +522,19 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           const productosEntregados = [...productos];
           if (!pedidoCerrado) {
             Alert.alert("Error", "No se encontró el pedido para confirmar la entrega");
+            return;
+          }
+
+          const user = await AuthService.restoreSession();
+          const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoCerrado.ruta || 1);
+          const validacionInventario = validarInventarioPedido(productosEntregados, sucursal);
+          if (!validacionInventario.permitido) {
+            Alert.alert(
+              "Inventario insuficiente",
+              `Los siguientes productos no tienen suficiente inventario:\n${validacionInventario.faltantes
+                .map((item) => `- ${item.nombre} (disponible: ${item.disponible}, solicitado: ${item.solicitado})`)
+                .join("\n")}`,
+            );
             return;
           }
 

@@ -13,6 +13,46 @@ export interface PrinterStatus {
 }
 
 const STORAGE_KEY = "@awesomeapp/selected_printer";
+const EAN13_PARITY = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"];
+const EAN13_L_CODES = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
+const EAN13_G_CODES = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111"];
+const EAN13_R_CODES = ["1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100"];
+
+export interface Ean13Barcode {
+  data: string;
+  encodedValue: string;
+  pattern: string;
+}
+
+export const createEan13Barcode = (value?: string): Ean13Barcode | null => {
+  const folio = value?.trim();
+  if (!folio || !/^\d{1,12}$/.test(folio)) return null;
+
+  const data = folio.padStart(12, "0");
+  const sum = data.split("").reduce(
+    (total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3),
+    0,
+  );
+  const checkDigit = String((10 - (sum % 10)) % 10);
+  const encodedValue = data + checkDigit;
+  const parity = EAN13_PARITY[Number(data[0])];
+  const left = data
+    .slice(1)
+    .split("")
+    .map((digit, index) => (parity[index] === "L" ? EAN13_L_CODES[Number(digit)] : EAN13_G_CODES[Number(digit)]))
+    .join("");
+  const right = encodedValue
+    .slice(7)
+    .split("")
+    .map((digit) => EAN13_R_CODES[Number(digit)])
+    .join("");
+
+  return {
+    data,
+    encodedValue,
+    pattern: `101${left}01010${right}101`,
+  };
+};
 
 class BluetoothPrinterService {
   private currentPrinter: PrinterDevice | null = null;
@@ -379,10 +419,14 @@ class BluetoothPrinterService {
     });
   }
 
+  private normalizeEan13Data(value?: string): string | null {
+    return createEan13Barcode(value)?.data ?? null;
+  }
+
   /**
    * Imprime líneas de ticket con formato (con auto-reconexión)
    */
-  async printTicket(lines: string[]): Promise<boolean> {
+  async printTicket(lines: string[], barcodeValue?: string): Promise<boolean> {
     return this.executeWithReconnect(async () => {
       await BluetoothEscposPrinter.printerInit();
 
@@ -412,6 +456,21 @@ class BluetoothPrinterService {
           // Texto normal (las negritas ESC/POS se manejarán con comandos si es necesario)
           await BluetoothEscposPrinter.printText(line + "\n", this.PRINT_OPTS);
         }
+      }
+
+      const barcode = this.normalizeEan13Data(barcodeValue);
+      if (barcode) {
+        await BluetoothEscposPrinter.printerAlign(BluetoothEscposPrinter.ALIGN.CENTER);
+        await BluetoothEscposPrinter.printBarCode(
+          barcode,
+          BluetoothEscposPrinter.BARCODETYPE.JAN13,
+          2,
+          80,
+          0,
+          2,
+        );
+        await BluetoothEscposPrinter.printText("\n", this.PRINT_OPTS);
+        await BluetoothEscposPrinter.printerAlign(BluetoothEscposPrinter.ALIGN.LEFT);
       }
 
       // Alimentación adicional

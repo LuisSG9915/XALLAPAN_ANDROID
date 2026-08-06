@@ -210,8 +210,8 @@ class PedidosService {
               fecha: row.fecha ? new Date(row.fecha) : null,
               ruta: row.ruta,
               cliente: row.cliente,
-              clienteNombre: cliente?.nombre || `Cliente #${row.cliente}`,
-              clienteDomicilio: cliente?.domicilio || "",
+              clienteNombre: row.nombreCliente ?? row.clienteNombre ?? `Cliente #${row.cliente}`,
+              clienteDomicilio: row.clienteDomicilio ?? cliente?.domicilio ?? "",
               idCanal: null,
               fechaAtencion: fechaAtencionFinal,
               idVendedor: row.idVendedor,
@@ -233,7 +233,7 @@ class PedidosService {
               productoNombre: producto?.descripcion || `Producto #${idProducto}`,
               cantAtencion: cantAtencionFinal,
               precio: row.precio ?? null,
-              precioAtencion: pedidoExistente?.precioAtencion ?? null,
+              precioAtencion: pedidoExistente?.precioAtencion ?? row.precioAtencion ?? null,
               causaDiferencia: pedidoExistente?.causaDiferencia ?? null,
               causaDiferenciaDesc: pedidoExistente?.causaDiferencia
                 ? this.getCausaDiferenciaDescripcion(pedidoExistente.causaDiferencia)
@@ -340,8 +340,18 @@ class PedidosService {
   getFoliosByRuta(ruta: number): number[] {
     const realm = this.getRealm();
     const pedidos = realm.objects("Pedido").filtered("ruta = $0", ruta);
+    const foliosCancelados = new Set<number>();
     const folios = new Set<number>();
-    Array.from(pedidos).forEach((p: any) => folios.add(p.folio));
+
+    Array.from(pedidos).forEach((p: any) => {
+      if (Number(p.estatus) === ESTATUS_PEDIDO.CANCELADO) {
+        foliosCancelados.add(Number(p.folio));
+      } else {
+        folios.add(Number(p.folio));
+      }
+    });
+
+    foliosCancelados.forEach((folio) => folios.delete(folio));
     return Array.from(folios);
   }
 
@@ -743,7 +753,7 @@ class PedidosService {
               idVendedor: renglon.idVendedor,
               idProducto: renglon.idProducto ?? null,
               cantPedido: null,
-              precio: null,
+              precio: renglon.precio ?? null,
               observaciones: renglon.observaciones ?? null,
               listaPrecio: null,
               fechaEntrega: null,

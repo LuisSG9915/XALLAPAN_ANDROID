@@ -24,6 +24,14 @@ declare module 'react-native-bluetooth-escpos-printer' {
   }
 
   export class BluetoothEscposPrinter {
+    static readonly ALIGN: {
+      LEFT: number;
+      CENTER: number;
+      RIGHT: number;
+    };
+    static readonly BARCODETYPE: {
+      JAN13: number;
+    };
     static printerInit(): Promise<void>;
     static printerLeftSpace(space: number): Promise<void>;
     static printerLineSpace(space: number): Promise<void>;
@@ -43,8 +51,9 @@ declare module 'react-native-bluetooth-escpos-printer' {
       barcodeType: number,
       width: number,
       height: number,
-      textPosition: number,
-    ): Promise<void>;
+      hriFontType: number,
+      hriFontPosition: number,
+    ): void | Promise<void>;
     static printQRCode(qrcode: string, size: number, correction: number): Promise<void>;
     static rotate(rotate: number): Promise<void>;
   }

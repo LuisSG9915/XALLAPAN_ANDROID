@@ -38,7 +38,7 @@ adb uninstall com.awesomeproject
 
 cd android
 ./gradlew assembleRelease
-cd..
+cd ..
 
 
 

@@ -136,13 +136,12 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (pedido) {
-          const clienteFull = buscarClienteEnRealm(pedido.cliente);
           const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
           pedidosAgrupados.push({
             ...pedido,
             folioKey: folio,
-            clienteNombre: clienteFull?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`,
-            clienteDomicilio: clienteFull?.domicilio || pedido.clienteDomicilio || "",
+            clienteNombre: pedido.clienteNombre || `Cliente #${pedido.cliente}`,
+            clienteDomicilio: pedido.clienteDomicilio || "",
             observaciones: pedido.observaciones || "",
             total,
           });
@@ -183,13 +182,12 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);
           if (pedido) {
-            const clienteFull = buscarClienteEnRealm(pedido.cliente);
             const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
             pedidosAgrupados.push({
               ...pedido,
               folioKey: folio,
-              clienteNombre: clienteFull?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`,
-              clienteDomicilio: clienteFull?.domicilio || pedido.clienteDomicilio || "",
+              clienteNombre: pedido.clienteNombre || `Cliente #${pedido.cliente}`,
+              clienteDomicilio: pedido.clienteDomicilio || "",
               observaciones: pedido.observaciones || "",
               total,
             });
@@ -325,7 +323,6 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   };
 
   const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
-    const clienteFull = buscarClienteEnRealm(Number(item.cliente));
     const clienteNombre = item.clienteNombre || `Cliente #${item.cliente}`;
     const clienteDomicilio = item.clienteDomicilio || "";
     const estatusColor = getEstatusColor(item.estatus);
@@ -340,6 +337,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
 
     let distanciaTexto = "No disponible";
     let distanciaDisponible = false;
+    const clienteFull = buscarClienteEnRealm(Number(item.cliente));
     if (ubicacion && clienteFull?.latitud != null && clienteFull?.longitud != null) {
       const dist = calcularDistancia(
         ubicacion.latitude,
@@ -369,6 +367,13 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
             </Text>
           </View>
         </View>
+
+        {item.fueraAgenda ? (
+          <View style={styles.fueraAgendaBadge}>
+            <Icon name="event-busy" type="material" size={15} color="#fff" />
+            <Text style={styles.fueraAgendaText}>CLIENTE FUERA DE AGENDA</Text>
+          </View>
+        ) : null}
 
         <View style={styles.cardBody}>
           <View style={styles.clienteRow}>

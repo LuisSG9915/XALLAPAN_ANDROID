@@ -8,6 +8,7 @@ export interface TicketOptions {
   title?: string;
   width?: number;
   encoding?: string;
+  barcode?: string;
 }
 
 export interface KitBreakdownItem {
@@ -359,7 +360,7 @@ class TicketPrinter {
       const connected = await BluetoothPrinterService.ensureConnected();
 
       if (connected) {
-        const success = await BluetoothPrinterService.printTicket(lines);
+        const success = await BluetoothPrinterService.printTicket(lines, opts.barcode);
         if (success) {
           return; // Impresión exitosa
         }
@@ -397,7 +398,7 @@ class TicketPrinter {
    */
   async printSaleTicket(data: SaleTicketData): Promise<void> {
     const lines = this.generateSaleTicket(data);
-    await this.print(lines, { title: "Ticket de Venta" });
+    await this.print(lines, { title: "Ticket de Venta", barcode: data.ticketNumber });
   }
 
   /**
