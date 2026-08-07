@@ -3,7 +3,8 @@
 ABRIMOS EL EMULADOR
 
 %LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe -avd Pixel_9a -no-snapshot-load
-
+AQUI ESTA LA RUTA DE LA APP
+C:\Users\Administrador\.xallapan\android-build\outputs\apk\release\app-release.apk
 
 
 Para probar:

@@ -21,7 +21,14 @@ buildscript {
 
 apply plugin: "com.facebook.react.rootproject"
 
-subprojects {
+def xallapanCmakeRoot = new File(System.getProperty("user.home"), ".xallapan/cmake")
+
+subprojects { subproject ->
+    subproject.plugins.withId("com.android.library") {
+        def libraryExtension = subproject.extensions.getByType(com.android.build.api.dsl.LibraryExtension)
+        libraryExtension.externalNativeBuild.cmake.buildStagingDirectory = new File(xallapanCmakeRoot, subproject.name)
+    }
+
     tasks.withType(com.facebook.react.tasks.GenerateCodegenSchemaTask).configureEach {
         doNotTrackState("React Native codegen output is not trackable on Windows Server")
     }
