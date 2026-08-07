@@ -78,6 +78,12 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    externalNativeBuild {
+        cmake {
+            buildStagingDirectory file("${System.getProperty('java.io.tmpdir')}/Xallapan-cmake")
+        }
+    }
+
     namespace "com.awesomeproject"
     defaultConfig {
         applicationId "com.awesomeproject"

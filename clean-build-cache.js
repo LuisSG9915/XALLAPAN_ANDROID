@@ -31,6 +31,7 @@ rm(path.join(process.env.USERPROFILE, '.gradle', 'caches', '9.0.0', 'files-2.1',
 
 // Build dirs del proyecto
 rm(path.join(__dirname, 'android', '.gradle'));
+rm(path.join(__dirname, 'android', 'app', '.cxx'));
 rm(path.join(__dirname, 'android', 'app', 'build'));
 rm(path.join(__dirname, 'android', 'build'));
 

@@ -466,6 +466,37 @@ class LocationService {
     });
   }
 
+  async getLocationForNearby(): Promise<LocationCoordinates | null> {
+    if (!this.hasPermission) {
+      const granted = await this.checkPermission();
+      if (!granted) {
+        console.warn("[LocationService] No hay permisos de ubicación");
+        return null;
+      }
+    }
+
+    return new Promise((resolve) => {
+      Geolocation.getCurrentPosition(
+        (position: GeoPosition) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          GpsBitacoraService.registrarUbicacion(latitude, longitude, accuracy);
+          resolve({ latitude, longitude, accuracy });
+        },
+        (error: GeoError) => {
+          console.warn("[LocationService] No se pudo obtener ubicación rápida:", error.message);
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 4500,
+          maximumAge: 0,
+          forceRequestLocation: true,
+          showLocationDialog: true,
+        } as any,
+      );
+    });
+  }
+
   /**
    * Retorna si los permisos están concedidos.
    */

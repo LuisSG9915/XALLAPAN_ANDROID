@@ -150,6 +150,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   const [clientesVisitadosHoy, setClientesVisitadosHoy] = useState<Set<number>>(new Set());
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loadingCercanos, setLoadingCercanos] = useState(false);
+  const actualizandoCoordenadasRef = useRef(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
   const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
 
@@ -754,26 +755,51 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   // Obtener ubicación del vendedor y recalcular los 5 clientes más cercanos
   const actualizarCoordenadas = async () => {
+    if (actualizandoCoordenadasRef.current) return;
+
+    actualizandoCoordenadasRef.current = true;
     setLoadingCercanos(true);
     try {
-      const ubicacion = await LocationService.getBestLocation();
+      const ubicacion = await LocationService.getLocationForNearby();
       if (ubicacion) {
         setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude });
-        const clientesConCoords = clientes.filter(
-          (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
-        );
-        console.log("[Cumplimiento] actualizarCoordenadas -> clientesConCoords:", clientesConCoords.length, "de", clientes.length, "clientes totales");
-        console.log("[Cumplimiento] actualizarCoordenadas -> clientes SIN coords:", clientes.filter((c) => !c.latitud || !c.longitud || (c.latitud === 0 && c.longitud === 0)).map((c) => ({ id: c.id, nombre: c.nombre })));
 
-        const clientesConDistancia = clientesConCoords
-          .map((c) => ({
-            ...c,
-            distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, c.latitud!, c.longitud!),
+        const latitudEnRadianes = (ubicacion.latitude * Math.PI) / 180;
+        const cosLatitud = Math.cos(latitudEnRadianes);
+        const candidatos: { cliente: ClienteLite; distanciaAproximada: number }[] = [];
+        clientes.forEach((cliente) => {
+          if (
+            !Number.isFinite(cliente.latitud) ||
+            !Number.isFinite(cliente.longitud) ||
+            (cliente.latitud === 0 && cliente.longitud === 0)
+          ) {
+            return;
+          }
+
+          const deltaLatitud = cliente.latitud! - ubicacion.latitude;
+          const deltaLongitud = (cliente.longitud! - ubicacion.longitude) * cosLatitud;
+          const candidato = {
+            cliente,
+            distanciaAproximada: deltaLatitud * deltaLatitud + deltaLongitud * deltaLongitud,
+          };
+          const posicion = candidatos.findIndex((actual) => actual.distanciaAproximada > candidato.distanciaAproximada);
+
+          if (posicion >= 0) {
+            candidatos.splice(posicion, 0, candidato);
+          } else if (candidatos.length < 5) {
+            candidatos.push(candidato);
+          }
+          if (candidatos.length > 5) candidatos.pop();
+        });
+
+        const clientesCercanos = candidatos
+          .map(({ cliente }) => ({
+            ...cliente,
+            distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, cliente.latitud!, cliente.longitud!),
           }))
-          .sort((a, b) => a.distanciaMetros - b.distanciaMetros)
-          .slice(0, 5);
-        console.log("[Cumplimiento] actualizarCoordenadas -> nearestClientes (top 5):", clientesConDistancia.map((c) => ({ id: c.id, nombre: c.nombre, distanciaMetros: c.distanciaMetros })));
-        setNearestClientes(clientesConDistancia);
+          .sort((a, b) => a.distanciaMetros - b.distanciaMetros);
+
+        setNearestClientes(clientesCercanos);
       } else {
         Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
       }
@@ -781,6 +807,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
       console.error("[Cumplimiento] Error al obtener ubicación:", error);
       Alert.alert("Error de ubicación", "No se pudo obtener tu ubicación.");
     } finally {
+      actualizandoCoordenadasRef.current = false;
       setLoadingCercanos(false);
     }
   };
