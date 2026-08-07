@@ -377,12 +377,16 @@ class VisitaSyncService {
     try {
       console.log(`[VisitaSync] 🔄 Sincronizando visitas realizadas para ruta: ${sucursal}`);
 
-      const response = await fetchWithTimeout(endpoint, {
-        method: "GET",
-        headers: {
-          accept: "application/json",
+      const response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+          },
         },
-      });
+        3000,
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

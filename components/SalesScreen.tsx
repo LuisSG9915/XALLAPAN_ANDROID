@@ -40,6 +40,63 @@ type Cliente = {
   domicilio?: string;
 };
 
+type ClienteCercano = Cliente & { distanciaMetros: number };
+
+const MAX_CLIENTES_CERCANOS = 5;
+
+const calcularClientesCercanos = (clientes: Cliente[], ubicacion: LocationCoordinates): ClienteCercano[] => {
+  const clientesConDistancia: ClienteCercano[] = [];
+
+  for (const cliente of clientes) {
+    const latitudRaw: unknown = cliente.latitud;
+    const longitudRaw: unknown = cliente.longitud;
+    if (
+      latitudRaw == null ||
+      longitudRaw == null ||
+      (typeof latitudRaw === "string" && latitudRaw.trim() === "") ||
+      (typeof longitudRaw === "string" && longitudRaw.trim() === "")
+    ) {
+      continue;
+    }
+
+    const latitud = Number(latitudRaw);
+    const longitud = Number(longitudRaw);
+    if (
+      !Number.isFinite(latitud) ||
+      !Number.isFinite(longitud) ||
+      latitud < -90 ||
+      latitud > 90 ||
+      longitud < -180 ||
+      longitud > 180 ||
+      (latitud === 0 && longitud === 0)
+    ) {
+      continue;
+    }
+
+    const clienteConDistancia = {
+      ...cliente,
+      distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, latitud, longitud),
+    };
+    const indiceInsercion = clientesConDistancia.findIndex(
+      (cercano) => cercano.distanciaMetros > clienteConDistancia.distanciaMetros,
+    );
+
+    if (indiceInsercion === -1) {
+      if (clientesConDistancia.length < MAX_CLIENTES_CERCANOS) {
+        clientesConDistancia.push(clienteConDistancia);
+      }
+      continue;
+    }
+
+    clientesConDistancia.splice(indiceInsercion, 0, clienteConDistancia);
+    if (clientesConDistancia.length > MAX_CLIENTES_CERCANOS) {
+      clientesConDistancia.pop();
+    }
+  }
+
+  return clientesConDistancia;
+};
+
 type Producto = {
   id: number;
   claveProd: string;
@@ -130,12 +187,25 @@ export default function SalesScreen({ route }: { route?: any }) {
 
   // Tabs del modal de clientes: 'agendados' | 'cercanos' | 'todos'
   const [clienteTabActivo, setClienteTabActivo] = useState<"agendados" | "cercanos" | "todos">("agendados");
-  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
-  const [nearestClientes, setNearestClientes] = useState<(Cliente & { distanciaMetros: number })[]>([]);
+  const [userCoords, setUserCoords] = useState<LocationCoordinates | null>(null);
+  const nearestClientes = useMemo(
+    () => (userCoords ? calcularClientesCercanos(clientes, userCoords) : []),
+    [clientes, userCoords],
+  );
   const [loadingCercanos, setLoadingCercanos] = useState(false);
   const [loadingAgendados, setLoadingAgendados] = useState(false);
   const [usuarioPermisoReubicacion, setUsuarioPermisoReubicacion] = useState(false);
   const [reubicandoCliente, setReubicandoCliente] = useState(false);
+  const actualizandoCoordenadasRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      actualizandoCoordenadasRef.current = false;
+    };
+  }, []);
 
   // Cache de GPS obtenido durante validacion de visita/venta para reutilizar en processSale.
   // `source` indica quién lo llenó (visita | prefetch | venta) para la bitácora de tiempos.
@@ -862,13 +932,18 @@ export default function SalesScreen({ route }: { route?: any }) {
         console.log("[Sales] Ejemplo cliente con coords:", JSON.stringify(clientesConCoords[0]));
       }
 
-      // Sincronizar visitas realizadas al inicio (solo si no hay sync automática en curso)
+      // Sincronizar visitas realizadas en segundo plano (solo si no hay sync automática en curso)
       if (!skipNetworkSync) {
-        try {
-          await VisitaSyncService.getInstance().syncVisitasRealizadas(sucursal);
-        } catch (syncErr) {
-          console.warn("[Sales] Sync visitas realizadas fallido (no crítico):", syncErr);
-        }
+        void VisitaSyncService.getInstance()
+          .syncVisitasRealizadas(sucursal)
+          .then((syncResult) => {
+            if (!syncResult.success) {
+              console.warn("[Sales] Sync visitas realizadas fallido (no crítico)");
+            }
+          })
+          .catch((syncErr) => {
+            console.warn("[Sales] Sync visitas realizadas fallido (no crítico):", syncErr);
+          });
       } else {
         console.log("[Sales] Omitiendo sync de visitas realizadas: sync automática en curso");
       }
@@ -1007,41 +1082,42 @@ export default function SalesScreen({ route }: { route?: any }) {
   const tiposVisita = getTipoVisitas();
 
   // Actualizar coordenadas del usuario y recalcular cercanos
-  const actualizarCoordenadas = async () => {
+  const actualizarCoordenadas = useCallback(async () => {
+    if (actualizandoCoordenadasRef.current) return;
+
+    actualizandoCoordenadasRef.current = true;
     setLoadingCercanos(true);
     try {
-      const ubicacion = await LocationService.getBestLocation();
-      if (ubicacion) {
-        setUserCoords({ latitude: ubicacion.latitude, longitude: ubicacion.longitude, accuracy: ubicacion.accuracy });
-        // Calcular top 5 más cercanos
-        const clientesConCoords = clientes.filter(
-          (c) => c.latitud != null && c.longitud != null && (c.latitud !== 0 || c.longitud !== 0),
-        );
-        console.log(
-          `[Sales] Cercanos: ${clientes.length} clientes total, ${clientesConCoords.length} con coordenadas válidas`,
-        );
-        const clientesConDistancia = clientesConCoords
-          .map((c) => ({
-            ...c,
-            distanciaMetros: calcularDistancia(ubicacion.latitude, ubicacion.longitude, c.latitud!, c.longitud!),
-          }))
-          .sort((a, b) => a.distanciaMetros - b.distanciaMetros)
-          .slice(0, 5);
-        console.log(
-          `[Sales] Top 5 cercanos:`,
-          clientesConDistancia.map((c) => ({ id: c.id, nombre: c.nombre, dist: Math.round(c.distanciaMetros) })),
-        );
-        setNearestClientes(clientesConDistancia);
-      } else {
+      const ubicacion = await LocationService.getBestLocation(5, 6000);
+      if (!isMountedRef.current) return;
+      if (!ubicacion) {
         Alert.alert("Ubicación no disponible", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+        return;
       }
+
+      const { latitude, longitude } = ubicacion;
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        Alert.alert("Ubicación no disponible", "La ubicación obtenida no es válida. Intenta nuevamente.");
+        return;
+      }
+
+      setUserCoords(ubicacion);
     } catch (error) {
+      if (!isMountedRef.current) return;
       console.error("[Sales] Error al obtener ubicación:", error);
       Alert.alert("Error de ubicación", "No se pudo obtener tu ubicación.");
     } finally {
-      setLoadingCercanos(false);
+      actualizandoCoordenadasRef.current = false;
+      if (isMountedRef.current) setLoadingCercanos(false);
     }
-  };
+  }, []);
 
   // Guardia síncrona contra doble tap: el state `validandoUbicacion` tarda un
   // frame en deshabilitar el botón; dos taps rápidos lanzaban dos validaciones
@@ -3172,7 +3248,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                   onPress={() => {
                     setClienteTabActivo("cercanos");
                     setSearchQuery("");
-                    if (nearestClientes.length === 0) {
+                    if (!loadingCercanos && !userCoords) {
                       actualizarCoordenadas();
                     }
                   }}
@@ -3199,9 +3275,10 @@ export default function SalesScreen({ route }: { route?: any }) {
               {clienteTabActivo === "cercanos" && (
                 <View>
                   <TouchableOpacity
-                    style={styles.refreshCoordsBtn}
+                    style={[styles.refreshCoordsBtn, loadingCercanos && styles.refreshCoordsBtnDisabled]}
                     onPress={actualizarCoordenadas}
                     disabled={loadingCercanos}
+                    activeOpacity={0.8}
                   >
                     {loadingCercanos ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -3215,6 +3292,7 @@ export default function SalesScreen({ route }: { route?: any }) {
                   {userCoords && (
                     <Text style={styles.coordsInfo}>
                       Lat: {userCoords.latitude.toFixed(5)}, Lon: {userCoords.longitude.toFixed(5)}
+                      {userCoords.accuracy != null ? ` · Precisión ±${Math.round(userCoords.accuracy)} m` : ""}
                     </Text>
                   )}
                 </View>
@@ -4505,6 +4583,10 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.m,
     marginVertical: SPACING.s,
     gap: SPACING.s,
+  },
+  refreshCoordsBtnDisabled: {
+    backgroundColor: COLORS.muted,
+    opacity: 0.7,
   },
   refreshCoordsBtnText: {
     color: "#fff",
