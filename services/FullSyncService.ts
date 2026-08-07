@@ -455,8 +455,8 @@ class FullSyncService {
               fecha: row.fecha ? new Date(row.fecha) : null,
               ruta: Number(row.ruta ?? ruta ?? 0),
               cliente: Number(row.cliente ?? 0),
-              clienteNombre: null,
-              clienteDomicilio: null,
+              clienteNombre: row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? null,
+              clienteDomicilio: row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? null,
               idCanal: null,
               fechaAtencion: null,
               idVendedor: Number(row.idVendedor ?? row.id_vendedor ?? 0),
@@ -498,6 +498,8 @@ class FullSyncService {
               pedido.fecha = row.fecha ? new Date(row.fecha) : pedido.fecha;
               pedido.ruta = Number(row.ruta ?? ruta ?? pedido.ruta);
               pedido.cliente = Number(row.cliente ?? pedido.cliente);
+              pedido.clienteNombre = row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? pedido.clienteNombre;
+              pedido.clienteDomicilio = row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? pedido.clienteDomicilio;
               pedido.idVendedor = Number(row.idVendedor ?? row.id_vendedor ?? pedido.idVendedor);
               pedido.numeroProductos = Number(row.numeroProductos ?? row.numero_productos ?? pedido.numeroProductos);
               pedido.cantPedido = Number(row.cantPedido ?? row.cant_pedido ?? pedido.cantPedido);
@@ -1888,7 +1890,8 @@ class FullSyncService {
               throw new Error(`HTTP ${response.status} VisitasPivote`);
             }
 
-            const visitasData = await response.json();
+            const responseText = await response.text();
+            const visitasData = responseText.trim() ? JSON.parse(responseText) : [];
             const registrosLeidos = Array.isArray(visitasData) ? visitasData.length : 0;
             let registrosGuardados = 0;
             let registrosActualizados = 0;

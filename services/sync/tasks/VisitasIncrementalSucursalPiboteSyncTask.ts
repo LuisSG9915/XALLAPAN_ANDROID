@@ -42,7 +42,8 @@ export class VisitasIncrementalSucursalPiboteSyncTask extends SyncTask {
         throw new Error(`HTTP ${response.status} VisitasPivote`);
       }
 
-      const visitasData = await response.json();
+      const responseText = await response.text();
+      const visitasData = responseText.trim() ? JSON.parse(responseText) : [];
       const registrosLeidos = Array.isArray(visitasData) ? visitasData.length : 0;
       let registrosGuardados = 0;
       let registrosActualizados = 0;

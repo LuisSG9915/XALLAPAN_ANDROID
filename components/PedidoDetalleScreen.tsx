@@ -85,6 +85,22 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
       const pedidoData = pedidosService.getPedidoByFolio(folio);
       const productosData = pedidosService.getProductosByFolio(folio);
+      const productosCatalogo = FullSyncService.getProductos(100000);
+      console.log(
+        `[PedidoDetalle] Diagnóstico folio=${folio}`,
+        productosData.map((producto: any) => ({
+          id: producto.id,
+          idProducto: producto.idProducto,
+          productoNombre: producto.productoNombre,
+          cantPedido: producto.cantPedido,
+          catalogoEncontrado: productosCatalogo.some(
+            (catalogo: any) => Number(catalogo.id) === Number(producto.idProducto),
+          ),
+          catalogoNombre: productosCatalogo.find(
+            (catalogo: any) => Number(catalogo.id) === Number(producto.idProducto),
+          )?.descripcion,
+        })),
+      );
       const causasDif = pedidosService.getCausasDiferencia();
       const causasNoAt = pedidosService.getCausasNoAtencion();
 
@@ -135,13 +151,23 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     }
   };
 
-  const iniciarAtencion = () => {
+  const iniciarAtencion = async () => {
     const pedidosService = PedidosService.getInstance();
     pedidosService.setRealm((FullSyncService as any).realm);
     const success = pedidosService.iniciarAtencionPedido(folio);
-    if (success) {
-      const pedidoActualizado = pedidosService.getPedidoByFolio(folio);
-      if (pedidoActualizado) setPedido(pedidoActualizado);
+    console.log(`[PedidoDetalle] Iniciar atención folio=${folio}, resultado=${success}`);
+    if (!success) return;
+
+    const pedidoActualizado = pedidosService.getPedidoByFolio(folio);
+    if (pedidoActualizado) setPedido(pedidoActualizado);
+
+    try {
+      const user = await AuthService.restoreSession();
+      const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedidoActualizado?.idVendedor ?? 1);
+      const resultadoArrastre = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
+      console.log(`[PedidoDetalle] Arrastre bitácora EN_ATENCION folio=${folio}:`, resultadoArrastre);
+    } catch (error) {
+      console.warn(`[PedidoDetalle] No se pudo enviar arrastre EN_ATENCION folio=${folio}:`, error);
     }
   };
 
@@ -538,11 +564,32 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             return;
           }
 
+          for (const producto of productosEntregados) {
+            const precioAtencion = Number(
+              producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto),
+            );
+            if (!Number.isFinite(precioAtencion)) {
+              Alert.alert("Error", `Precio inválido para el producto ${producto.idProducto}`);
+              return;
+            }
+
+            const precioGuardado = pedidosService.actualizarPrecioAtencion(
+              folio,
+              producto.idProducto,
+              precioAtencion,
+            );
+            if (!precioGuardado) {
+              Alert.alert("Error", `No se pudo guardar el precio del producto ${producto.idProducto}`);
+              return;
+            }
+          }
+
+          const productosParaVenta = pedidosService.getProductosByFolio(folio);
           const result = pedidosService.finalizarPedido(folio, nuevoEstatus);
 
           if (result.success && result.idMovil) {
             try {
-              await procesarCierreComoVenta(pedidoCerrado, productosEntregados, result.idMovil);
+              await procesarCierreComoVenta(pedidoCerrado, productosParaVenta, result.idMovil);
               Alert.alert(
                 "Éxito",
                 nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada",

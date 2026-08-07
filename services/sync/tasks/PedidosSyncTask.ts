@@ -5,6 +5,10 @@ import { SyncTask, SyncTaskResult } from "../SyncTask";
 import PedidoNotificacionService from "../../PedidoNotificacionService";
 import AuthService from "../../AuthService";
 
+const ESTATUS_PEDIDO_EN_ATENCION = 5;
+const ESTATUS_PEDIDO_EN_CAPTURA = 10;
+const ESTADOS_PEDIDO_FINALES = [2, 6, 7, 9];
+
 export class PedidosSyncTask extends SyncTask {
   constructor(realm: Realm, syncLogId: string) {
     super(realm, syncLogId);
@@ -95,6 +99,7 @@ export class PedidosSyncTask extends SyncTask {
 
       const rows = await response.json();
       console.log(`[PedidosSyncTask] JSON recibido, tipo: ${typeof rows}, es array: ${Array.isArray(rows)}, length: ${Array.isArray(rows) ? rows.length : "N/A"}`);
+      console.log("[PedidosSyncTask] Datos completos recibidos:", JSON.stringify(rows, null, 2));
 
       if (!Array.isArray(rows)) {
         throw new Error("La respuesta no es un array de pedidos");
@@ -113,14 +118,20 @@ export class PedidosSyncTask extends SyncTask {
           const id = this.buildPedidoId(folio, idProducto);
           const pedidoExistente = this.realm.objectForPrimaryKey("Pedido", id) as any;
 
-          const conservarLocal = pedidoExistente?.modificadoLocal === true;
-          const estatusFinal = conservarLocal ? pedidoExistente.estatus : row.estatus;
+          const estatusServidor = Number(row.estatus);
+          const conservarLocal =
+            pedidoExistente?.modificadoLocal === true &&
+            [ESTATUS_PEDIDO_EN_ATENCION, ESTATUS_PEDIDO_EN_CAPTURA].includes(Number(pedidoExistente.estatus)) &&
+            !ESTADOS_PEDIDO_FINALES.includes(estatusServidor);
+          const estatusFinal = conservarLocal ? pedidoExistente.estatus : estatusServidor;
           const fechaAtencionFinal = conservarLocal ? pedidoExistente.fechaAtencion : null;
           const causaNoAtencionFinal = conservarLocal ? pedidoExistente.causaNoAtencion : null;
           const obserNoAtencionFinal = conservarLocal ? pedidoExistente.obserNoAtencion : null;
 
-          const cliente = this.getClienteNombre(row.cliente);
-          const clienteDomicilio = this.getClienteDomicilio(row.cliente);
+          const clienteNombre =
+            row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? `Cliente #${row.cliente}`;
+          const clienteDomicilio =
+            row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? "";
           const producto = this.realm.objectForPrimaryKey("Producto", idProducto) as any;
           const productoNombre = producto?.descripcion || `Producto #${idProducto}`;
           const cantPedido = parseFloat(row.cantPedido) || 0;
@@ -138,7 +149,7 @@ export class PedidosSyncTask extends SyncTask {
               fecha: row.fecha ? new Date(row.fecha) : null,
               ruta: row.ruta,
               cliente: row.cliente,
-              clienteNombre: cliente,
+              clienteNombre,
               clienteDomicilio,
               idCanal: null,
               fechaAtencion: fechaAtencionFinal,
@@ -212,24 +223,6 @@ export class PedidosSyncTask extends SyncTask {
         success: false,
         error: error instanceof Error ? error.message : "Error desconocido",
       };
-    }
-  }
-
-  private getClienteNombre(idCliente: number): string {
-    try {
-      const cliente = this.realm.objectForPrimaryKey("ClienteFull", idCliente) as any;
-      return cliente?.nombre || `Cliente #${idCliente}`;
-    } catch {
-      return `Cliente #${idCliente}`;
-    }
-  }
-
-  private getClienteDomicilio(idCliente: number): string {
-    try {
-      const cliente = this.realm.objectForPrimaryKey("ClienteFull", idCliente) as any;
-      return cliente?.domicilio || "";
-    } catch {
-      return "";
     }
   }
 

@@ -7,15 +7,21 @@ import { navigationRef } from "./navigationRef";
 import PedidosService, { Pedido, ESTATUS_PEDIDO } from "./PedidosService";
 import AuthService from "./AuthService";
 import FullSyncService from "./FullSyncService";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 const CHANNEL_ID = "pedidos-central";
 const PENDING_NAVIGATION_KEY = "@xallapan/pedido_pendiente_navegacion";
+const PEDIDOS_POLL_STATE_PREFIX = "@xallapan/pedidos_poll_state:";
+const PEDIDOS_POLL_LOOKBACK_MS = 2 * 60 * 1000;
+const PEDIDOS_POLL_OVERLAP_MS = 1000;
 
 class PedidoNotificacionService {
   private static instance: PedidoNotificacionService;
   private realm: any = null;
   private inicializado = false;
   private navegacionPendienteEnCurso: Promise<boolean> | null = null;
+  private notificacionesEnCurso = new Set<string>();
+  private ultimoPollingPorRuta = new Map<number, number>();
 
   private constructor() {}
 
@@ -80,6 +86,254 @@ class PedidoNotificacionService {
     }
   }
 
+  async verificarPedidosNuevos(ruta: number): Promise<number> {
+    if (!Number.isFinite(ruta) || ruta <= 0) return 0;
+
+    const stateKey = `${PEDIDOS_POLL_STATE_PREFIX}${ruta}`;
+    let state: { initialized: boolean; knownFolios: number[]; lastPollAt?: number } = {
+      initialized: false,
+      knownFolios: [],
+    };
+    try {
+      const stored = await AsyncStorage.getItem(stateKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        state = {
+          initialized: parsed?.initialized === true,
+          knownFolios: Array.isArray(parsed?.knownFolios)
+            ? parsed.knownFolios.map(Number).filter((folio: number) => Number.isFinite(folio))
+            : [],
+          lastPollAt: Number.isFinite(Number(parsed?.lastPollAt)) ? Number(parsed.lastPollAt) : undefined,
+        };
+      }
+    } catch (error) {
+      console.warn("[PedidoNotificacionService] Estado de polling inválido:", error);
+    }
+
+    const ahora = Date.now();
+    const ultimoPolling = this.ultimoPollingPorRuta.get(ruta) ?? state.lastPollAt;
+    const fechaInicial = new Date(
+      ultimoPolling ? ultimoPolling - PEDIDOS_POLL_OVERLAP_MS : ahora - PEDIDOS_POLL_LOOKBACK_MS,
+    );
+    const fecha = [
+      fechaInicial.getFullYear(),
+      String(fechaInicial.getMonth() + 1).padStart(2, "0"),
+      String(fechaInicial.getDate()).padStart(2, "0"),
+    ].join("-");
+    const hora = `${String(fechaInicial.getHours()).padStart(2, "0")}:${String(
+      fechaInicial.getMinutes(),
+    ).padStart(2, "0")}:${String(fechaInicial.getSeconds()).padStart(2, "0")}.${String(
+      fechaInicial.getMilliseconds(),
+    ).padStart(3, "0")}`;
+    const url = `https://api.cbinformatica.net:9031/api/MovilesVentas/sp_MovilesPedidos/${ruta}?fechaInicial=${encodeURIComponent(
+      `${fecha} ${hora}`,
+    )}`;
+    console.log("[PedidoNotificacionService] Consultando pedidos", {
+      ruta,
+      fechaInicial: `${fecha} ${hora}`,
+      url,
+    });
+
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        { headers: { accept: "application/json" } },
+        8000,
+      );
+      const responseText = await response.text();
+      console.log(
+        `[PedidoNotificacionService] Respuesta de pedidos: ruta=${ruta}, status=${response.status}, ok=${response.ok}, bytes=${responseText.length}`,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (response.status === 204 || !responseText.trim()) {
+        const lastPollAt = Date.now();
+        this.ultimoPollingPorRuta.set(ruta, lastPollAt);
+        await AsyncStorage.setItem(
+          stateKey,
+          JSON.stringify({
+            initialized: state.initialized,
+            knownFolios: state.knownFolios,
+            lastPollAt,
+          }),
+        );
+        console.log(`[PedidoNotificacionService] Sin pedidos en la respuesta para ruta ${ruta}`);
+        return 0;
+      }
+      let payload: any;
+      try {
+        payload = JSON.parse(responseText);
+      } catch (error) {
+        console.warn(
+          `[PedidoNotificacionService] Respuesta no JSON del endpoint de pedidos (HTTP ${response.status})`,
+        );
+        return 0;
+      }
+
+      const rows = Array.isArray(payload)
+        ? payload
+        : payload?.data || payload?.result || payload?.items || [];
+      if (!Array.isArray(rows)) return 0;
+      console.log(`[PedidoNotificacionService] Registros recibidos: ${rows.length}`);
+      console.log(
+        "[PedidoNotificacionService] Renglones recibidos:",
+        rows.map((row: any) => ({
+          folio: row?.folio,
+          idProducto: row?.idProducto,
+          cantPedido: row?.cantPedido,
+          numeroProductos: row?.numeroProductos,
+          estatus: row?.estatus,
+        })),
+      );
+
+      const pedidosService = PedidosService.getInstance();
+      if (this.realm) {
+        pedidosService.setRealm(this.realm);
+        pedidosService.actualizarPedidosDesdeRespuesta(rows);
+      }
+
+      const pedidos = new Map<number, any>();
+      rows.forEach((row: any) => {
+        const folio = Number(row?.folio ?? row?.folioPedido ?? row?.idPedido);
+        if (Number.isFinite(folio) && folio > 0 && !pedidos.has(folio)) {
+          pedidos.set(folio, row);
+        }
+      });
+
+      const knownFolios = new Set(state.knownFolios);
+      if (!state.initialized) {
+        pedidos.forEach((_row, folio) => knownFolios.add(folio));
+        const lastPollAt = Date.now();
+        await AsyncStorage.setItem(
+          stateKey,
+          JSON.stringify({
+            initialized: true,
+            knownFolios: Array.from(knownFolios).slice(-1000),
+            lastPollAt,
+          }),
+        );
+        this.ultimoPollingPorRuta.set(ruta, lastPollAt);
+        console.log(
+          `[PedidoNotificacionService] Línea base creada para ruta ${ruta}: ${pedidos.size} folio(s)`,
+        );
+        return 0;
+      }
+
+      const foliosNuevos = Array.from(pedidos.keys()).filter((folio) => !knownFolios.has(folio));
+      console.log(
+        `[PedidoNotificacionService] Folios nuevos detectados para ruta ${ruta}: ${foliosNuevos.length}`,
+      );
+
+      let notificados = 0;
+      const estadosFinales = [
+        ESTATUS_PEDIDO.ENTREGADO,
+        ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+        ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+        ESTATUS_PEDIDO.CANCELADO,
+      ];
+      for (const [folio, row] of pedidos) {
+        if (knownFolios.has(folio)) continue;
+
+        const pedidoLocal = this.realm && !this.realm.isClosed
+          ? (pedidosService.getPedidoByFolio(folio) as Pedido | null)
+          : null;
+        if (pedidoLocal && estadosFinales.includes(pedidoLocal.estatus)) {
+          knownFolios.add(folio);
+          continue;
+        }
+
+        const pedido = pedidoLocal || this.crearPedidoDesdeApi(row, folio);
+        if (await this.mostrarNotificacionPedido(pedido)) {
+          knownFolios.add(folio);
+          notificados++;
+        }
+      }
+
+      const lastPollAt = Date.now();
+      await AsyncStorage.setItem(
+        stateKey,
+        JSON.stringify({
+          initialized: true,
+          knownFolios: Array.from(knownFolios).slice(-1000),
+          lastPollAt,
+        }),
+      );
+      this.ultimoPollingPorRuta.set(ruta, lastPollAt);
+
+      if (notificados > 0) {
+        console.log(`[PedidoNotificacionService] ${notificados} pedido(s) nuevo(s) notificado(s)`);
+      }
+      return notificados;
+    } catch (error) {
+      console.warn("[PedidoNotificacionService] Error consultando pedidos nuevos:", error);
+      return 0;
+    }
+  }
+
+  private crearPedidoDesdeApi(row: any, folio: number): Pedido {
+    const cliente = Number(row?.cliente ?? row?.idCliente ?? 0);
+    const idProducto = Number(row?.idProducto ?? 0);
+
+    return {
+      id: `${folio}-${idProducto}`,
+      idPedido: folio,
+      folio,
+      ruta: Number(row?.ruta ?? row?.idRuta ?? 0),
+      cliente,
+      clienteNombre: row?.nombreCliente ?? row?.clienteNombre,
+      clienteDomicilio: row?.clienteDomicilio ?? row?.domicilio,
+      idVendedor: Number(row?.idVendedor ?? 0),
+      numeroProductos: Number(row?.numeroProductos ?? row?.totalProductos ?? 1),
+      cantPedido: Number(row?.cantPedido ?? row?.cantidad ?? 0),
+      estatus: Number(row?.estatus ?? ESTATUS_PEDIDO.CONFIRMADO),
+      syncedAt: new Date(),
+      idProducto,
+    };
+  }
+
+  private async folioRegistradoEnPolling(folio: number): Promise<boolean> {
+    try {
+      const user = await AuthService.restoreSession();
+      const ruta = Number(user?.idSucursal ?? user?.sucursal_origen ?? user?.sucursal ?? user?.ruta);
+      if (!Number.isFinite(ruta) || ruta <= 0) return false;
+
+      const stored = await AsyncStorage.getItem(`${PEDIDOS_POLL_STATE_PREFIX}${ruta}`);
+      if (!stored) return false;
+
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed?.knownFolios) && parsed.knownFolios.map(Number).includes(folio);
+    } catch {
+      return false;
+    }
+  }
+
+  private async registrarFolioEnPolling(folio: number): Promise<void> {
+    try {
+      const user = await AuthService.restoreSession();
+      const ruta = Number(user?.idSucursal ?? user?.sucursal_origen ?? user?.sucursal ?? user?.ruta);
+      if (!Number.isFinite(ruta) || ruta <= 0) return;
+
+      const stateKey = `${PEDIDOS_POLL_STATE_PREFIX}${ruta}`;
+      const stored = await AsyncStorage.getItem(stateKey);
+      const parsed = stored ? JSON.parse(stored) : {};
+      const knownFolios = new Set<number>(
+        Array.isArray(parsed?.knownFolios)
+          ? parsed.knownFolios.map(Number).filter((value: number) => Number.isFinite(value))
+          : [],
+      );
+      knownFolios.add(folio);
+
+      await AsyncStorage.setItem(
+        stateKey,
+        JSON.stringify({
+          initialized: parsed?.initialized === true,
+          knownFolios: Array.from(knownFolios).slice(-1000),
+        }),
+      );
+    } catch (error) {
+      console.warn("[PedidoNotificacionService] No se pudo guardar folio notificado:", error);
+    }
+  }
+
   /**
    * Debe llamarse desde index.js / top-level para que funcione cuando la app está en background/killed.
    */
@@ -118,6 +372,11 @@ class PedidoNotificacionService {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (!pedido) continue;
 
+        if (await this.folioRegistradoEnPolling(folio)) {
+          this.marcarPedidoNotificado(folio);
+          continue;
+        }
+
         // Solo notificar pedidos confirmados, aun no notificados ni cerrados
         const ESTATUS_FINALES_NOTIF = [
           ESTATUS_PEDIDO.ENTREGADO,
@@ -148,6 +407,7 @@ class PedidoNotificacionService {
 
         // Marcar como notificado para evitar duplicados en futuras sincronizaciones
         this.marcarPedidoNotificado(folio);
+        await this.registrarFolioEnPolling(folio);
       }
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al procesar pedidos sincronizados:", error);
@@ -155,6 +415,10 @@ class PedidoNotificacionService {
   }
 
   async mostrarNotificacionPedido(pedido: Pedido): Promise<boolean> {
+    const notificationId = `pedido-${pedido.folio}`;
+    if (this.notificacionesEnCurso.has(notificationId)) return false;
+
+    this.notificacionesEnCurso.add(notificationId);
     try {
       await this.asegurarCanalNotificacion();
       const cliente = this.realm?.objectForPrimaryKey("ClienteFull", pedido.cliente) as any;
@@ -186,6 +450,8 @@ class PedidoNotificacionService {
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al mostrar notificación:", error);
       return false;
+    } finally {
+      this.notificacionesEnCurso.delete(notificationId);
     }
   }
 
@@ -351,6 +617,7 @@ class PedidoNotificacionService {
 
     await this.registrarVisitaFueraAgenda(pedido);
     this.marcarPedidoNotificado(folio);
+    await this.registrarFolioEnPolling(folio);
   }
 
   private marcarPedidoNotificado(folio: number): void {

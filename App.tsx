@@ -484,6 +484,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const prevRutaCerradaRef = useRef<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const pollingIntervalRef = useRef<any>(null);
+  const pedidosPollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pedidosPollingInFlightRef = useRef(false);
   const [pressingCierre, setPressingCierre] = useState(false);
   const [pressProgress, setPressProgress] = useState(0);
   const pressTimerRef = useRef<any>(null);
@@ -557,7 +559,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     pollingIntervalRef.current = setInterval(() => {
       checkPendingTraspasos();
-    }, 10000);
+    }, 5000);
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -565,6 +567,49 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       }
     };
   }, [currentUser, checkPendingTraspasos]);
+
+  const checkNewPedidos = useCallback(async () => {
+    if (!currentUser || pedidosPollingInFlightRef.current) return;
+
+    const ruta = Number(currentUser.idSucursal || currentUser.sucursal_origen || currentUser.sucursal || currentUser.ruta);
+    if (!Number.isFinite(ruta) || ruta <= 0) {
+      console.warn("[App] Polling de pedidos omitido: usuario sin ruta válida", currentUser);
+      return;
+    }
+
+    console.log("[App] Ejecutando polling de pedidos para ruta", ruta);
+    pedidosPollingInFlightRef.current = true;
+    try {
+      await PedidoNotificacionService.verificarPedidosNuevos(ruta);
+    } finally {
+      pedidosPollingInFlightRef.current = false;
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    checkNewPedidos();
+    pedidosPollingIntervalRef.current = setInterval(() => {
+      if (AppState.currentState === "active") {
+        checkNewPedidos();
+      }
+    }, 5000);
+
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        checkNewPedidos();
+      }
+    });
+
+    return () => {
+      if (pedidosPollingIntervalRef.current) {
+        clearInterval(pedidosPollingIntervalRef.current);
+        pedidosPollingIntervalRef.current = null;
+      }
+      subscription.remove();
+    };
+  }, [currentUser, checkNewPedidos]);
 
   const syncRouteTracking = useCallback(async (rutaStatus: boolean) => {
     try {

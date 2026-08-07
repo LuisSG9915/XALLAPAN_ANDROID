@@ -55,7 +55,6 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filtroEstatus, setFiltroEstatus] = useState<number | null>(null);
   const [currentRuta, setCurrentRuta] = useState<number>(0);
   const [ubicacion, setUbicacion] = useState<LocationCoordinates | null>(null);
 
@@ -135,7 +134,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosAgrupados: PedidoAgrupado[] = [];
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
-        if (pedido) {
+        if (pedido && pedido.estatus !== ESTATUS_PEDIDO.CANCELADO) {
           const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
           pedidosAgrupados.push({
             ...pedido,
@@ -181,7 +180,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         const pedidosAgrupados: PedidoAgrupado[] = [];
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);
-          if (pedido) {
+          if (pedido && pedido.estatus !== ESTATUS_PEDIDO.CANCELADO) {
             const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
             pedidosAgrupados.push({
               ...pedido,
@@ -302,9 +301,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       String(p.folio).includes(query) ||
       String(p.cliente).includes(query);
 
-    const coincideEstatus = filtroEstatus === null || p.estatus === filtroEstatus;
-
-    return coincideBusqueda && coincideEstatus;
+    return coincideBusqueda;
   });
 
   const totalPendientes = pedidos.filter(
@@ -313,13 +310,10 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       p.estatus !== ESTATUS_PEDIDO.CANCELADO &&
       p.estatus !== ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
   ).length;
-  const totalSinCausa = pedidos.filter((p) => p.estatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA).length;
-  const totalEnAtencion = pedidos.filter((p) => p.estatus === ESTATUS_PEDIDO.EN_ATENCION).length;
-  const filtrosActivos = Boolean(query || filtroEstatus !== null);
+  const filtrosActivos = Boolean(query);
 
   const limpiarFiltros = () => {
     setSearchQuery("");
-    setFiltroEstatus(null);
   };
 
   const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
@@ -550,105 +544,6 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         )}
       </View>
 
-      <View style={styles.filterHeading}>
-        <Text style={styles.filterLabel}>FILTRAR POR ESTATUS</Text>
-        <Text style={styles.filterResultText}>
-          {pedidosFiltrados.length} {pedidosFiltrados.length === 1 ? "resultado" : "resultados"}
-        </Text>
-      </View>
-
-      <View style={styles.filterContainer}>
-        <TouchableOpacity
-          style={[styles.filterBtn, filtroEstatus === null && styles.filterBtnActive]}
-          onPress={() => setFiltroEstatus(null)}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityState={{ selected: filtroEstatus === null }}
-        >
-          <Icon name="view-list" type="material" size={16} color={filtroEstatus === null ? "#fff" : COLORS.textSecondary} />
-          <Text style={[styles.filterText, filtroEstatus === null && styles.filterTextActive]}>Todos</Text>
-          <View style={[styles.filterCount, filtroEstatus === null && styles.filterCountActive]}>
-            <Text style={[styles.filterCountText, filtroEstatus === null && styles.filterCountTextActive]}>
-              {pedidos.length}
-            </Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterBtn, filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterBtnActive]}
-          onPress={() =>
-            setFiltroEstatus(
-              filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ? null : ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA,
-            )
-          }
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityState={{ selected: filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA }}
-        >
-          <Icon
-            name="error-outline"
-            type="material"
-            size={16}
-            color={filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ? "#fff" : COLORS.error}
-          />
-          <Text
-            style={[
-              styles.filterText,
-              filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterTextActive,
-            ]}
-          >
-            Sin causa
-          </Text>
-          <View
-            style={[
-              styles.filterCount,
-              filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterCountActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterCountText,
-                filtroEstatus === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA && styles.filterCountTextActive,
-              ]}
-            >
-              {totalSinCausa}
-            </Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterBtn, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterBtnActive]}
-          onPress={() =>
-            setFiltroEstatus(filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION ? null : ESTATUS_PEDIDO.EN_ATENCION)
-          }
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityState={{ selected: filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION }}
-        >
-          <Icon
-            name="edit"
-            type="material"
-            size={16}
-            color={filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION ? "#fff" : COLORS.warning}
-          />
-          <Text
-            style={[styles.filterText, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterTextActive]}
-          >
-            En atención
-          </Text>
-          <View
-            style={[styles.filterCount, filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterCountActive]}
-          >
-            <Text
-              style={[
-                styles.filterCountText,
-                filtroEstatus === ESTATUS_PEDIDO.EN_ATENCION && styles.filterCountTextActive,
-              ]}
-            >
-              {totalEnAtencion}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
       <View style={styles.resultsRow}>
         <View>
           <Text style={styles.sectionTitle}>Pedidos de hoy</Text>
@@ -831,73 +726,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.s,
     fontSize: 16,
     color: COLORS.textPrimary,
-  },
-  filterHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: SPACING.l,
-    marginHorizontal: SPACING.m,
-  },
-  filterLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    color: COLORS.textSecondary,
-  },
-  filterResultText: {
-    ...TYPOGRAPHY.small,
-    color: COLORS.muted,
-  },
-  filterContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: SPACING.m,
-    paddingTop: SPACING.s,
-    gap: SPACING.s,
-  },
-  filterBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 38,
-    paddingHorizontal: SPACING.s,
-    borderRadius: BORDER_RADIUS.round,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E6ED",
-    gap: SPACING.xs,
-  },
-  filterBtnActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  filterText: {
-    ...TYPOGRAPHY.caption,
-    fontWeight: "600",
-    color: COLORS.textSecondary,
-  },
-  filterTextActive: {
-    color: "#fff",
-  },
-  filterCount: {
-    minWidth: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 5,
-    borderRadius: BORDER_RADIUS.round,
-    backgroundColor: "#F0F1F6",
-  },
-  filterCountActive: {
-    backgroundColor: "rgba(255,255,255,0.22)",
-  },
-  filterCountText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: COLORS.textSecondary,
-  },
-  filterCountTextActive: {
-    color: "#fff",
   },
   resultsRow: {
     flexDirection: "row",
