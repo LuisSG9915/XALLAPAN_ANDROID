@@ -20,3 +20,18 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+subprojects {
+    def modulePath = project.projectDir.canonicalPath.toLowerCase()
+    if (modulePath.contains("${File.separator}node_modules${File.separator}")) {
+        def moduleBuildName = project.path.replace(":", "_")
+        project.layout.buildDirectory.set(file("${rootProject.projectDir}/build/node-modules/${moduleBuildName}"))
+    }
+
+    tasks.withType(com.facebook.react.tasks.GenerateCodegenSchemaTask).configureEach {
+        doNotTrackState("React Native codegen output is not trackable on Windows Server")
+    }
+    tasks.withType(com.facebook.react.tasks.GenerateCodegenArtifactsTask).configureEach {
+        doNotTrackState("React Native codegen output is not trackable on Windows Server")
+    }
+}

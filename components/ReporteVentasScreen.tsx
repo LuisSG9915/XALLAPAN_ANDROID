@@ -14,7 +14,6 @@ import {
 import { Icon } from "react-native-elements";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import TicketPrinter, { SaleTicketData } from "../services/TicketPrinter";
-import { createEan13Barcode } from "../services/BluetoothPrinterService";
 import FullSyncService from "../services/FullSyncService";
 import FacturaService, { FacturaItem } from "../services/FacturaService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
@@ -66,33 +65,6 @@ type GroupedSale = {
 };
 type TicketLine = string;
 
-type Ean13PreviewProps = {
-  value?: string;
-};
-
-const Ean13Preview = ({ value }: Ean13PreviewProps) => {
-  const barcode = createEan13Barcode(value);
-  if (!barcode) return null;
-
-  return (
-    <View style={styles.barcodePreview}>
-      <View style={styles.barcodeBars}>
-        {barcode.pattern.split("").map((module, index) => (
-          <View
-            key={`${index}-${module}`}
-            style={[
-              styles.barcodeModule,
-              index < 3 || (index >= 45 && index < 50) || index >= 92 ? styles.barcodeGuard : undefined,
-              module === "1" ? styles.barcodeBlack : styles.barcodeWhite,
-            ]}
-          />
-        ))}
-      </View>
-      <Text style={styles.barcodeValue}>{barcode.encodedValue}</Text>
-    </View>
-  );
-};
-
 export default function ReporteVentasScreen() {
   const today = useMemo(() => new Date(), []);
   const LOCAL_SALE_ID_THRESHOLD = 1700000000;
@@ -118,7 +90,6 @@ export default function ReporteVentasScreen() {
 
   const [ticketVisible, setTicketVisible] = useState(false);
   const [ticketContent, setTicketContent] = useState<TicketLine[]>([]);
-  const [ticketBarcode, setTicketBarcode] = useState<string>();
 
   const [modModalVisible, setModModalVisible] = useState(false);
   const [modVentaSeleccionada, setModVentaSeleccionada] = useState<GroupedSale | null>(null);
@@ -931,7 +902,6 @@ export default function ReporteVentasScreen() {
     );
     const lines = TicketPrinter.generateSaleTicket(ticketData);
     setTicketContent(lines);
-    setTicketBarcode(ticketData.ticketNumber);
     setTicketVisible(true);
   };
 
@@ -1625,7 +1595,6 @@ export default function ReporteVentasScreen() {
                 </Text>
               ))}
             </ScrollView>
-            <Ean13Preview value={ticketBarcode} />
           </View>
         </View>
       </Modal>
@@ -1813,40 +1782,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: COLORS.textPrimary,
-  },
-  barcodePreview: {
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    marginTop: SPACING.m,
-    paddingTop: SPACING.m,
-  },
-  barcodeBars: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    height: 72,
-    paddingHorizontal: 18,
-    backgroundColor: "#fff",
-  },
-  barcodeModule: {
-    width: 2,
-    height: 64,
-  },
-  barcodeGuard: {
-    height: 72,
-  },
-  barcodeBlack: {
-    backgroundColor: "#000",
-  },
-  barcodeWhite: {
-    backgroundColor: "#fff",
-  },
-  barcodeValue: {
-    color: COLORS.textPrimary,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-    fontSize: 12,
-    letterSpacing: 1,
-    marginTop: 4,
   },
   modSubtitle: {
     color: COLORS.textSecondary,

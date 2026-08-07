@@ -919,13 +919,20 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     );
   }
 
+  const busquedaNormalizada = searchQuery.trim().toLowerCase();
+  const coincideBusquedaCliente = (nombre: string | undefined, id: number, domicilio?: string): boolean => {
+    if (!busquedaNormalizada) return true;
+    return (
+      (nombre || "").toLowerCase().includes(busquedaNormalizada) ||
+      (domicilio || "").toLowerCase().includes(busquedaNormalizada) ||
+      String(id).includes(busquedaNormalizada)
+    );
+  };
+
   // Filtrar visitas según búsqueda y toggle de visitadas
   const visitasAgendadas = visitas.filter((v) => {
     if (v.tipo === 99) return false; // Los pedidos de central van en su propia pestaña
-    const coincideBusqueda =
-      !searchQuery.trim() ||
-      (v.nombreCliente || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(v.idCliente).includes(searchQuery);
+    const coincideBusqueda = coincideBusquedaCliente(v.nombreCliente, v.idCliente, v.domicilio);
     const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
     return coincideBusqueda && coincideEstado;
   });
@@ -933,19 +940,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   // Visor de folios: pedidos de central (tipo 99)
   const visitasFolios = visitas.filter((v) => {
     if (v.tipo !== 99) return false;
-    const coincideBusqueda =
-      !searchQuery.trim() ||
-      (v.nombreCliente || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(v.idCliente).includes(searchQuery);
+    const coincideBusqueda = coincideBusquedaCliente(v.nombreCliente, v.idCliente, v.domicilio);
     const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
     return coincideBusqueda && coincideEstado;
   });
 
   // Filtrar todos los clientes por búsqueda (tab Todos)
-  const clientesFiltrados = clientes.filter((c) => {
-    if (!searchQuery.trim()) return true;
-    return (c.nombre || "").toLowerCase().includes(searchQuery.toLowerCase()) || String(c.id).includes(searchQuery);
-  });
+  const clientesFiltrados = clientes.filter((c) => coincideBusquedaCliente(c.nombre, c.id, c.domicilio));
+  const nearestClientesFiltrados = nearestClientes.filter((c) => coincideBusquedaCliente(c.nombre, c.id, c.domicilio));
 
   // Render de un cliente para los tabs Cercanos / Todos (botón -> Ventas)
   const renderClienteVenta = (cliente: ClienteLite & { distanciaMetros?: number }) => {
@@ -1097,7 +1099,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           <Icon name="search" type="material" size={18} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Buscar cliente..."
+            placeholder="Buscar cliente o domicilio..."
             placeholderTextColor="#C7C7CC"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1144,12 +1146,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         >
           <Text style={[styles.tabItemText, clienteTab === "cercanos" && styles.tabItemTextActive]}>Cercanos</Text>
         </TouchableOpacity>
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={[styles.tabItem, clienteTab === "folios" && styles.tabItemActive]}
           onPress={() => setClienteTab("folios")}
         >
           <Text style={[styles.tabItemText, clienteTab === "folios" && styles.tabItemTextActive]}>Pedido</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
         <TouchableOpacity
           style={[styles.tabItem, clienteTab === "todos" && styles.tabItemActive]}
           onPress={() => setClienteTab("todos")}
@@ -1241,7 +1243,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         />
       ) : clienteTab === "cercanos" ? (
         <FlatList
-          data={nearestClientes}
+          data={nearestClientesFiltrados}
           renderItem={({ item }) => renderClienteVenta(item)}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.lista}
@@ -1249,7 +1251,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             <View style={styles.emptyContainer}>
               <Icon name="near-me" type="material" size={64} color="#C7C7CC" />
               <Text style={styles.emptyTexto}>
-                {loadingCercanos ? "Buscando clientes cercanos..." : "Pulsa actualizar para ver clientes cercanos"}
+                {searchQuery
+                  ? 'Sin resultados para "' + searchQuery + '"'
+                  : loadingCercanos
+                  ? "Buscando clientes cercanos..."
+                  : "Pulsa actualizar para ver clientes cercanos"}
               </Text>
             </View>
           }

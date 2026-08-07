@@ -30,7 +30,7 @@ declare module 'react-native-bluetooth-escpos-printer' {
       RIGHT: number;
     };
     static readonly BARCODETYPE: {
-      JAN13: number;
+      CODE128: number;
     };
     static printerInit(): Promise<void>;
     static printerLeftSpace(space: number): Promise<void>;
