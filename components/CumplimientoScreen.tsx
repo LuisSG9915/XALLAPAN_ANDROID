@@ -19,6 +19,7 @@ import DetalleVisitasService from "../services/DetalleVisitasService";
 import Realm from "realm";
 import AuthService from "../services/AuthService";
 import FullSyncService from "../services/FullSyncService"; // Agregada importación de FullSyncService
+import PedidosService, { ESTATUS_PEDIDO, Pedido } from "../services/PedidosService";
 import LocationService, { LocationCoordinates, calcularDistancia } from "../services/LocationService";
 import ReubicacionService from "../services/ReubicacionService";
 import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
@@ -37,13 +38,28 @@ const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
   );
 };
 
-const pedidoTieneFechaEntregaHoy = (folio: number): boolean => {
-  const realm = (FullSyncService as any).realm;
-  if (!realm || !Number.isFinite(folio)) return false;
+const CLIENTE_DIAGNOSTICO = 6606;
 
-  const pedidos = realm.objects("Pedido").filtered("folio == $0", folio);
-  return Array.from(pedidos).some((pedido: any) => esFechaDeHoy(pedido.fechaEntrega));
+const esMismaFecha = (valor: Date | string | null | undefined, referencia: Date): boolean => {
+  if (!valor) return false;
+
+  const fecha = valor instanceof Date ? valor : new Date(String(valor));
+  if (Number.isNaN(fecha.getTime())) return false;
+
+  return (
+    fecha.getFullYear() === referencia.getFullYear() &&
+    fecha.getMonth() === referencia.getMonth() &&
+    fecha.getDate() === referencia.getDate()
+  );
 };
+
+const esPedidoFinalizado = (estatus: number): boolean =>
+  [
+    ESTATUS_PEDIDO.ENTREGADO,
+    ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+    ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+    ESTATUS_PEDIDO.CANCELADO,
+  ].includes(Number(estatus));
 
 interface Visita {
   id: string;
@@ -62,6 +78,7 @@ interface VisitaConCliente extends Visita {
   longitud?: number;
   metros?: number; // Distancia máxima permitida en metros
   domicilio?: string;
+  pedidoFolios?: number[];
 }
 
 interface ClienteLite {
@@ -166,33 +183,248 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const cargarDatos = useCallback((fecha: Date, sucursal: number, showLoading = true) => {
     if (showLoading) setLoading(true);
+
+    const pedidosDelDiaPromise = (async (): Promise<Pedido[]> => {
+      try {
+        const user = await AuthService.restoreSession();
+        const ruta =
+          [user?.ruta, user?.sucursal_origen, user?.sucursal, sucursal]
+            .map(Number)
+            .find((valor) => Number.isFinite(valor) && valor > 0) || 0;
+        if (!Number.isFinite(ruta) || ruta <= 0) {
+          console.warn("[Cumplimiento] No se pueden cargar pedidos de central: ruta inválida", { ruta, sucursal });
+          return [];
+        }
+
+        const pedidosService = PedidosService.getInstance();
+        pedidosService.setRealm((FullSyncService as any).realm);
+        const pedidosPorRuta = pedidosService.getPedidosByRuta(ruta);
+        const pedidosPorFolio = new Map<number, Pedido>();
+
+        pedidosPorRuta.forEach((pedido) => {
+          const folio = Number(pedido.folio);
+          if (
+            !Number.isFinite(folio) ||
+            folio <= 0 ||
+            !esMismaFecha(pedido.fechaEntrega, fecha) ||
+            esPedidoFinalizado(Number(pedido.estatus)) ||
+            pedidosPorFolio.has(folio)
+          ) {
+            return;
+          }
+          pedidosPorFolio.set(folio, pedido);
+        });
+
+        const pedidosDelDia = Array.from(pedidosPorFolio.values());
+        console.log("[Cumplimiento] Pedidos de central para Agendados", {
+          fecha: fecha.toISOString(),
+          sucursal,
+          ruta,
+          totalPedidosRuta: pedidosPorRuta.length,
+          pedidosDelDia: pedidosDelDia.map((pedido) => ({
+            folio: pedido.folio,
+            idCliente: pedido.cliente,
+            ruta: pedido.ruta,
+            fechaEntrega: pedido.fechaEntrega,
+            estatus: pedido.estatus,
+          })),
+        });
+        return pedidosDelDia;
+      } catch (error) {
+        console.error("[Cumplimiento] Error al cargar pedidos de central para Agendados:", error);
+        return [];
+      }
+    })();
+
     Promise.all([
       VisitaSyncService.getInstance().getVisitasByFecha(fecha, sucursal),
       VisitaSyncService.getInstance().getEstadisticasCumplimiento(fecha, sucursal),
       VisitaSyncService.getInstance().getClientesVisitadosHoy(sucursal),
+      pedidosDelDiaPromise,
     ])
-      .then(([visitasDelDia, stats, visitadosHoy]) => {
+      .then(([visitasDelDia, stats, visitadosHoy, pedidosDelDia]) => {
         console.log("[Cumplimiento] cargarDatos -> visitadosHoy:", Array.from(visitadosHoy), "sucursal:", sucursal, "fecha:", fecha.toISOString());
         setClientesVisitadosHoy(visitadosHoy);
 
-        const visitasDelDiaFiltradas = visitasDelDia.filter(
-          (visita: any) => Number(visita.tipo) !== 99 || pedidoTieneFechaEntregaHoy(Number(visita.idOriginal)),
+        console.log(
+          `[Cumplimiento] Visitas recibidas para Agendados: ${visitasDelDia.length}`,
+          visitasDelDia.filter((visita: any) => Number(visita.tipo) === 99).map((visita: any) => ({
+            folio: visita.idOriginal,
+            idCliente: visita.idCliente,
+            tipo: visita.tipo,
+            fecha: visita.fecha,
+          })),
         );
 
+        const visitasClienteDiagnostico = visitasDelDia.filter(
+          (visita: any) => Number(visita.idCliente) === CLIENTE_DIAGNOSTICO,
+        );
+        console.log("[Cumplimiento][DEBUG 6606] Resultado de getVisitasByFecha", {
+          fechaSolicitada: fecha.toISOString(),
+          sucursal,
+          totalVisitas: visitasDelDia.length,
+          visitasCliente: visitasClienteDiagnostico.map((visita: any) => ({
+            id: visita.id,
+            idCompuesto: visita.idCompuesto,
+            idOriginal: visita.idOriginal,
+            idCliente: visita.idCliente,
+            tipo: visita.tipo,
+            tipoJavaScript: typeof visita.tipo,
+            ruta: visita.ruta,
+            fecha: visita.fecha,
+            visitado: visita.visitado,
+          })),
+        });
+
+        const foliosConVisita = new Set(
+          visitasDelDia
+            .filter((visita: any) => Number(visita.tipo) === 99)
+            .map((visita: any) => Number(visita.idOriginal)),
+        );
+        const pedidosSinVisita = pedidosDelDia.filter(
+          (pedido) => !foliosConVisita.has(Number(pedido.folio)),
+        );
+        const gruposPedidosCentral = new Map<
+          number,
+          { visita?: any; pedidos: Pedido[]; folios: Set<number> }
+        >();
+
+        visitasDelDia
+          .filter((visita: any) => Number(visita.tipo) === 99)
+          .forEach((visita: any) => {
+            const idCliente = Number(visita.idCliente);
+            if (!Number.isFinite(idCliente) || idCliente <= 0) return;
+
+            const grupo = gruposPedidosCentral.get(idCliente) || {
+              visita,
+              pedidos: [],
+              folios: new Set<number>(),
+            };
+            grupo.visita = grupo.visita || visita;
+            const folio = Number(visita.idOriginal);
+            if (Number.isFinite(folio) && folio > 0) grupo.folios.add(folio);
+            gruposPedidosCentral.set(idCliente, grupo);
+          });
+
+        pedidosSinVisita.forEach((pedido) => {
+          const idCliente = Number(pedido.cliente);
+          const folio = Number(pedido.folio);
+          if (!Number.isFinite(idCliente) || idCliente <= 0 || !Number.isFinite(folio) || folio <= 0) return;
+
+          const grupo = gruposPedidosCentral.get(idCliente) || {
+            pedidos: [],
+            folios: new Set<number>(),
+          };
+          grupo.pedidos.push(pedido);
+          grupo.folios.add(folio);
+          gruposPedidosCentral.set(idCliente, grupo);
+        });
+
+        const visitasPedidosCentral: VisitaConCliente[] = Array.from(gruposPedidosCentral.values()).map(
+          (grupo, index) => {
+            const pedidosOrdenados = [...grupo.pedidos].sort((a, b) => {
+              const fechaA = a.fechaEntrega ? new Date(String(a.fechaEntrega)).getTime() : Number.MAX_SAFE_INTEGER;
+              const fechaB = b.fechaEntrega ? new Date(String(b.fechaEntrega)).getTime() : Number.MAX_SAFE_INTEGER;
+              return fechaA - fechaB || Number(a.folio) - Number(b.folio);
+            });
+            const pedidoPrincipal = pedidosOrdenados[0];
+            const visitaBase = grupo.visita;
+            const idCliente = Number(visitaBase?.idCliente ?? pedidoPrincipal?.cliente);
+            const fechaEntrega = pedidoPrincipal?.fechaEntrega
+              ? pedidoPrincipal.fechaEntrega instanceof Date
+                ? new Date(pedidoPrincipal.fechaEntrega)
+                : new Date(String(pedidoPrincipal.fechaEntrega))
+              : null;
+            const fechaBase = visitaBase?.fecha
+              ? new Date(visitaBase.fecha)
+              : fechaEntrega || new Date(fecha);
+            const fechaClave = [
+              fechaBase.getFullYear(),
+              String(fechaBase.getMonth() + 1).padStart(2, "0"),
+              String(fechaBase.getDate()).padStart(2, "0"),
+            ].join("-");
+            const folios = Array.from(grupo.folios).sort((a, b) => a - b);
+            const folioPrincipal = folios[0] || 0;
+            const idCompuesto = visitaBase?.idCompuesto || `pedido-${idCliente}-${fechaClave}`;
+            const cliente = FullSyncService.getClienteFullById(idCliente);
+
+            return {
+              id: String(visitaBase?.id ?? idCompuesto),
+              idCompuesto,
+              idOriginal: Number(visitaBase?.idOriginal ?? folioPrincipal),
+              idCliente,
+              ruta: String(visitaBase?.ruta ?? pedidoPrincipal?.ruta ?? ""),
+              fecha: fechaBase,
+              orden: Number(visitaBase?.orden ?? 9999 + index),
+              tipo: 99,
+              visitado: grupo.pedidos.length > 0 ? 0 : Number(visitaBase?.visitado ?? 0),
+              pedidoFolios: folios,
+              nombreCliente:
+                pedidoPrincipal?.clienteNombre || (cliente?.nombre ? String(cliente.nombre) : undefined),
+              latitud: cliente?.latitud != null ? Number(cliente.latitud) : undefined,
+              longitud: cliente?.longitud != null ? Number(cliente.longitud) : undefined,
+              metros: cliente?.metros != null ? Number(cliente.metros) : undefined,
+              domicilio:
+                pedidoPrincipal?.clienteDomicilio || (cliente?.domicilio ? String(cliente.domicilio) : undefined),
+            };
+          },
+        );
+        console.log("[Cumplimiento] Pedidos agrupados por cliente en Agendados", {
+          pedidosDelDia: pedidosDelDia.length,
+          clientesConPedido: visitasPedidosCentral.map((visita) => ({
+            idCliente: visita.idCliente,
+            folios: visita.pedidoFolios,
+            tipo: visita.tipo,
+            fecha: visita.fecha,
+            ruta: visita.ruta,
+          })),
+        });
+
+        const visitasParaRender = [
+          ...visitasDelDia.filter((visita: any) => Number(visita.tipo) !== 99),
+          ...visitasPedidosCentral,
+        ];
+
         // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
-        const visitasConNombres = visitasDelDiaFiltradas.map((visita: any) => {
+        const visitasConNombres = visitasParaRender.map((visita: any) => {
           const idClienteNum = Number(visita.idCliente);
           const cliente = FullSyncService.getClienteFullById(idClienteNum);
+          if (idClienteNum === CLIENTE_DIAGNOSTICO) {
+            console.log("[Cumplimiento][DEBUG 6606] Cliente resuelto para la visita", {
+              visita: {
+                id: visita.id,
+                idOriginal: visita.idOriginal,
+                tipo: visita.tipo,
+                ruta: visita.ruta,
+                fecha: visita.fecha,
+                visitado: visita.visitado,
+              },
+              cliente: cliente
+                ? {
+                    id: cliente.id,
+                    nombre: cliente.nombre,
+                    domicilio: cliente.domicilio,
+                    latitud: cliente.latitud,
+                    longitud: cliente.longitud,
+                  }
+                : null,
+            });
+          }
           return {
             ...visita,
             idCliente: idClienteNum,
-            nombreCliente: cliente?.nombre ? String(cliente.nombre) : `Cliente #${idClienteNum}`,
-            latitud: cliente?.latitud != null ? Number(cliente.latitud) : undefined,
-            longitud: cliente?.longitud != null ? Number(cliente.longitud) : undefined,
-            metros: cliente?.metros != null ? Number(cliente.metros) : undefined,
-            domicilio: cliente?.domicilio ? String(cliente.domicilio) : undefined,
+            nombreCliente:
+              visita.nombreCliente || (cliente?.nombre ? String(cliente.nombre) : `Cliente #${idClienteNum}`),
+            latitud: visita.latitud ?? (cliente?.latitud != null ? Number(cliente.latitud) : undefined),
+            longitud: visita.longitud ?? (cliente?.longitud != null ? Number(cliente.longitud) : undefined),
+            metros: visita.metros ?? (cliente?.metros != null ? Number(cliente.metros) : undefined),
+            domicilio: visita.domicilio || (cliente?.domicilio ? String(cliente.domicilio) : undefined),
           };
         });
+        console.log(
+          "[Cumplimiento][DEBUG 6606] Visitas preparadas para render",
+          visitasConNombres.filter((visita: any) => Number(visita.idCliente) === CLIENTE_DIAGNOSTICO),
+        );
         setVisitas(visitasConNombres);
         setEstadisticas(stats);
       })
@@ -214,6 +446,18 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         // Cargar datos locales (sin sincronización)
         cargarDatos(fechaSeleccionada, currentSucursal);
       }
+    }, [fechaSeleccionada, currentSucursal, cargarDatos]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (currentSucursal <= 0) return;
+
+      const interval = setInterval(() => {
+        cargarDatos(fechaSeleccionada, currentSucursal, false);
+      }, 10000);
+
+      return () => clearInterval(interval);
     }, [fechaSeleccionada, currentSucursal, cargarDatos]),
   );
 
@@ -431,6 +675,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   };
 
   const obtenerRangoHorario = (visita: Visita) => {
+    if (Number(visita.tipo) === 99) return "Pedido de hoy";
+
     const horaInicio = 8 + visita.orden * 0.5;
     const horaFin = horaInicio + 0.05;
 
@@ -814,7 +1060,38 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => {
     const esPedidoCentral = item.tipo === 99;
-    const folio = esPedidoCentral ? item.idOriginal : null;
+    const foliosPedido = esPedidoCentral
+      ? item.pedidoFolios?.length
+        ? item.pedidoFolios
+        : [item.idOriginal]
+      : [];
+    const folio = foliosPedido[0] ?? null;
+    const abrirPedido = () => {
+      if (foliosPedido.length > 1) {
+        navigation.navigate("Pedidos");
+      } else if (folio !== null) {
+        navigation.navigate("PedidoDetalle", { folio, soloLectura: false });
+      }
+    };
+
+    if (Number(item.idCliente) === CLIENTE_DIAGNOSTICO) {
+      console.log("[Cumplimiento][DEBUG 6606] renderVisita", {
+        index,
+        clienteTab,
+        id: item.id,
+        idOriginal: item.idOriginal,
+        idCliente: item.idCliente,
+        tipo: item.tipo,
+        tipoJavaScript: typeof item.tipo,
+        esPedidoCentral,
+        folio,
+        foliosPedido,
+        fecha: item.fecha,
+        ruta: item.ruta,
+        visitado: item.visitado,
+        nombreCliente: item.nombreCliente,
+      });
+    }
 
     const card = (
       <View style={[styles.visitaCard, esPedidoCentral && styles.visitaCardPedidoCentral]}>
@@ -840,8 +1117,15 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 {esPedidoCentral && (
                   <View style={styles.pedidoCentralBadge}>
                     <Icon name="local_shipping" type="material" size={12} color="#fff" />
-                    <Text style={styles.pedidoCentralText}>Pedido de Central</Text>
+                    <Text style={styles.pedidoCentralText}>
+                      Fuera de agenda · {foliosPedido.length > 1 ? `${foliosPedido.length} pedidos` : "Pedido"}
+                    </Text>
                   </View>
+                )}
+                {esPedidoCentral && foliosPedido.length > 1 && (
+                  <Text style={styles.domicilioTexto} numberOfLines={2}>
+                    Folios: {foliosPedido.join(", ")}
+                  </Text>
                 )}
               </View>
             </View>
@@ -910,13 +1194,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               </TouchableOpacity>
             )}
             {esPedidoCentral && (
-              <TouchableOpacity
-                style={styles.botonVerPedido}
-                onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: false })}
-                activeOpacity={0.8}
-              >
+              <TouchableOpacity style={styles.botonVerPedido} onPress={abrirPedido} activeOpacity={0.8}>
                 <Icon name="arrow-forward" type="material" size={16} color="white" />
-                <Text style={styles.botonVisitadoTexto}>IR A PEDIDO</Text>
+                <Text style={styles.botonVisitadoTexto}>
+                  {foliosPedido.length > 1 ? `VER PEDIDOS (${foliosPedido.length})` : "IR A PEDIDO"}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -925,11 +1207,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     );
 
     return esPedidoCentral ? (
-      <TouchableOpacity
-        style={styles.visitaContainer}
-        onPress={() => navigation.navigate("PedidoDetalle", { folio, soloLectura: false })}
-        activeOpacity={0.9}
-      >
+      <TouchableOpacity style={styles.visitaContainer} onPress={abrirPedido} activeOpacity={0.9}>
         {card}
       </TouchableOpacity>
     ) : (
@@ -958,7 +1236,6 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   // Filtrar visitas según búsqueda y toggle de visitadas
   const visitasAgendadas = visitas.filter((v) => {
-    if (v.tipo === 99) return false; // Los pedidos de central van en su propia pestaña
     const coincideBusqueda = coincideBusquedaCliente(v.nombreCliente, v.idCliente, v.domicilio);
     const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
     return coincideBusqueda && coincideEstado;

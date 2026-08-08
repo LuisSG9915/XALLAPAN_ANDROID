@@ -5,6 +5,8 @@ import BitacoraService from "./BitacoraService";
 import AuthService from "./AuthService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
+const CLIENTE_DIAGNOSTICO = 6606;
+
 class VisitaSyncService {
   private static instance: VisitaSyncService;
   private realm: Realm | null = null;
@@ -256,7 +258,7 @@ class VisitaSyncService {
         .filtered(`fecha >= $0 AND fecha <= $1 AND ruta == $2`, startOfDay, endOfDay, sucursal.toString())
         .sorted("orden");
 
-      return visitas.map((v: any) => ({
+      const resultado = visitas.map((v: any) => ({
         id: v.idOriginal, // Retornar idOriginal como "id" para compatibilidad con UI
         idCompuesto: v.id, // ID compuesto real de Realm
         idOriginal: v.idOriginal,
@@ -267,6 +269,39 @@ class VisitaSyncService {
         tipo: v.tipo,
         visitado: v.visitado,
       }));
+      console.log(
+        `[VisitaSync] Visitas del día sucursal=${sucursal}: total=${resultado.length}, fueraAgenda=${resultado.filter((v: any) => Number(v.tipo) === 99).length}`,
+        resultado.filter((v: any) => Number(v.tipo) === 99).map((v: any) => ({
+          id: v.id,
+          folio: v.idOriginal,
+          idCliente: v.idCliente,
+          fecha: v.fecha,
+          ruta: v.ruta,
+        })),
+      );
+
+      const visitasClienteDiagnostico = realm.objects("Visita").filtered("idCliente == $0", CLIENTE_DIAGNOSTICO);
+      console.log("[VisitaSync][DEBUG 6606] Consulta de visitas", {
+        fechaSolicitada: fecha.toISOString(),
+        inicio: startOfDay.toISOString(),
+        fin: endOfDay.toISOString(),
+        sucursalFiltro: sucursal.toString(),
+        totalResultado: resultado.length,
+        registrosEnRealm: Array.from(visitasClienteDiagnostico).map((visita: any) => ({
+          id: visita.id,
+          idOriginal: visita.idOriginal,
+          idCliente: visita.idCliente,
+          ruta: visita.ruta,
+          fecha: visita.fecha,
+          tipo: visita.tipo,
+          tipoJavaScript: typeof visita.tipo,
+          visitado: visita.visitado,
+          entraEnResultado: resultado.some(
+            (item: any) => item.idCompuesto === visita.id,
+          ),
+        })),
+      });
+      return resultado;
     } catch (error) {
       console.error("[VisitaSync] ❌ Error al obtener visitas:", error);
       return [];

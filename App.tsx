@@ -569,7 +569,14 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   }, [currentUser, checkPendingTraspasos]);
 
   const checkNewPedidos = useCallback(async () => {
-    if (!currentUser || pedidosPollingInFlightRef.current) return;
+    if (
+      !currentUser ||
+      !navigationRef.isReady() ||
+      navigationRef.getCurrentRoute()?.name !== "Pedidos"
+    ) {
+      return;
+    }
+    if (pedidosPollingInFlightRef.current) return;
 
     const ruta = Number(currentUser.idSucursal || currentUser.sucursal_origen || currentUser.sucursal || currentUser.ruta);
     if (!Number.isFinite(ruta) || ruta <= 0) {

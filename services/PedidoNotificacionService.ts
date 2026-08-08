@@ -14,6 +14,7 @@ const PENDING_NAVIGATION_KEY = "@xallapan/pedido_pendiente_navegacion";
 const PEDIDOS_POLL_STATE_PREFIX = "@xallapan/pedidos_poll_state:";
 const PEDIDOS_POLL_LOOKBACK_MS = 2 * 60 * 1000;
 const PEDIDOS_POLL_OVERLAP_MS = 1000;
+const CLIENTE_DIAGNOSTICO = 6606;
 
 class PedidoNotificacionService {
   private static instance: PedidoNotificacionService;
@@ -185,6 +186,24 @@ class PedidoNotificacionService {
         })),
       );
 
+      const pedidosClienteDiagnostico = rows.filter(
+        (row: any) => Number(row?.cliente ?? row?.idCliente ?? row?.clienteId) === CLIENTE_DIAGNOSTICO,
+      );
+      console.log("[PedidoNotificacionService][DEBUG 6606] Filas API recibidas", {
+        ruta,
+        fechaInicial: `${fecha} ${hora}`,
+        estadoPolling: {
+          initialized: state.initialized,
+          foliosConocidos: state.knownFolios.filter((folio) =>
+            pedidosClienteDiagnostico.some(
+              (row: any) => Number(row?.folio ?? row?.folioPedido ?? row?.idPedido) === folio,
+            ),
+          ),
+        },
+        cantidad: pedidosClienteDiagnostico.length,
+        filas: pedidosClienteDiagnostico,
+      });
+
       const pedidosService = PedidosService.getInstance();
       if (this.realm) {
         pedidosService.setRealm(this.realm);
@@ -199,8 +218,32 @@ class PedidoNotificacionService {
         }
       });
 
+      const pedidosClienteAgrupados = Array.from(pedidos.entries()).filter(
+        ([_folio, row]: [number, any]) =>
+          Number(row?.cliente ?? row?.idCliente ?? row?.clienteId) === CLIENTE_DIAGNOSTICO,
+      );
+      console.log("[PedidoNotificacionService][DEBUG 6606] Pedidos agrupados por folio", {
+        cantidad: pedidosClienteAgrupados.length,
+        pedidos: pedidosClienteAgrupados.map(([folio, row]) => ({
+          folio,
+          cliente: row?.cliente,
+          idCliente: row?.idCliente,
+          ruta: row?.ruta,
+          fecha: row?.fecha,
+          fechaEntrega: row?.fechaEntrega,
+          estatus: row?.estatus,
+          fueraAgenda: row?.fueraAgenda,
+        })),
+      });
+
       const knownFolios = new Set(state.knownFolios);
       if (!state.initialized) {
+        if (pedidosClienteAgrupados.length > 0) {
+          console.log("[PedidoNotificacionService][DEBUG 6606] El polling está creando línea base", {
+            folios: pedidosClienteAgrupados.map(([folio]) => folio),
+            noSeProcesanVisitasEnEstaRonda: true,
+          });
+        }
         pedidos.forEach((_row, folio) => knownFolios.add(folio));
         const lastPollAt = Date.now();
         await AsyncStorage.setItem(
@@ -231,17 +274,38 @@ class PedidoNotificacionService {
         ESTATUS_PEDIDO.CANCELADO,
       ];
       for (const [folio, row] of pedidos) {
-        if (knownFolios.has(folio)) continue;
-
         const pedidoLocal = this.realm && !this.realm.isClosed
           ? (pedidosService.getPedidoByFolio(folio) as Pedido | null)
           : null;
+        const pedido = pedidoLocal || this.crearPedidoDesdeApi(row, folio);
+        const entregaHoy = this.esPedidoConEntregaHoy(pedido);
+        const esClienteDiagnostico = Number(pedido.cliente) === CLIENTE_DIAGNOSTICO;
+
+        if (esClienteDiagnostico) {
+          console.log("[PedidoNotificacionService][DEBUG 6606] Evaluando pedido", {
+            folio,
+            cliente: pedido.cliente,
+            rutaPedido: pedido.ruta,
+            fecha: pedido.fecha,
+            fechaEntrega: pedido.fechaEntrega,
+            entregaHoy,
+            estatus: pedido.estatus,
+            pedidoLocalEncontrado: Boolean(pedidoLocal),
+            folioConocido: knownFolios.has(folio),
+            esEstadoFinal: estadosFinales.includes(pedido.estatus),
+          });
+        }
+
+        if (entregaHoy && !estadosFinales.includes(pedido.estatus)) {
+          await this.registrarVisitaFueraAgenda(pedido);
+        }
+
+        if (knownFolios.has(folio)) continue;
         if (pedidoLocal && estadosFinales.includes(pedidoLocal.estatus)) {
           knownFolios.add(folio);
           continue;
         }
 
-        const pedido = pedidoLocal || this.crearPedidoDesdeApi(row, folio);
         if (await this.mostrarNotificacionPedido(pedido)) {
           knownFolios.add(folio);
           notificados++;
@@ -269,6 +333,22 @@ class PedidoNotificacionService {
     }
   }
 
+  private esPedidoConEntregaHoy(pedido: Pedido): boolean {
+    if (!pedido.fechaEntrega) return false;
+
+    const fechaEntrega = pedido.fechaEntrega instanceof Date
+      ? pedido.fechaEntrega
+      : new Date(pedido.fechaEntrega);
+    const hoy = new Date();
+
+    return (
+      !Number.isNaN(fechaEntrega.getTime()) &&
+      fechaEntrega.getFullYear() === hoy.getFullYear() &&
+      fechaEntrega.getMonth() === hoy.getMonth() &&
+      fechaEntrega.getDate() === hoy.getDate()
+    );
+  }
+
   private crearPedidoDesdeApi(row: any, folio: number): Pedido {
     const cliente = Number(row?.cliente ?? row?.idCliente ?? 0);
     const idProducto = Number(row?.idProducto ?? 0);
@@ -277,6 +357,8 @@ class PedidoNotificacionService {
       id: `${folio}-${idProducto}`,
       idPedido: folio,
       folio,
+      fecha: row?.fecha ? new Date(row.fecha) : undefined,
+      fechaEntrega: row?.fechaEntrega ? new Date(row.fechaEntrega) : undefined,
       ruta: Number(row?.ruta ?? row?.idRuta ?? 0),
       cliente,
       clienteNombre: row?.nombreCliente ?? row?.clienteNombre,
@@ -648,6 +730,19 @@ class PedidoNotificacionService {
    */
   private async registrarVisitaFueraAgenda(pedido: Pedido): Promise<void> {
     try {
+      const esClienteDiagnostico = Number(pedido.cliente) === CLIENTE_DIAGNOSTICO;
+      if (esClienteDiagnostico) {
+        console.log("[PedidoNotificacionService][DEBUG 6606] Iniciando registro de visita fuera de agenda", {
+          folio: pedido.folio,
+          idCliente: pedido.cliente,
+          rutaPedido: pedido.ruta,
+          fecha: pedido.fecha,
+          fechaEntrega: pedido.fechaEntrega,
+          estatus: pedido.estatus,
+          realmDisponible: Boolean(this.realm),
+        });
+      }
+
       if (!this.realm) {
         console.warn("[PedidoNotificacionService] Realm no disponible para registrar visita");
         return;
@@ -656,6 +751,14 @@ class PedidoNotificacionService {
       const user = await AuthService.restoreSession();
       const sucursal = user?.sucursal_origen || user?.sucursal || 0;
       const ruta = user?.ruta ? String(user.ruta) : String(pedido.ruta);
+
+      if (esClienteDiagnostico) {
+        console.log("[PedidoNotificacionService][DEBUG 6606] Datos de sesión para visita", {
+          sucursalSesion: sucursal,
+          rutaSesion: user?.ruta,
+          rutaCalculada: ruta,
+        });
+      }
 
       if (!sucursal) {
         console.warn("[PedidoNotificacionService] No se pudo determinar sucursal para visita");
@@ -669,6 +772,30 @@ class PedidoNotificacionService {
       hoy.setHours(0, 0, 0, 0);
 
       const idCompuesto = `pedido-${pedido.folio}-${hoy.toISOString().split("T")[0]}`;
+      const visitaExistente = this.realm.objectForPrimaryKey("Visita", idCompuesto) as any;
+      if (visitaExistente) {
+        console.log(`[PedidoNotificacionService] Visita fuera de agenda ya existe para folio ${pedido.folio}`);
+        if (esClienteDiagnostico) {
+          console.log("[PedidoNotificacionService][DEBUG 6606] Visita existente encontrada", {
+            id: visitaExistente.id,
+            idOriginal: visitaExistente.idOriginal,
+            idCliente: visitaExistente.idCliente,
+            ruta: visitaExistente.ruta,
+            fecha: visitaExistente.fecha,
+            tipo: visitaExistente.tipo,
+            visitado: visitaExistente.visitado,
+          });
+        }
+        return;
+      }
+
+      console.log("[PedidoNotificacionService] Creando visita fuera de agenda", {
+        folio: pedido.folio,
+        idCliente: pedido.cliente,
+        ruta,
+        fechaEntrega: pedido.fechaEntrega,
+        idCompuesto,
+      });
 
       this.realm.write(() => {
         this.realm.create(
@@ -688,6 +815,18 @@ class PedidoNotificacionService {
       });
 
       console.log(`[PedidoNotificacionService] Visita fuera de agenda registrada para folio ${pedido.folio}`);
+      if (esClienteDiagnostico) {
+        const visitaRegistrada = this.realm.objectForPrimaryKey("Visita", idCompuesto) as any;
+        console.log("[PedidoNotificacionService][DEBUG 6606] Visita registrada en Realm", {
+          id: visitaRegistrada?.id,
+          idOriginal: visitaRegistrada?.idOriginal,
+          idCliente: visitaRegistrada?.idCliente,
+          ruta: visitaRegistrada?.ruta,
+          fecha: visitaRegistrada?.fecha,
+          tipo: visitaRegistrada?.tipo,
+          visitado: visitaRegistrada?.visitado,
+        });
+      }
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al registrar visita fuera de agenda:", error);
     }
