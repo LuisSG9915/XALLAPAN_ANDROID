@@ -56,6 +56,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentRuta, setCurrentRuta] = useState<number>(0);
+  const [currentVendedor, setCurrentVendedor] = useState<number>(0);
   const [ubicacion, setUbicacion] = useState<LocationCoordinates | null>(null);
 
   const buscarClienteEnRealm = (idCliente: number): any => {
@@ -117,6 +118,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       }
 
       setCurrentRuta(ruta);
+      setCurrentVendedor(Number(user.id ?? user.idUsuario ?? 0));
 
       if (!FullSyncService.isServiceInitialized()) {
         await FullSyncService.initialize();
@@ -128,13 +130,17 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const folios = pedidosService.getFoliosByRuta(ruta).filter((folio) =>
+      const folios = pedidosService.getFoliosByRuta(ruta, Number(user.id ?? user.idUsuario ?? 0)).filter((folio) =>
         pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
       );
       const pedidosAgrupados: PedidoAgrupado[] = [];
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
-        if (pedido && pedido.estatus !== ESTATUS_PEDIDO.CANCELADO) {
+        if (
+          pedido &&
+          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO &&
+          pedido.estatus !== ESTATUS_PEDIDO.CANCELADO
+        ) {
           const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
           pedidosAgrupados.push({
             ...pedido,
@@ -174,13 +180,17 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const folios = pedidosService.getFoliosByRuta(currentRuta).filter((folio) =>
+        const folios = pedidosService.getFoliosByRuta(currentRuta, currentVendedor).filter((folio) =>
           pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
         );
         const pedidosAgrupados: PedidoAgrupado[] = [];
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);
-          if (pedido && pedido.estatus !== ESTATUS_PEDIDO.CANCELADO) {
+          if (
+          pedido &&
+          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO &&
+          pedido.estatus !== ESTATUS_PEDIDO.CANCELADO
+        ) {
             const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
             pedidosAgrupados.push({
               ...pedido,

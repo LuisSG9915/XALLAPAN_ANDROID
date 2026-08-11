@@ -25,7 +25,11 @@ export class PedidoEstadoUploadSyncTask extends SyncTask {
 
   async execute(): Promise<SyncTaskResult> {
     try {
-      const estados = this.realm.objects("PedidoEstado").filtered("enviado = false");
+      const user = await AuthService.restoreSession();
+      const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
+      const estados = Array.from(
+        this.realm.objects("PedidoEstado").filtered("enviado = false AND idVendedor == $0", idUsuario),
+      ) as any[];
       if (estados.length === 0) {
         return {
           success: true,
@@ -33,11 +37,6 @@ export class PedidoEstadoUploadSyncTask extends SyncTask {
           registrosGuardados: 0,
         };
       }
-
-      const user = await AuthService.restoreSession();
-      const idUsuario = Number(
-        user?.id ?? user?.idUsuario ?? (estados[0] as any).idVendedor ?? 0,
-      );
       const payload = Array.from(estados).map((estado: any) => ({
         ruta: Number(estado.ruta),
         pedido: Number(estado.pedido),

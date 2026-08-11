@@ -154,9 +154,9 @@ class BitacoraService {
       fechaArrastre: this.formatDate(new Date()),
     }));
 
-    console.log(`[BitacoraService] 📤 Primer registro del payload:`, payload[0]);
-    console.log(`[BitacoraService] 📊 Total registros en payload:`, payload.length);
-    console.log(`[BitacoraService] 📤 Payload completo:`, JSON.stringify(payload));
+    // console.log(`[BitacoraService] 📤 Primer registro del payload:`, payload[0]);
+    // console.log(`[BitacoraService] 📊 Total registros en payload:`, payload.length);
+    // console.log(`[BitacoraService] 📤 Payload completo:`, JSON.stringify(payload));
     try {
       const response = await fetchWithTimeout(url, {
         method: "POST",

@@ -51,6 +51,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const [observacionNoAtencion, setObservacionNoAtencion] = useState("");
 
   const salidaControlada = useRef(false);
+  const cierreEnCursoRef = useRef(false);
 
   useEffect(() => {
     cargarDatos();
@@ -104,8 +105,18 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       const causasDif = pedidosService.getCausasDiferencia();
       const causasNoAt = pedidosService.getCausasNoAtencion();
 
+      const productosConNombre = productosData.map((producto: Pedido) => {
+        if (producto.productoNombre) return producto;
+        const productoCatalogo = productosCatalogo.find(
+          (catalogo: any) => Number(catalogo.id) === Number(producto.idProducto),
+        );
+        return productoCatalogo?.descripcion
+          ? { ...producto, productoNombre: productoCatalogo.descripcion }
+          : producto;
+      });
+
       setPedido(pedidoData);
-      setProductos(productosData);
+      setProductos(productosConNombre);
       if (pedidoData) {
         const realm = (FullSyncService as any).realm;
         let clienteObj: any = realm
@@ -541,6 +552,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       {
         text: "Confirmar",
         onPress: async () => {
+          if (cierreEnCursoRef.current) return;
+          cierreEnCursoRef.current = true;
           const pedidosService = PedidosService.getInstance();
           pedidosService.setRealm((FullSyncService as any).realm);
 
@@ -548,6 +561,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           const productosEntregados = [...productos];
           if (!pedidoCerrado) {
             Alert.alert("Error", "No se encontró el pedido para confirmar la entrega");
+            cierreEnCursoRef.current = false;
             return;
           }
 
@@ -561,6 +575,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
                 .map((item) => `- ${item.nombre} (disponible: ${item.disponible}, solicitado: ${item.solicitado})`)
                 .join("\n")}`,
             );
+            cierreEnCursoRef.current = false;
             return;
           }
 
@@ -570,6 +585,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             );
             if (!Number.isFinite(precioAtencion)) {
               Alert.alert("Error", `Precio inválido para el producto ${producto.idProducto}`);
+              cierreEnCursoRef.current = false;
               return;
             }
 
@@ -580,6 +596,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             );
             if (!precioGuardado) {
               Alert.alert("Error", `No se pudo guardar el precio del producto ${producto.idProducto}`);
+              cierreEnCursoRef.current = false;
               return;
             }
           }
@@ -604,8 +621,10 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
               );
             }
           } else if (result.success) {
+            cierreEnCursoRef.current = false;
             Alert.alert("Error", "El pedido se cerró sin un id_movil válido; no se pudo registrar la venta");
           } else {
+            cierreEnCursoRef.current = false;
             Alert.alert("Error", "No se pudo confirmar la entrega");
           }
         },

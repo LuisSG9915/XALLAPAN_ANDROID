@@ -385,7 +385,7 @@ export const BitacoraValidacionSchema = {
     idUsuario: "int",
     sucursal: "int",
     idCliente: "int?",
-     motivo: "string", // ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango | red_no_gnss
+    motivo: "string", // ok | ok_cache | sin_permiso | sin_senal | precision_baja | fuera_de_rango | red_no_gnss
     valido: "bool",
     distancia: "float?", // metros medidos al cliente
     accuracy: "float?", // precisión (±m) del mejor fix
@@ -683,6 +683,7 @@ export const PedidoBitacoraSchema = {
     ruta: "int",
     cliente: "int",
     idCanal: "int?",
+    fechaAtencion: "date?",
     idVendedor: "int",
     idProducto: "int?",
     cantPedido: "float?",
@@ -748,6 +749,30 @@ export const CatalogoCausaNoAtencionSchema = {
   primaryKey: "id",
 };
 
+export const ClienteFotoSchema = {
+  name: "ClienteFoto",
+  properties: {
+    id: "string",
+    idServidor: "int?",
+    idMovil: "string",
+    idCliente: "int",
+    foto: "string?",
+    fotoMiniatura: "string?",
+    fotoBase64: "string?",
+    fotoMiniaturaBase64: "string?",
+    mimeType: "string?",
+    miniaturaMimeType: "string?",
+    nombreArchivo: "string?",
+    fechaCaptura: "date?",
+    fechaLog: "date?",
+    activa: { type: "bool" as const, default: true },
+    estado: "string", // pendiente | sincronizando | sincronizada | error
+    errorMensaje: "string?",
+    syncedAt: "date?",
+  },
+  primaryKey: "id",
+};
+
 export const allSchemas = [
   VentaSchema,
   UsuarioSchema,
@@ -786,4 +811,5 @@ export const allSchemas = [
   CatalogoEstatusPedidoSchema,
   CatalogoCausaDiferenciaSchema,
   CatalogoCausaNoAtencionSchema,
+  ClienteFotoSchema,
 ];

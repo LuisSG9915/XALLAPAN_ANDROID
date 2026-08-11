@@ -1098,35 +1098,39 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
         <View style={styles.visitaHeader}>
           <View style={styles.visitaInfo}>
             <View style={styles.clienteRow}>
-              <View style={[styles.clienteIcon, esPedidoCentral && styles.clienteIconPedidoCentral]}>
+              <TouchableOpacity
+                style={[styles.clienteIcon, esPedidoCentral && styles.clienteIconPedidoCentral]}
+                onPress={() => navigation.navigate("ClienteFotos", { idCliente: item.idCliente, nombreCliente: item.nombreCliente })}
+                accessibilityLabel={`Fotos del cliente ${item.idCliente}`}
+              >
                 <Icon
                   name={esPedidoCentral ? "receipt" : item.visitado === 1 ? "check-circle" : "radio-button-unchecked"}
                   type="material"
                   size={20}
                   color={esPedidoCentral ? "#FF9800" : item.visitado === 1 ? "#34C759" : "#007AFF"}
                 />
-              </View>
+              </TouchableOpacity>
               <View style={styles.clienteDetails}>
                 <Text style={styles.clienteId}>#{item.idCliente}</Text>
                 <Text style={styles.clienteNombre}>{item.nombreCliente || "Cargando..."}</Text>
                 {item.domicilio ? (
-                  <Text style={styles.domicilioTexto} numberOfLines={1}>
+                  <Text style={styles.domicilioTexto}>
                     {item.domicilio}
                   </Text>
                 ) : null}
-                {esPedidoCentral && (
+                {/* {esPedidoCentral && (
                   <View style={styles.pedidoCentralBadge}>
                     <Icon name="local_shipping" type="material" size={12} color="#fff" />
                     <Text style={styles.pedidoCentralText}>
                       Fuera de agenda · {foliosPedido.length > 1 ? `${foliosPedido.length} pedidos` : "Pedido"}
                     </Text>
                   </View>
-                )}
-                {esPedidoCentral && foliosPedido.length > 1 && (
+                )} */}
+                {/* {esPedidoCentral && foliosPedido.length > 1 && (
                   <Text style={styles.domicilioTexto} numberOfLines={2}>
                     Folios: {foliosPedido.join(", ")}
                   </Text>
-                )}
+                )} */}
               </View>
             </View>
             <View style={styles.horaRow}>
@@ -1150,9 +1154,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               </TouchableOpacity>
             )}
             {!esPedidoCentral && item.visitado === 0 && (
-              <TouchableOpacity style={styles.botonVentas} onPress={() => handleIrAVentas(item)} activeOpacity={0.8}>
-                <Icon name="shopping-cart" type="material" size={16} color="white" />
-                <Text style={styles.botonVentasTexto}>Ventas</Text>
+              <TouchableOpacity
+                style={styles.botonVentas}
+                onPress={() => handleIrAVentas(item)}
+                activeOpacity={0.8}
+                accessibilityLabel="Ir a ventas"
+                accessibilityHint="Abre el punto de venta para este cliente"
+              >
+                <Icon name="shopping-cart" type="material" size={18} color="white" />
               </TouchableOpacity>
             )}
             {!esPedidoCentral && (
@@ -1165,6 +1174,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 onPress={() => handleMarcarVisitado(item.id)}
                 disabled={item.visitado === 1 || validandoUbicacion}
                 activeOpacity={0.8}
+                accessibilityLabel={item.visitado === 1 ? "Visita completada" : "Iniciar visita"}
+                accessibilityHint="Registra la visita del cliente"
               >
                 {validandoUbicacion ? (
                   <>
@@ -1174,30 +1185,20 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                     </Text>
                   </>
                 ) : (
-                  <>
-                    <Icon
-                      name={item.visitado === 1 ? "check" : "directions-walk"}
-                      type="material"
-                      size={16}
-                      color="white"
-                    />
-                    <Text
-                      style={[
-                        styles.botonVisitadoTexto,
-                        item.visitado === 1 ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
-                      ]}
-                    >
-                      {item.visitado === 1 ? "Completado" : "Visitar"}
-                    </Text>
-                  </>
+                  <Icon
+                    name={item.visitado === 1 ? "check" : "directions-walk"}
+                    type="material"
+                    size={18}
+                    color="white"
+                  />
                 )}
               </TouchableOpacity>
             )}
             {esPedidoCentral && (
               <TouchableOpacity style={styles.botonVerPedido} onPress={abrirPedido} activeOpacity={0.8}>
-                <Icon name="arrow-forward" type="material" size={16} color="white" />
+                <Icon name="arrow-forward" type="material" size={14} color="white" />
                 <Text style={styles.botonVisitadoTexto}>
-                  {foliosPedido.length > 1 ? `VER PEDIDOS (${foliosPedido.length})` : "IR A PEDIDO"}
+                  {foliosPedido.length > 1 ? ` (${foliosPedido.length})` : "IR A PEDIDO"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1273,14 +1274,18 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           <View style={styles.visitaHeader}>
             <View style={styles.visitaInfo}>
               <View style={styles.clienteRow}>
-                <View style={styles.clienteIcon}>
+                <TouchableOpacity
+                  style={styles.clienteIcon}
+                  onPress={() => navigation.navigate("ClienteFotos", { idCliente: cliente.id, nombreCliente: cliente.nombre })}
+                  accessibilityLabel={`Fotos del cliente ${cliente.id}`}
+                >
                   <Icon
                     name={fueVisitadoHoy ? "check-circle" : "store"}
                     type="material"
                     size={20}
                     color={fueVisitadoHoy ? "#34C759" : "#007AFF"}
                   />
-                </View>
+                </TouchableOpacity>
                 <View style={styles.clienteDetails}>
                   <Text style={styles.clienteId}>#{cliente.id}</Text>
                   <Text style={styles.clienteNombre}>{cliente.nombre}</Text>
@@ -1323,7 +1328,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 activeOpacity={0.8}
               >
                 <Icon name="shopping-cart" type="material" size={16} color="white" />
-                <Text style={styles.botonVentasTexto}>Ventas</Text>
+                <Text style={styles.botonVentasTexto}></Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1351,7 +1356,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                         fueVisitadoHoy ? styles.botonVisitadoTextoActivo : styles.botonVisitadoTextoInactivo,
                       ]}
                     >
-                      {fueVisitadoHoy ? "Completado" : "Visitar"}
+                      {fueVisitadoHoy ? "" : ""}
                     </Text>
                   </>
                 )}
@@ -1818,19 +1823,19 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   botonesContainer: {
-    flexDirection: "row",
-    gap: 4,
-    alignItems: "center",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    marginLeft: 8,
   },
   botonVentas: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#FF9500",
-    minWidth: 60,
     justifyContent: "center",
+    alignItems: "center",
   },
   botonVentasTexto: {
     color: "white",
@@ -1931,13 +1936,11 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   botonVisitado: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    minWidth: 65,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
+    alignItems: "center",
   },
   botonVisitadoActivo: {
     backgroundColor: "#34C759",

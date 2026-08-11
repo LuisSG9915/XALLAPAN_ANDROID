@@ -1,9 +1,9 @@
 import Realm from "realm";
 import { allSchemas } from "./RealmSchemas";
 
-// Únicamente estos estados permiten cerrar la ruta.
-// 2=ENTREGADO, 6=ENTREGADO PARCIAL
-const ESTATUS_PEDIDO_PERMITE_CIERRE = [2, 6] as const;
+// Estados que no requieren atención del vendedor para cerrar la ruta.
+// 1=PROGRAMADO, 2=ENTREGADO, 6=ENTREGADO PARCIAL, 7=PENDIENTE CON CAUSA, 9=CANCELADO
+const ESTATUS_PEDIDO_PERMITE_CIERRE = [1, 2, 6, 7, 9] as const;
 
 type ResultadoValidacionPedidos = {
   permitido: boolean;

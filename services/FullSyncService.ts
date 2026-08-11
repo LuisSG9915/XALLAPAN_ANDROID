@@ -6,18 +6,38 @@ import { ConsoleLogger } from "@microsoft/signalr/dist/esm/Utils";
 import BitacoraService from "./BitacoraService";
 import GpsBitacoraService from "./GpsBitacoraService";
 import ReubicacionService from "./ReubicacionService";
+import AuthService from "./AuthService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import ClienteFotosService from "./ClienteFotosService";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
 
 const ESTATUS_PEDIDO_CONFIRMADO = 3;
+const ESTATUS_PEDIDO_EN_ATENCION = 5;
+const ESTATUS_PEDIDO_EN_CAPTURA = 10;
+const ESTADOS_PEDIDO_FINALES = [2, 6, 7, 9];
+const ARRASTRE_REQUEST_TIMEOUT_MS = 3000;
 
 class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
-  private cierreRutaSendInFlight: Promise<{ success: boolean; sent: number; error?: string }> | null = null;
+  private cierreRutaSendInFlight: Promise<{
+    success: boolean;
+    sent: number;
+    error?: string;
+  }> | null = null;
+  private pedidoEstadosSendInFlight: Promise<{
+    success: boolean;
+    sent: number;
+    error?: string;
+  }> | null = null;
+  private pedidoBitacoraSendInFlight: Promise<{
+    success: boolean;
+    sent: number;
+    error?: string;
+  }> | null = null;
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.realm && !this.realm.isClosed) {
@@ -28,8 +48,22 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 57,
+        schemaVersion: 60,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 59) {
+            console.log("[Migration v59] Creando tabla ClienteFoto");
+          }
+          if (oldRealm.schemaVersion < 60) {
+            console.log(
+              "[Migration v60] Renombrando ClienteFoto.error a errorMensaje"
+            );
+            const fotos = newRealm.objects("ClienteFoto");
+            for (const foto of fotos) {
+              const registro = foto as any;
+              if (registro.errorMensaje === undefined)
+                registro.errorMensaje = null;
+            }
+          }
           // Migración v56: Agregar idPedido e idLista a Venta.
           if (oldRealm.schemaVersion < 56) {
             console.log("[Migration v56] Agregando idPedido e idLista a Venta");
@@ -38,7 +72,9 @@ class FullSyncService {
           // Migración v55: Agregar syncedAr a Usuario y Producto para sincronización parcial.
           // Los campos son opcionales; Realm los inicializa en null. No es necesario copiar datos.
           if (oldRealm.schemaVersion < 55) {
-            console.log("[Migration v55] Agregando syncedAr a Usuario y Producto");
+            console.log(
+              "[Migration v55] Agregando syncedAr a Usuario y Producto"
+            );
           }
 
           // Migración v54: Nueva tabla BitacoraTrackingGps (tracking de recorrido cada ~30s).
@@ -52,27 +88,37 @@ class FullSyncService {
           // La primary key cambia a string compuesta `${folio}-${idProducto}`.
           // Se elimina la tabla PedidoDetalle.
           if (oldRealm.schemaVersion < 53) {
-            console.log("[Migration v53] Reestructurando Pedido como tabla única con detalle de producto");
+            console.log(
+              "[Migration v53] Reestructurando Pedido como tabla única con detalle de producto"
+            );
           }
 
           // Migración v52: Crear/actualizar tablas de Pedidos (Pedido, PedidoBitacora, catálogos)
           if (oldRealm.schemaVersion < 52) {
-            console.log("[Migration v52] Creando/actualizando tablas de Pedidos y catálogos");
+            console.log(
+              "[Migration v52] Creando/actualizando tablas de Pedidos y catálogos"
+            );
           }
 
           // Migración v51: Campos completos de snapshot en PedidoBitacora (id_movil, precio, observaciones, etc.)
           if (oldRealm.schemaVersion < 51) {
-            console.log("[Migration v51] Ampliando esquema de PedidoBitacora para snapshot completo");
+            console.log(
+              "[Migration v51] Ampliando esquema de PedidoBitacora para snapshot completo"
+            );
           }
 
           // Migración v50: Nuevas tablas para módulo de Pedidos (Pedido, PedidoDetalle, PedidoBitacora, catálogos)
           if (oldRealm.schemaVersion < 50) {
-            console.log("[Migration v50] Creando tablas de Pedidos y catálogos");
+            console.log(
+              "[Migration v50] Creando tablas de Pedidos y catálogos"
+            );
           }
 
           // Migración v49: Agregar campos de auditoría a Reubicacion (latitudAnterior, longitudAnterior, accuracy, numFixes, metrosMovidos)
           if (oldRealm.schemaVersion < 49) {
-            console.log("[Migration v49] Agregando campos de auditoría a Reubicacion");
+            console.log(
+              "[Migration v49] Agregando campos de auditoría a Reubicacion"
+            );
           }
 
           // Migración v48: Nueva tabla BitacoraTiemposVenta (medición de tiempos del cierre de venta)
@@ -97,22 +143,30 @@ class FullSyncService {
 
           // Migración v44: Agregar campos sincronizado y agenda a DetalleVisitas
           if (oldRealm.schemaVersion < 44) {
-            console.log("[Migration v44] Agregando campos sincronizado y agenda a DetalleVisitas");
+            console.log(
+              "[Migration v44] Agregando campos sincronizado y agenda a DetalleVisitas"
+            );
           }
 
           // Migración v43: Agregar campo dobleTicket a Usuario
           if (oldRealm.schemaVersion < 43) {
-            console.log("[Migration v43] Agregando campo dobleTicket a Usuario");
+            console.log(
+              "[Migration v43] Agregando campo dobleTicket a Usuario"
+            );
           }
 
           // Migración v42: Agregar campo precioCatalogo a Producto y noPrecioCatalogo a Kit
           if (oldRealm.schemaVersion < 42) {
-            console.log("[Migration v42] Agregando campo precioCatalogo a Producto y noPrecioCatalogo a Kit");
+            console.log(
+              "[Migration v42] Agregando campo precioCatalogo a Producto y noPrecioCatalogo a Kit"
+            );
           }
 
           // Migración v41: Agregar campo idEmpresa a ClienteFull
           if (oldRealm.schemaVersion < 41) {
-            console.log("[Migration v41] Agregando campo idEmpresa a ClienteFull");
+            console.log(
+              "[Migration v41] Agregando campo idEmpresa a ClienteFull"
+            );
           }
 
           // Migración v40: Nueva tabla Cia para compañías
@@ -122,7 +176,9 @@ class FullSyncService {
 
           // Migración v39: Cambiar cantRecEnvOtro de bool a int en Kit
           if (oldRealm.schemaVersion < 39) {
-            console.log("[Migration v39] Cambiando tipo de cantRecEnvOtro de bool a int en Kit");
+            console.log(
+              "[Migration v39] Cambiando tipo de cantRecEnvOtro de bool a int en Kit"
+            );
           }
 
           // Migración v38: Agregar campo cantRecEnvOtro a Kit (obsoleto, reemplazado por v39)
@@ -132,12 +188,16 @@ class FullSyncService {
 
           // Migración v37: Agregar campo domicilio a ClienteFull y permisoDomicilioTicket a Usuario
           if (oldRealm.schemaVersion < 37) {
-            console.log("[Migration v37] Agregando domicilio a ClienteFull y permisoDomicilioTicket a Usuario");
+            console.log(
+              "[Migration v37] Agregando domicilio a ClienteFull y permisoDomicilioTicket a Usuario"
+            );
           }
 
           // Migración v36: Agregar campo precioEnvase a KitIntercambio y omitirMovil a Producto
           if (oldRealm.schemaVersion < 36) {
-            console.log("[Migration v36] Agregando precioEnvase a KitIntercambio y omitirMovil a Producto");
+            console.log(
+              "[Migration v36] Agregando precioEnvase a KitIntercambio y omitirMovil a Producto"
+            );
           }
 
           // Migración v35: Agregar campo envaseVendido a Kit
@@ -147,7 +207,9 @@ class FullSyncService {
 
           // Migración v34: Agregar campo inventariable a Producto
           if (oldRealm.schemaVersion < 34) {
-            console.log("[Migration v34] Agregando campo inventariable a Producto");
+            console.log(
+              "[Migration v34] Agregando campo inventariable a Producto"
+            );
           }
 
           // Migración v33: Nueva tabla KitIntercambio para intercambios de envases
@@ -178,23 +240,29 @@ class FullSyncService {
           // Las visitas antiguas se perderán y deberán sincronizarse nuevamente
           if (oldRealm.schemaVersion < 16) {
             console.log(
-              "[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse.",
+              "[Migration v16] ⚠️ Cambio de primary key en Visita: las visitas antiguas se perderán y deben resincronizarse."
             );
           }
 
           // Migración v22: Agregar campo reubicacion (bool?) a Usuario — default null (se llenará en el próximo sync)
           if (oldRealm.schemaVersion < 22) {
-            console.log("[Migration v22] Agregando campo reubicacion a Usuario");
+            console.log(
+              "[Migration v22] Agregando campo reubicacion a Usuario"
+            );
           }
 
           // Migración v23: Agregar campo sucursalNombre (string?) a Usuario — default null (se llenará en el próximo sync)
           if (oldRealm.schemaVersion < 23) {
-            console.log("[Migration v23] Agregando campo sucursalNombre a Usuario");
+            console.log(
+              "[Migration v23] Agregando campo sucursalNombre a Usuario"
+            );
           }
 
           // Migración v24: Nueva tabla InventarioEnvasesHistorial (se llenará en el próximo sync)
           if (oldRealm.schemaVersion < 24) {
-            console.log("[Migration v24] Creando tabla InventarioEnvasesHistorial");
+            console.log(
+              "[Migration v24] Creando tabla InventarioEnvasesHistorial"
+            );
           }
 
           // Migración v25: Reubicacion cambió completamente su estructura
@@ -202,13 +270,15 @@ class FullSyncService {
           // Los datos antiguos de reubicaciones se perderán y deben resincronizarse
           if (oldRealm.schemaVersion < 25) {
             console.log(
-              "[Migration v25] ⚠️ Reestructuración completa de Reubicacion: datos antiguos se eliminarán y deben resincronizarse.",
+              "[Migration v25] ⚠️ Reestructuración completa de Reubicacion: datos antiguos se eliminarán y deben resincronizarse."
             );
           }
 
           // Migración v26: Agregar campo enviado a Reubicacion con default false
           if (oldRealm.schemaVersion < 26) {
-            console.log("[Migration v26] Agregando campo enviado a Reubicacion");
+            console.log(
+              "[Migration v26] Agregando campo enviado a Reubicacion"
+            );
             const reubicaciones = newRealm.objects("Reubicacion");
             for (let i = 0; i < reubicaciones.length; i++) {
               const obj: any = reubicaciones[i];
@@ -220,7 +290,9 @@ class FullSyncService {
 
           // Migración v27: Agregar campo sucursal a Reubicacion
           if (oldRealm.schemaVersion < 27) {
-            console.log("[Migration v27] Agregando campo sucursal a Reubicacion");
+            console.log(
+              "[Migration v27] Agregando campo sucursal a Reubicacion"
+            );
           }
 
           // Migración v28: Nueva tabla VentaCancelacion para cancelaciones de ventas
@@ -235,7 +307,9 @@ class FullSyncService {
 
           // Migración v30: Agregar intercambio a Producto y envaseIntercambio a Kit
           if (oldRealm.schemaVersion < 30) {
-            console.log("[Migration v30] Agregando campo intercambio a Producto y envaseIntercambio a Kit");
+            console.log(
+              "[Migration v30] Agregando campo intercambio a Producto y envaseIntercambio a Kit"
+            );
           }
 
           // Migración v31: Agregar envasePrestado a Kit
@@ -246,22 +320,29 @@ class FullSyncService {
           // Migración v32: Agregar recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit
           if (oldRealm.schemaVersion < 32) {
             console.log(
-              "[Migration v32] Agregando campos recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit",
+              "[Migration v32] Agregando campos recuperaEnvase, claveIntercambio, recuperaEnvaseOtro, controlPresamo a Kit"
             );
           }
         },
       });
 
       this.isInitialized = true;
-      console.log("✅ FullSyncService inicializado correctamente (v52 - Tablas de Pedidos)");
+      console.log(
+        "✅ FullSyncService inicializado correctamente (v52 - Tablas de Pedidos)"
+      );
 
       // Diagnostico: verificar tablas de pedidos
       try {
         const pedidoCount = this.realm.objects("Pedido").length;
         const bitacoraCount = this.realm.objects("PedidoBitacora").length;
-        console.log(`[FullSyncService] Diagnostico Pedidos: ${pedidoCount} renglones, ${bitacoraCount} bitacoras`);
+        console.log(
+          `[FullSyncService] Diagnostico Pedidos: ${pedidoCount} renglones, ${bitacoraCount} bitacoras`
+        );
       } catch (diagError) {
-        console.error("[FullSyncService] Error en diagnostico de tablas de pedidos:", diagError);
+        console.error(
+          "[FullSyncService] Error en diagnostico de tablas de pedidos:",
+          diagError
+        );
       }
 
       // Inyectar Realm a otros servicios para evitar múltiples instancias
@@ -278,7 +359,9 @@ class FullSyncService {
    */
   private async injectRealmToServices(): Promise<void> {
     if (!this.realm) {
-      console.warn("[FullSyncService] No se puede inyectar Realm: instancia no inicializada");
+      console.warn(
+        "[FullSyncService] No se puede inyectar Realm: instancia no inicializada"
+      );
       return;
     }
 
@@ -290,7 +373,8 @@ class FullSyncService {
       GpsBitacoraService.setRealm(this.realm);
 
       // Inyectar a DetalleVisitasService
-      const DetalleVisitasService = (await import("./DetalleVisitasService")).default;
+      const DetalleVisitasService = (await import("./DetalleVisitasService"))
+        .default;
       DetalleVisitasService.getInstance().setRealm(this.realm);
 
       // Inyectar a VisitaSyncService
@@ -305,16 +389,23 @@ class FullSyncService {
       const ReubicacionService = (await import("./ReubicacionService")).default;
       ReubicacionService.getInstance().setRealm(this.realm);
 
+      ClienteFotosService.setRealm(this.realm);
+
       // Inyectar a VentaCancelacionService
-      const VentaCancelacionService = (await import("./VentaCancelacionService")).default;
+      const VentaCancelacionService = (
+        await import("./VentaCancelacionService")
+      ).default;
       VentaCancelacionService.getInstance().setRealm(this.realm);
 
       // Inyectar a VentaModificacionService
-      const VentaModificacionService = (await import("./VentaModificacionService")).default;
+      const VentaModificacionService = (
+        await import("./VentaModificacionService")
+      ).default;
       VentaModificacionService.getInstance().setRealm(this.realm);
 
       // Inyectar a RouteTrackingService
-      const RouteTrackingService = (await import("./RouteTrackingService")).default;
+      const RouteTrackingService = (await import("./RouteTrackingService"))
+        .default;
       RouteTrackingService.setRealm(this.realm);
 
       // Inyectar a PedidosService
@@ -322,7 +413,9 @@ class FullSyncService {
       PedidosService.getInstance().setRealm(this.realm);
 
       // Inyectar a PedidoNotificacionService
-      const PedidoNotificacionService = (await import("./PedidoNotificacionService")).default;
+      const PedidoNotificacionService = (
+        await import("./PedidoNotificacionService")
+      ).default;
       PedidoNotificacionService.setRealm(this.realm);
 
       console.log("✅ Realm inyectado a todos los servicios");
@@ -341,7 +434,9 @@ class FullSyncService {
     const collection: any = this.realm.objects(tableName);
     if (!collection || collection.length === 0) return null;
 
-    const firstWithSyncedAr = Array.from(collection).find((record: any) => record?.syncedAr != null) as any;
+    const firstWithSyncedAr = Array.from(collection).find(
+      (record: any) => record?.syncedAr != null
+    ) as any;
     if (!firstWithSyncedAr) return null;
 
     if (typeof firstWithSyncedAr.syncedAr === "string") {
@@ -350,7 +445,8 @@ class FullSyncService {
         const value = record?.syncedAr;
         if (!value) continue;
 
-        const candidate = value instanceof Date ? value : new Date(String(value));
+        const candidate =
+          value instanceof Date ? value : new Date(String(value));
         if (Number.isNaN(candidate.getTime())) continue;
         if (!maxDate || candidate.getTime() > maxDate.getTime()) {
           maxDate = candidate;
@@ -366,6 +462,29 @@ class FullSyncService {
   /**
    * Normaliza un Date a un string "YYYY-MM-DD HH:mm" para fechaInicial.
    */
+  private getLastSyncedArForRoute(ruta: number): Date | null {
+    if (!this.realm || this.realm.isClosed) return null;
+    const pedidos = this.realm
+      .objects("Pedido")
+      .filtered("ruta == $0", ruta) as any;
+    if (!pedidos || pedidos.length === 0) return null;
+    let maxDate: Date | null = null;
+    Array.from(pedidos).forEach((pedido: any) => {
+      if (!pedido.syncedAr) return;
+      const candidate =
+        pedido.syncedAr instanceof Date
+          ? pedido.syncedAr
+          : new Date(pedido.syncedAr);
+      if (
+        !Number.isNaN(candidate.getTime()) &&
+        (!maxDate || candidate > maxDate)
+      ) {
+        maxDate = candidate;
+      }
+    });
+    return maxDate;
+  }
+
   private formatDateTimeForApi(date: Date): string {
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -385,6 +504,14 @@ class FullSyncService {
     return `${yyyy}-${mm}-${dd}`;
   }
 
+  private getProductoNombre(idProducto: number): string | null {
+    const producto = this.realm?.objectForPrimaryKey(
+      "Producto",
+      Number(idProducto)
+    ) as any;
+    return producto?.descripcion || null;
+  }
+
   private async syncPedidosIncrementalEndpoint(
     tableName: string,
     endpointPath: string,
@@ -392,7 +519,7 @@ class FullSyncService {
     idUsuario?: number,
     sucursal?: number,
     lastSyncedAr?: Date,
-    ruta?: number,
+    ruta?: number
   ): Promise<{
     tabla: string;
     endpoint: string;
@@ -402,16 +529,21 @@ class FullSyncService {
   }> {
     const last = lastSyncedAr ?? new Date("1900-01-01T00:00:00");
     const fechaInicial = this.formatDateTimeForApi(last);
-    const url = tipo === "pedidos"
-      ? `${this.apiBaseUrl}${endpointPath}/${encodeURIComponent(String(ruta))}?fechaInicial=${encodeURIComponent(fechaInicial)}`
-      : `${this.apiBaseUrl}${endpointPath}?fechaInicial=${encodeURIComponent(fechaInicial)}`;
+    const url =
+      tipo === "pedidos"
+        ? `${this.apiBaseUrl}${endpointPath}/${encodeURIComponent(
+            String(ruta)
+          )}?fechaInicial=${encodeURIComponent(fechaInicial)}`
+        : `${this.apiBaseUrl}${endpointPath}?fechaInicial=${encodeURIComponent(
+            fechaInicial
+          )}`;
     const idBitacora = await BitacoraService.registrarInicioSync(
       tableName,
       "incremental",
       "background",
       idUsuario,
       sucursal,
-      url,
+      url
     );
 
     try {
@@ -423,7 +555,10 @@ class FullSyncService {
         throw new Error(`HTTP ${response.status} ${tableName}`);
       }
 
-      const rows = response.status === 204 || response.status === 205 ? [] : await response.json();
+      const rows =
+        response.status === 204 || response.status === 205
+          ? []
+          : await response.json();
       if (!Array.isArray(rows)) {
         throw new Error(`La respuesta de ${tableName} no es un array`);
       }
@@ -441,12 +576,23 @@ class FullSyncService {
 
           const idProductoValue = row.idProducto ?? row.id_producto;
           const estatusServidor = row.estatus ?? row.estado;
-          const esPedidoConfirmado = Number(estatusServidor) === ESTATUS_PEDIDO_CONFIRMADO;
-          const pedidos = idProductoValue === undefined || idProductoValue === null
-            ? this.realm!.objects("Pedido").filtered("folio == $0", folio)
-            : this.realm!.objects("Pedido").filtered("folio == $0 AND idProducto == $1", folio, Number(idProductoValue));
+          const esPedidoConfirmado =
+            Number(estatusServidor) === ESTATUS_PEDIDO_CONFIRMADO;
+          const pedidos =
+            idProductoValue === undefined || idProductoValue === null
+              ? this.realm!.objects("Pedido").filtered("folio == $0", folio)
+              : this.realm!.objects("Pedido").filtered(
+                  "folio == $0 AND idProducto == $1",
+                  folio,
+                  Number(idProductoValue)
+                );
 
-          if (tipo === "pedidos" && pedidos.length === 0 && idProductoValue !== undefined && idProductoValue !== null) {
+          if (
+            tipo === "pedidos" &&
+            pedidos.length === 0 &&
+            idProductoValue !== undefined &&
+            idProductoValue !== null
+          ) {
             this.realm!.create("Pedido", {
               id: `${folio}-${Number(idProductoValue)}`,
               idPedido: folio,
@@ -455,15 +601,29 @@ class FullSyncService {
               fecha: row.fecha ? new Date(row.fecha) : null,
               ruta: Number(row.ruta ?? ruta ?? 0),
               cliente: Number(row.cliente ?? 0),
-              clienteNombre: row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? null,
-              clienteDomicilio: row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? null,
+              clienteNombre:
+                row.nombreCliente ??
+                row.clienteNombre ??
+                row.nombre_cliente ??
+                null,
+              clienteDomicilio:
+                row.clienteDomicilio ??
+                row.domicilioCliente ??
+                row.domicilio ??
+                null,
               idCanal: null,
-              fechaAtencion: null,
+              fechaAtencion: row.fechaAtencion
+                ? new Date(row.fechaAtencion)
+                : null,
               idVendedor: Number(row.idVendedor ?? row.id_vendedor ?? 0),
-              numeroProductos: Number(row.numeroProductos ?? row.numero_productos ?? 1),
+              numeroProductos: Number(
+                row.numeroProductos ?? row.numero_productos ?? 1
+              ),
               cantPedido: Number(row.cantPedido ?? row.cant_pedido ?? 0),
               listaPrecio: row.listaPrecio ?? row.lista_precio ?? null,
-              fechaEntrega: row.fechaEntrega ? new Date(row.fechaEntrega) : null,
+              fechaEntrega: row.fechaEntrega
+                ? new Date(row.fechaEntrega)
+                : null,
               estatus: Number(row.estatus ?? 0),
               estatusDescripcion: null,
               fueraAgenda: row.fueraAgenda ?? row.fuera_agenda ?? null,
@@ -476,7 +636,7 @@ class FullSyncService {
               syncedAr,
               modificadoLocal: false,
               idProducto: Number(idProductoValue),
-              productoNombre: null,
+              productoNombre: this.getProductoNombre(Number(idProductoValue)),
               cantAtencion: null,
               precio: row.precio ?? null,
               precioAtencion: null,
@@ -494,24 +654,71 @@ class FullSyncService {
 
           for (const pedido of pedidos as any) {
             if (tipo === "pedidos") {
-              const preservarLocal = pedido.modificadoLocal === true;
+              const preservarLocal =
+                pedido.modificadoLocal === true &&
+                [
+                  ESTATUS_PEDIDO_EN_ATENCION,
+                  ESTATUS_PEDIDO_EN_CAPTURA,
+                ].includes(Number(pedido.estatus)) &&
+                !ESTADOS_PEDIDO_FINALES.includes(Number(estatusServidor));
               pedido.fecha = row.fecha ? new Date(row.fecha) : pedido.fecha;
               pedido.ruta = Number(row.ruta ?? ruta ?? pedido.ruta);
               pedido.cliente = Number(row.cliente ?? pedido.cliente);
-              pedido.clienteNombre = row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? pedido.clienteNombre;
-              pedido.clienteDomicilio = row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? pedido.clienteDomicilio;
-              pedido.idVendedor = Number(row.idVendedor ?? row.id_vendedor ?? pedido.idVendedor);
-              pedido.numeroProductos = Number(row.numeroProductos ?? row.numero_productos ?? pedido.numeroProductos);
-              pedido.cantPedido = Number(row.cantPedido ?? row.cant_pedido ?? pedido.cantPedido);
-              pedido.listaPrecio = row.listaPrecio ?? row.lista_precio ?? pedido.listaPrecio;
-              pedido.fechaEntrega = row.fechaEntrega ? new Date(row.fechaEntrega) : pedido.fechaEntrega;
-              pedido.fueraAgenda = row.fueraAgenda ?? row.fuera_agenda ?? pedido.fueraAgenda;
+              pedido.clienteNombre =
+                row.nombreCliente ??
+                row.clienteNombre ??
+                row.nombre_cliente ??
+                pedido.clienteNombre;
+              if (!pedido.productoNombre) {
+                pedido.productoNombre = this.getProductoNombre(
+                  Number(pedido.idProducto)
+                );
+              }
+              pedido.clienteDomicilio =
+                row.clienteDomicilio ??
+                row.domicilioCliente ??
+                row.domicilio ??
+                pedido.clienteDomicilio;
+              pedido.idVendedor = Number(
+                row.idVendedor ?? row.id_vendedor ?? pedido.idVendedor
+              );
+              pedido.numeroProductos = Number(
+                row.numeroProductos ??
+                  row.numero_productos ??
+                  pedido.numeroProductos
+              );
+              pedido.cantPedido = Number(
+                row.cantPedido ?? row.cant_pedido ?? pedido.cantPedido
+              );
+              pedido.listaPrecio =
+                row.listaPrecio ?? row.lista_precio ?? pedido.listaPrecio;
+              pedido.fechaEntrega = row.fechaEntrega
+                ? new Date(row.fechaEntrega)
+                : pedido.fechaEntrega;
+              if (row.fechaAtencion !== undefined) {
+                pedido.fechaAtencion = row.fechaAtencion
+                  ? new Date(row.fechaAtencion)
+                  : null;
+              }
+              pedido.causaNoAtencion =
+                row.causaNoAtencion ??
+                row.causa_no_atencion ??
+                pedido.causaNoAtencion;
+              pedido.obserNoAtencion =
+                row.obserNoAtencion ??
+                row.obser_no_atencion ??
+                pedido.obserNoAtencion;
+              pedido.fueraAgenda =
+                row.fueraAgenda ?? row.fuera_agenda ?? pedido.fueraAgenda;
               pedido.observaciones = row.observaciones ?? pedido.observaciones;
               pedido.no_venta = row.noVenta ?? row.no_venta ?? pedido.no_venta;
               pedido.precio = row.precio ?? pedido.precio;
               if (!preservarLocal) {
                 pedido.estatus = Number(row.estatus ?? pedido.estatus);
-                pedido.estatusDescripcion = row.estatusDescripcion ?? row.estatus_descripcion ?? pedido.estatusDescripcion;
+                pedido.estatusDescripcion =
+                  row.estatusDescripcion ??
+                  row.estatus_descripcion ??
+                  pedido.estatusDescripcion;
                 if (esPedidoConfirmado) {
                   foliosParaNotificar.add(folio);
                 }
@@ -519,24 +726,54 @@ class FullSyncService {
             } else if (tipo === "diferencias") {
               const cantAtencion = row.cantAtencion ?? row.cant_atencion;
               pedido.cantAtencion = cantAtencion ?? pedido.cantAtencion;
-              pedido.precioAtencion = row.precioAtencion ?? row.precio_atencion ?? pedido.precioAtencion;
-              pedido.causaDiferencia = row.causaDiferencia ?? row.causa_diferencia ?? pedido.causaDiferencia;
-              pedido.obserDiferencia = row.obserDiferencia ?? row.obser_diferencia ?? pedido.obserDiferencia;
-              pedido.tieneDiferencia = pedido.cantAtencion !== null &&
+              pedido.precioAtencion =
+                row.precioAtencion ??
+                row.precio_atencion ??
+                pedido.precioAtencion;
+              pedido.causaDiferencia =
+                row.causaDiferencia ??
+                row.causa_diferencia ??
+                pedido.causaDiferencia;
+              pedido.obserDiferencia =
+                row.obserDiferencia ??
+                row.obser_diferencia ??
+                pedido.obserDiferencia;
+              pedido.tieneDiferencia =
+                pedido.cantAtencion !== null &&
                 pedido.cantAtencion !== undefined &&
                 pedido.cantAtencion < pedido.cantPedido;
-              pedido.atendido = pedido.cantAtencion !== null &&
+              pedido.atendido =
+                pedido.cantAtencion !== null &&
                 pedido.cantAtencion !== undefined &&
                 pedido.cantAtencion > 0;
             } else if (tipo === "noAtencion") {
-              pedido.causaNoAtencion = row.causaNoAtencion ?? row.causa_no_atencion ?? pedido.causaNoAtencion;
-              pedido.obserNoAtencion = row.obserNoAtencion ?? row.obser_no_atencion ?? pedido.obserNoAtencion;
+              pedido.causaNoAtencion =
+                row.causaNoAtencion ??
+                row.causa_no_atencion ??
+                pedido.causaNoAtencion;
+              pedido.obserNoAtencion =
+                row.obserNoAtencion ??
+                row.obser_no_atencion ??
+                pedido.obserNoAtencion;
             } else {
-              const preservarLocal = pedido.modificadoLocal === true;
               const estatus = row.estatus ?? row.estado;
-              if (estatus !== undefined && estatus !== null && !preservarLocal) {
+              const preservarLocal =
+                pedido.modificadoLocal === true &&
+                [
+                  ESTATUS_PEDIDO_EN_ATENCION,
+                  ESTATUS_PEDIDO_EN_CAPTURA,
+                ].includes(Number(pedido.estatus)) &&
+                !ESTADOS_PEDIDO_FINALES.includes(Number(estatus));
+              if (
+                estatus !== undefined &&
+                estatus !== null &&
+                !preservarLocal
+              ) {
                 pedido.estatus = Number(estatus);
-                pedido.estatusDescripcion = row.estatusDescripcion ?? row.estatus_descripcion ?? pedido.estatusDescripcion;
+                pedido.estatusDescripcion =
+                  row.estatusDescripcion ??
+                  row.estatus_descripcion ??
+                  pedido.estatusDescripcion;
                 if (Number(estatus) === ESTATUS_PEDIDO_CONFIRMADO) {
                   foliosParaNotificar.add(folio);
                 }
@@ -552,11 +789,18 @@ class FullSyncService {
 
       if (foliosParaNotificar.size > 0) {
         try {
-          const PedidoNotificacionService = (await import("./PedidoNotificacionService")).default;
+          const PedidoNotificacionService = (
+            await import("./PedidoNotificacionService")
+          ).default;
           PedidoNotificacionService.setRealm(this.realm);
-          await PedidoNotificacionService.procesarPedidosSincronizados(Array.from(foliosParaNotificar));
+          await PedidoNotificacionService.procesarPedidosSincronizados(
+            Array.from(foliosParaNotificar)
+          );
         } catch (notificationError) {
-          console.warn("[Incremental] Error al notificar pedidos confirmados:", notificationError);
+          console.warn(
+            "[Incremental] Error al notificar pedidos confirmados:",
+            notificationError
+          );
         }
       }
 
@@ -573,7 +817,8 @@ class FullSyncService {
         registrosActualizados,
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       await BitacoraService.registrarFinSync(idBitacora, {
         exitoso: false,
         error: errorMsg,
@@ -617,7 +862,7 @@ class FullSyncService {
       parseInt(day, 10),
       parseInt(hour, 10),
       parseInt(minute, 10),
-      parseInt(second, 10),
+      parseInt(second, 10)
     );
 
     return mexicoDate;
@@ -647,9 +892,11 @@ class FullSyncService {
    */
   private async sendPendingVentasArrastre(
     sucursal: number,
-    idUsuario: number,
+    idUsuario: number
   ): Promise<{ success: boolean; sent: number }> {
-    console.log("[FullSync] Llamando a sendPendingVentasToServer desde sincronización periódica");
+    console.log(
+      "[FullSync] Llamando a sendPendingVentasToServer desde sincronización periódica"
+    );
     const result = await this.sendPendingVentasToServer(sucursal, idUsuario);
     return { success: result.success, sent: result.sent };
   }
@@ -657,40 +904,34 @@ class FullSyncService {
   /**
    * Envía ventas pendientes con timeout de 3 segundos.
    * Usado desde SalesScreen para no bloquear el proceso de venta.
-   * Si tarda más de 3 segundos, se omite y se enviará en la próxima sincronización.
+   * Si tarda más de 3 segundos, la petición se cancela y se reintentara en la próxima sincronización.
    */
   async sendPendingVentasWithTimeout(
     sucursal: number,
     idUsuario: number,
-    timeoutMs: number = 3000,
-  ): Promise<{ success: boolean; sent: number; timedOut?: boolean; error?: string }> {
+    timeoutMs: number = ARRASTRE_REQUEST_TIMEOUT_MS
+  ): Promise<{
+    success: boolean;
+    sent: number;
+    timedOut?: boolean;
+    error?: string;
+  }> {
     console.log(`[FullSync] Enviando ventas con timeout de ${timeoutMs}ms`);
+    const result = await this.sendPendingVentasToServer(
+      sucursal,
+      idUsuario,
+      timeoutMs
+    );
+    const timedOut =
+      result.error?.includes("Tiempo de espera agotado") ?? false;
 
-    const timeoutPromise = new Promise<{ success: boolean; sent: number; timedOut: boolean }>((resolve) => {
-      setTimeout(() => {
-        console.log("[FullSync] ⏱️ Timeout alcanzado, omitiendo arrastre");
-        resolve({ success: true, sent: 0, timedOut: true });
-      }, timeoutMs);
-    });
-
-    const sendPromise = this.sendPendingVentasToServer(sucursal, idUsuario).then((result) => ({
-      ...result,
-      timedOut: false,
-    }));
-
-    try {
-      const result = await Promise.race([sendPromise, timeoutPromise]);
-
-      if (result.timedOut) {
-        console.log("[FullSync] Arrastre omitido por timeout, se enviará en próxima sincronización");
-      }
-
-      return result;
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-      console.error("[FullSync] Error en arrastre con timeout:", error);
-      return { success: false, sent: 0, error: errorMsg };
+    if (timedOut) {
+      console.log(
+        "[FullSync] ⏱️ Arrastre cancelado por timeout; se reintentará en próxima sincronización"
+      );
     }
+
+    return { ...result, timedOut };
   }
 
   /**
@@ -701,7 +942,7 @@ class FullSyncService {
    */
   async syncPostVenta(
     sucursal: number = 1,
-    idUsuario: number = 1,
+    idUsuario: number = 1
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       await this.initialize();
@@ -714,7 +955,9 @@ class FullSyncService {
       // 1. Enviar movimientos de envase generados por la venta
       const envasesPendientes = this.getInventarioEnvasesPendientes();
       if (envasesPendientes.length > 0) {
-        console.log(`[FullSync-PostVenta] Enviando ${envasesPendientes.length} movimientos de envase...`);
+        console.log(
+          `[FullSync-PostVenta] Enviando ${envasesPendientes.length} movimientos de envase...`
+        );
         const envasePayload = envasesPendientes.map((r: any) => ({
           sucursal: r.sucursal ?? sucursal,
           clave_prod: r.claveProd ?? 0,
@@ -729,34 +972,54 @@ class FullSyncService {
           observacion: r.observacion ?? "",
         }));
         const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-        const envaseResp = await fetchWithTimeout(envaseUrl, {
-          method: "POST",
-          headers: { accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify(envasePayload),
-        });
+        const envaseResp = await fetchWithTimeout(
+          envaseUrl,
+          {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(envasePayload),
+          },
+          ARRASTRE_REQUEST_TIMEOUT_MS
+        );
         if (envaseResp.ok) {
           const ids = envasesPendientes.map((r: any) => r.id as string);
           this.marcarInventarioEnvaseSincronizado(ids);
-          console.log(`[FullSync-PostVenta] ${envasesPendientes.length} envases sincronizados`);
+          console.log(
+            `[FullSync-PostVenta] ${envasesPendientes.length} envases sincronizados`
+          );
         } else {
-          console.warn(`[FullSync-PostVenta] Error HTTP ${envaseResp.status} enviando envases`);
+          console.warn(
+            `[FullSync-PostVenta] Error HTTP ${envaseResp.status} enviando envases`
+          );
         }
       }
 
-      // 2. Enviar bitácoras pendientes
-      await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-      await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-      await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
-      await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
-      await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
-
-      // 3. Enviar la venta recién generada
-      const ventasResult = await this.sendPendingVentasToServer(sucursal, idUsuario);
+      // 2. Enviar la venta recién generada
+      const ventasResult = await this.sendPendingVentasToServer(
+        sucursal,
+        idUsuario
+      );
       console.log("[FullSync-PostVenta] Arrastre de ventas:", ventasResult);
 
-      return { success: true };
+      void Promise.all([
+        BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario),
+        GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario),
+        GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario),
+        GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario),
+        GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario),
+      ]).catch((error) =>
+        console.warn("[FullSync-PostVenta] Error enviando bitácoras:", error)
+      );
+
+      return ventasResult.success
+        ? { success: true }
+        : { success: false, error: ventasResult.error };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSync-PostVenta] Error:", errorMsg);
       return { success: false, error: errorMsg };
     }
@@ -779,7 +1042,7 @@ class FullSyncService {
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
     idUsuario?: number,
-    isCancelled?: () => boolean,
+    isCancelled?: () => boolean
   ): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -791,13 +1054,17 @@ class FullSyncService {
 
     // PASO 1: Enviar cancelaciones de ventas pendientes PRIMERO
     if (idUsuario) {
-      console.log("[FullSync] PASO 1 - Enviando cancelaciones de ventas pendientes...");
+      console.log(
+        "[FullSync] PASO 1 - Enviando cancelaciones de ventas pendientes..."
+      );
       try {
-        const cancelacionesPendientes = this.realm.objects("VentaCancelacion").filtered("enviado == false");
+        const cancelacionesPendientes = this.realm
+          .objects("VentaCancelacion")
+          .filtered("enviado == false");
 
         if (cancelacionesPendientes.length > 0) {
           console.log(
-            `[FullSync-Cancelacion] 📤 Enviando ${cancelacionesPendientes.length} cancelaciones pendientes...`,
+            `[FullSync-Cancelacion] 📤 Enviando ${cancelacionesPendientes.length} cancelaciones pendientes...`
           );
 
           const formatDate = (date: Date): string => {
@@ -810,64 +1077,93 @@ class FullSyncService {
             return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
           };
 
-          const payload = Array.from(cancelacionesPendientes).map((cancelacion: any) => ({
-            sucursal: cancelacion.sucursal ?? sucursal,
-            no_venta: cancelacion.noVenta ?? 0,
-            caja: cancelacion.caja ?? 1,
-            id_movil: cancelacion.idMovil,
-            usuario_cancela: cancelacion.usuarioCancela ?? idUsuario,
-            fecha_cancela: formatDate(cancelacion.fechaCancela ?? new Date()),
-            motivo_cancelacion: cancelacion.motivoCancelacion ?? "",
-            latitud: cancelacion.latitud ?? 0,
-            longitud: cancelacion.longitud ?? 0,
-          }));
+          const payload = Array.from(cancelacionesPendientes).map(
+            (cancelacion: any) => ({
+              sucursal: cancelacion.sucursal ?? sucursal,
+              no_venta: cancelacion.noVenta ?? 0,
+              caja: cancelacion.caja ?? 1,
+              id_movil: cancelacion.idMovil,
+              usuario_cancela: cancelacion.usuarioCancela ?? idUsuario,
+              fecha_cancela: formatDate(cancelacion.fechaCancela ?? new Date()),
+              motivo_cancelacion: cancelacion.motivoCancelacion ?? "",
+              latitud: cancelacion.latitud ?? 0,
+              longitud: cancelacion.longitud ?? 0,
+            })
+          );
 
           const cancelacionUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasCancelacionJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
           console.log(`[FullSync-Cancelacion] 🌐 URL: ${cancelacionUrl}`);
-          console.log(`[FullSync-Cancelacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
+          console.log(
+            `[FullSync-Cancelacion] 📦 Payload:`,
+            JSON.stringify(payload, null, 2)
+          );
 
           const cancelacionResp = await fetchWithTimeout(cancelacionUrl, {
             method: "POST",
-            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
+            headers: {
+              accept: "application/octet-stream",
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify(payload),
           });
 
           console.log(
-            `[FullSync-Cancelacion] 📡 Respuesta HTTP: ${cancelacionResp.status} ${cancelacionResp.statusText}`,
+            `[FullSync-Cancelacion] 📡 Respuesta HTTP: ${cancelacionResp.status} ${cancelacionResp.statusText}`
           );
 
           if (cancelacionResp.ok) {
             const responseText = await cancelacionResp.text();
-            console.log(`[FullSync-Cancelacion] 📥 Respuesta del servidor:`, responseText);
+            console.log(
+              `[FullSync-Cancelacion] 📥 Respuesta del servidor:`,
+              responseText
+            );
 
             this.realm.write(() => {
               Array.from(cancelacionesPendientes).forEach((c: any) => {
                 c.enviado = true;
               });
             });
-            console.log(`[FullSync-Cancelacion] ✅ ${payload.length} cancelaciones enviadas y marcadas como enviado`);
+            console.log(
+              `[FullSync-Cancelacion] ✅ ${payload.length} cancelaciones enviadas y marcadas como enviado`
+            );
           } else {
-            const errorText = await cancelacionResp.text().catch(() => "No se pudo leer el error");
-            console.warn(`[FullSync-Cancelacion] ⚠️ Error HTTP ${cancelacionResp.status} enviando cancelaciones`);
-            console.warn(`[FullSync-Cancelacion] ⚠️ Detalle del error:`, errorText);
+            const errorText = await cancelacionResp
+              .text()
+              .catch(() => "No se pudo leer el error");
+            console.warn(
+              `[FullSync-Cancelacion] ⚠️ Error HTTP ${cancelacionResp.status} enviando cancelaciones`
+            );
+            console.warn(
+              `[FullSync-Cancelacion] ⚠️ Detalle del error:`,
+              errorText
+            );
           }
         } else {
-          console.log("[FullSync-Cancelacion] ℹ️ No hay cancelaciones pendientes de envío");
+          console.log(
+            "[FullSync-Cancelacion] ℹ️ No hay cancelaciones pendientes de envío"
+          );
         }
       } catch (cancelacionError) {
-        console.error("[FullSync-Cancelacion] ❌ Error enviando cancelaciones:", cancelacionError);
+        console.error(
+          "[FullSync-Cancelacion] ❌ Error enviando cancelaciones:",
+          cancelacionError
+        );
       }
     }
 
     // PASO 1.5: Enviar modificaciones de ventas pendientes (quitar renglón)
     if (idUsuario) {
-      console.log("[FullSync] PASO 1.5 - Enviando modificaciones de ventas pendientes...");
+      console.log(
+        "[FullSync] PASO 1.5 - Enviando modificaciones de ventas pendientes..."
+      );
       try {
-        const modificacionesPendientes = this.realm.objects("VentaModificacion").filtered("enviado == false");
+        const modificacionesPendientes = this.realm
+          .objects("VentaModificacion")
+          .filtered("enviado == false");
 
         if (modificacionesPendientes.length > 0) {
           console.log(
-            `[FullSync-Modificacion] 📤 Enviando ${modificacionesPendientes.length} modificaciones pendientes...`,
+            `[FullSync-Modificacion] 📤 Enviando ${modificacionesPendientes.length} modificaciones pendientes...`
           );
 
           const formatDate = (date: Date): string => {
@@ -880,74 +1176,112 @@ class FullSyncService {
             return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
           };
 
-          const payload = Array.from(modificacionesPendientes).map((mod: any) => ({
-            sucursal: mod.sucursal ?? sucursal,
-            no_venta: mod.noVenta ?? 0,
-            caja: mod.caja ?? 1,
-            id_movil: mod.idMovil,
-            clave_prod: mod.claveProd,
-            nombre_producto: mod.nombreProducto ?? "",
-            cantidad_anterior: mod.cantidadAnterior ?? 0,
-            cantidad_nueva: mod.cantidadNueva ?? 0,
-            usuario_modifica: mod.usuarioModifica ?? idUsuario,
-            fecha_modifica: formatDate(mod.fechaModifica ?? new Date()),
-            motivo_modificacion: mod.motivoModificacion ?? "",
-            latitud: mod.latitud ?? 0,
-            longitud: mod.longitud ?? 0,
-          }));
+          const payload = Array.from(modificacionesPendientes).map(
+            (mod: any) => ({
+              sucursal: mod.sucursal ?? sucursal,
+              no_venta: mod.noVenta ?? 0,
+              caja: mod.caja ?? 1,
+              id_movil: mod.idMovil,
+              clave_prod: mod.claveProd,
+              nombre_producto: mod.nombreProducto ?? "",
+              cantidad_anterior: mod.cantidadAnterior ?? 0,
+              cantidad_nueva: mod.cantidadNueva ?? 0,
+              usuario_modifica: mod.usuarioModifica ?? idUsuario,
+              fecha_modifica: formatDate(mod.fechaModifica ?? new Date()),
+              motivo_modificacion: mod.motivoModificacion ?? "",
+              latitud: mod.latitud ?? 0,
+              longitud: mod.longitud ?? 0,
+            })
+          );
 
           const modificacionUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVentasModificacionJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
           console.log(`[FullSync-Modificacion] 🌐 URL: ${modificacionUrl}`);
-          console.log(`[FullSync-Modificacion] 📦 Payload:`, JSON.stringify(payload, null, 2));
+          console.log(
+            `[FullSync-Modificacion] 📦 Payload:`,
+            JSON.stringify(payload, null, 2)
+          );
 
           const modificacionResp = await fetchWithTimeout(modificacionUrl, {
             method: "POST",
-            headers: { accept: "application/octet-stream", "Content-Type": "application/json" },
+            headers: {
+              accept: "application/octet-stream",
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify(payload),
           });
 
           console.log(
-            `[FullSync-Modificacion] 📡 Respuesta HTTP: ${modificacionResp.status} ${modificacionResp.statusText}`,
+            `[FullSync-Modificacion] 📡 Respuesta HTTP: ${modificacionResp.status} ${modificacionResp.statusText}`
           );
 
           if (modificacionResp.ok) {
             const responseText = await modificacionResp.text();
-            console.log(`[FullSync-Modificacion] 📥 Respuesta del servidor:`, responseText);
+            console.log(
+              `[FullSync-Modificacion] 📥 Respuesta del servidor:`,
+              responseText
+            );
 
             this.realm.write(() => {
               Array.from(modificacionesPendientes).forEach((m: any) => {
                 m.enviado = true;
               });
             });
-            console.log(`[FullSync-Modificacion] ✅ ${payload.length} modificaciones enviadas y marcadas como enviado`);
+            console.log(
+              `[FullSync-Modificacion] ✅ ${payload.length} modificaciones enviadas y marcadas como enviado`
+            );
           } else {
-            const errorText = await modificacionResp.text().catch(() => "No se pudo leer el error");
-            console.warn(`[FullSync-Modificacion] ⚠️ Error HTTP ${modificacionResp.status} enviando modificaciones`);
-            console.warn(`[FullSync-Modificacion] ⚠️ Detalle del error:`, errorText);
+            const errorText = await modificacionResp
+              .text()
+              .catch(() => "No se pudo leer el error");
+            console.warn(
+              `[FullSync-Modificacion] ⚠️ Error HTTP ${modificacionResp.status} enviando modificaciones`
+            );
+            console.warn(
+              `[FullSync-Modificacion] ⚠️ Detalle del error:`,
+              errorText
+            );
           }
         } else {
-          console.log("[FullSync-Modificacion] ℹ️ No hay modificaciones pendientes de envío");
+          console.log(
+            "[FullSync-Modificacion] ℹ️ No hay modificaciones pendientes de envío"
+          );
         }
       } catch (modificacionError) {
-        console.error("[FullSync-Modificacion] ❌ Error enviando modificaciones:", modificacionError);
+        console.error(
+          "[FullSync-Modificacion] ❌ Error enviando modificaciones:",
+          modificacionError
+        );
       }
     }
 
     // PASO 2: Enviar reubicaciones pendientes (delega en ReubicacionService)
     if (idUsuario) {
-      console.log("[FullSync-Reubicacion] 🔍 PASO 2 - Delegando envío de reubicaciones...");
+      console.log(
+        "[FullSync-Reubicacion] 🔍 PASO 2 - Delegando envío de reubicaciones..."
+      );
       try {
-        const resultado = await ReubicacionService.getInstance().enviarReubicacionesPendientes(sucursal, idUsuario);
+        const resultado =
+          await ReubicacionService.getInstance().enviarReubicacionesPendientes(
+            sucursal,
+            idUsuario
+          );
         if (resultado.success && resultado.sent > 0) {
-          console.log(`[FullSync-Reubicacion] ✅ ${resultado.sent} reubicaciones enviadas`);
+          console.log(
+            `[FullSync-Reubicacion] ✅ ${resultado.sent} reubicaciones enviadas`
+          );
         } else if (resultado.error) {
           console.warn(`[FullSync-Reubicacion] ⚠️ ${resultado.error}`);
         }
       } catch (reubicacionError) {
-        console.error("[FullSync-Reubicacion] ❌ Error enviando reubicaciones:", reubicacionError);
+        console.error(
+          "[FullSync-Reubicacion] ❌ Error enviando reubicaciones:",
+          reubicacionError
+        );
       }
     } else {
-      console.log("[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones");
+      console.log(
+        "[FullSync-Reubicacion] ⚠️ No hay idUsuario, saltando envío de reubicaciones"
+      );
     }
 
     // PASO 3: Enviar bitácoras pendientes
@@ -957,14 +1291,29 @@ class FullSyncService {
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras GPS pendientes...");
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de tracking GPS pendientes...");
+        console.log(
+          "[FullSync] Enviando bitácoras de tracking GPS pendientes..."
+        );
         await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
-        await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");
-        await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
+        console.log(
+          "[FullSync] Enviando bitácoras de validación de ubicación pendientes..."
+        );
+        await GpsBitacoraService.enviarValidacionesPendientes(
+          sucursal,
+          idUsuario
+        );
+        console.log(
+          "[FullSync] Enviando bitácoras de tiempos de venta pendientes..."
+        );
+        await GpsBitacoraService.enviarTiemposVentaPendientes(
+          sucursal,
+          idUsuario
+        );
       } catch (error) {
-        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
+        console.warn(
+          "[FullSync] Error enviando bitácoras, continuando:",
+          error
+        );
       }
     }
 
@@ -974,7 +1323,9 @@ class FullSyncService {
         const envasesPendientes = this.getInventarioEnvasesPendientes();
         console.log("ENVASES PENDIENTES.");
         if (envasesPendientes.length > 0) {
-          console.log(`[FullSync] PASO 4 - Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`);
+          console.log(
+            `[FullSync] PASO 4 - Enviando ${envasesPendientes.length} InventarioEnvase pendientes...`
+          );
           console.log;
           const envasePayload = envasesPendientes.map((r: any) => ({
             sucursal: r.sucursal ?? sucursal,
@@ -991,66 +1342,143 @@ class FullSyncService {
           }));
           console.log(envasePayload);
           const envaseUrl = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesInventarioEnvasesArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
-          const envaseResp = await fetchWithTimeout(envaseUrl, {
-            method: "POST",
-            headers: { accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify(envasePayload),
-          });
+          const envaseResp = await fetchWithTimeout(
+            envaseUrl,
+            {
+              method: "POST",
+              headers: {
+                accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(envasePayload),
+            },
+            ARRASTRE_REQUEST_TIMEOUT_MS
+          );
           if (envaseResp.ok) {
-            console.log(`[FullSync] ✅ ${envasePayload.length} InventarioEnvase enviados`);
+            console.log(
+              `[FullSync] ✅ ${envasePayload.length} InventarioEnvase enviados`
+            );
             const ids = envasesPendientes.map((r: any) => r.id as string);
             this.marcarInventarioEnvaseSincronizado(ids);
           } else {
-            console.warn(`[FullSync] ⚠️ Error HTTP ${envaseResp.status} enviando InventarioEnvase`);
+            console.warn(
+              `[FullSync] ⚠️ Error HTTP ${envaseResp.status} enviando InventarioEnvase`
+            );
           }
         }
       } catch (envaseError) {
-        console.warn("[FullSync] ⚠️ Error enviando InventarioEnvase, continuando:", envaseError);
+        console.warn(
+          "[FullSync] ⚠️ Error enviando InventarioEnvase, continuando:",
+          envaseError
+        );
       }
     }
 
     // PASO 5: Enviar ventas pendientes al servidor (DESPUÉS de reubicaciones y cancelaciones)
     if (idUsuario) {
-      console.log("[FullSync] PASO 5 - Enviando ventas pendientes antes de sincronización incremental...");
-      const ventasResult = await this.sendPendingVentasArrastre(sucursal, idUsuario);
+      console.log(
+        "[FullSync] PASO 5 - Enviando ventas pendientes antes de sincronización incremental..."
+      );
+      const ventasResult = await this.sendPendingVentasArrastre(
+        sucursal,
+        idUsuario
+      );
       if (ventasResult.success && ventasResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`);
+        console.log(
+          `[FullSync] ✅ ${ventasResult.sent} ventas enviadas antes de sincronizar`
+        );
       } else if (!ventasResult.success) {
-        console.warn("[FullSync] ⚠️ No se pudieron enviar ventas pendientes, continuando con sincronización");
+        console.warn(
+          "[FullSync] ⚠️ No se pudieron enviar ventas pendientes, continuando con sincronización"
+        );
       }
     }
 
     // PASO 5.5: Enviar cierres de ruta pendientes al servidor
     if (idUsuario) {
-      console.log("[FullSync] PASO 5.5 - Enviando cierres de ruta pendientes...");
-      const cierreResult = await this.sendPendingCierreRutaToServer(sucursal, idUsuario);
+      console.log(
+        "[FullSync] PASO 5.5 - Enviando cierres de ruta pendientes..."
+      );
+      const cierreResult = await this.sendPendingCierreRutaToServer(
+        sucursal,
+        idUsuario
+      );
       if (cierreResult.success && cierreResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${cierreResult.sent} cierres de ruta enviados`);
+        console.log(
+          `[FullSync] ✅ ${cierreResult.sent} cierres de ruta enviados`
+        );
       } else if (!cierreResult.success && cierreResult.error) {
-        console.warn("[FullSync] ⚠️ Error enviando cierres de ruta:", cierreResult.error);
+        console.warn(
+          "[FullSync] ⚠️ Error enviando cierres de ruta:",
+          cierreResult.error
+        );
       }
     }
 
     // PASO 5.6: Enviar cambios de estado y cierres de pedidos pendientes al servidor
     if (idUsuario) {
-      console.log("[FullSync] PASO 5.6 - Enviando estados de pedidos pendientes...");
-      const estadosResult = await this.sendPendingPedidoEstadosToServer(idUsuario);
+      console.log(
+        "[FullSync] PASO 5.6 - Enviando estados de pedidos pendientes..."
+      );
+      const estadosResult = await this.sendPendingPedidoEstadosToServer(
+        idUsuario
+      );
       if (estadosResult.success && estadosResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${estadosResult.sent} estados de pedidos enviados`);
+        console.log(
+          `[FullSync] ✅ ${estadosResult.sent} estados de pedidos enviados`
+        );
       } else if (!estadosResult.success && estadosResult.error) {
-        console.warn("[FullSync] ⚠️ Error enviando estados de pedidos:", estadosResult.error);
+        console.warn(
+          "[FullSync] ⚠️ Error enviando estados de pedidos:",
+          estadosResult.error
+        );
       }
 
-      const bitacoraResult = await this.sendPendingPedidoBitacoraToServer(idUsuario);
+      const bitacoraResult = await this.sendPendingPedidoBitacoraToServer(
+        idUsuario
+      );
       if (bitacoraResult.success && bitacoraResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${bitacoraResult.sent} cierres de pedidos enviados`);
+        console.log(
+          `[FullSync] ✅ ${bitacoraResult.sent} cierres de pedidos enviados`
+        );
       } else if (!bitacoraResult.success && bitacoraResult.error) {
-        console.warn("[FullSync] ⚠️ Error enviando cierres de pedidos:", bitacoraResult.error);
+        console.warn(
+          "[FullSync] ⚠️ Error enviando cierres de pedidos:",
+          bitacoraResult.error
+        );
+      }
+    }
+
+    // PASO 5.7: Enviar fotografías de clientes pendientes durante la sincronización parcial
+    if (idUsuario) {
+      console.log(
+        "[FullSync] PASO 5.7 - Enviando fotografías de clientes pendientes..."
+      );
+      try {
+        ClienteFotosService.setRealm(this.realm);
+        const fotosResult = await ClienteFotosService.syncPending(idUsuario);
+        if (fotosResult.sent > 0) {
+          console.log(
+            `[FullSync-Fotos] ✅ ${fotosResult.sent} fotografías enviadas durante syncIncremental`
+          );
+        }
+        if (fotosResult.failed > 0) {
+          console.warn(
+            `[FullSync-Fotos] ⚠️ ${fotosResult.failed} fotografías no pudieron enviarse; se reintentará en la próxima sincronización`
+          );
+        }
+      } catch (fotosError) {
+        console.warn(
+          "[FullSync-Fotos] ⚠️ Error enviando fotografías, continuando con syncIncremental:",
+          fotosError
+        );
       }
     }
 
     // Crear SyncLog principal específico para incremental
-    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const syncLogId = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
     const fechaInicio = new Date();
 
     this.realm.write(() => {
@@ -1068,19 +1496,23 @@ class FullSyncService {
 
     const errors: string[] = [];
     const nowMexico = this.getMexicoNow();
-    const pedidosIncrementalSince = this.getLastSyncedAr("Pedido") ?? new Date("1900-01-01T00:00:00");
-    const usuarioSync = idUsuario ? (this.realm.objectForPrimaryKey("Usuario", idUsuario) as any) : null;
-    const usuarioConRuta = usuarioSync?.ruta
-      ? usuarioSync
-      : (this.realm.objects("Usuario").filtered("ruta != null && ruta != \"\"")[0] as any);
-    const rutaPedido = Number(usuarioConRuta?.ruta ?? 0);
+    const usuarioSync = idUsuario
+      ? (this.realm.objectForPrimaryKey("Usuario", idUsuario) as any)
+      : null;
+    const usuarioSesion = await AuthService.restoreSession();
+    const rutaPedido = Number(usuarioSync?.ruta ?? usuarioSesion?.ruta ?? 0);
+    const pedidosIncrementalSince =
+      rutaPedido > 0
+        ? this.getLastSyncedArForRoute(rutaPedido) ??
+          new Date("1900-01-01T00:00:00")
+        : new Date("1900-01-01T00:00:00");
 
     const notify = (
       entity: string,
       current: number,
       total: number,
       status: SyncProgress["status"],
-      message: string,
+      message: string
     ) => {
       if (onProgress) {
         onProgress({ current, total, entity, status, message });
@@ -1096,1301 +1528,1560 @@ class FullSyncService {
       registrosActualizados: number;
     };
 
-    // Orden fijo de tablas incrementales
-    const tasks: { name: string; run: () => Promise<IncrementalTaskResult> }[] = [
-      {
-        name: "ClientesIncremental",
-        run: async () => {
-          const tableName = "ClienteFull";
-          let last = this.getLastSyncedAr(tableName);
+    // Pedidos es la sincronización crítica de negocio: debe iniciar antes que las
+    // tablas auxiliares para no quedar retrasada por una cola incremental larga.
+    const tasks: { name: string; run: () => Promise<IncrementalTaskResult> }[] =
+      [
+        {
+          name: "PedidosIncremental",
+          run: () =>
+            this.syncPedidosIncrementalEndpoint(
+              "Pedido",
+              "/api/MovilesVentas/sp_MovilesPedidos",
+              "pedidos",
+              idUsuario,
+              sucursal,
+              pedidosIncrementalSince,
+              rutaPedido
+            ),
+        },
+        {
+          name: "ClienteFotosIncremental",
+          run: async () => {
+            const tableName = "ClienteFoto";
+            const fotoRows = this.realm!.objects("ClienteFoto").sorted(
+              "fechaLog",
+              true
+            ) as any;
+            const since: Date =
+              fotoRows[0]?.fechaLog instanceof Date
+                ? fotoRows[0].fechaLog
+                : new Date("1900-01-01T00:00:00");
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
+              since.toISOString()
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+            try {
+              ClienteFotosService.setRealm(this.realm!);
+              const registrosLeidos =
+                await ClienteFotosService.downloadIncremental(since);
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados: registrosLeidos,
+                registrosActualizados: 0,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "ClientesIncremental",
+          run: async () => {
+            const tableName = "ClienteFull";
+            let last = this.getLastSyncedAr(tableName);
 
-          if (!last) {
-            last = new Date("1900-01-01T00:00:00");
-          }
-
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(fechaInicial)}&sucursal=${sucursal}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Clientes desde", fechaInicial, "sucursal:", sucursal);
-            console.log("[Incremental] URL completa:", url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/octet-stream" },
-            });
-            if (!response.ok) {
-              console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
-              throw new Error(`HTTP ${response.status} Clientes`);
+            if (!last) {
+              last = new Date("1900-01-01T00:00:00");
             }
 
-            const clientes = await response.json();
-            console.log({ clientes });
-            const registrosLeidos = Array.isArray(clientes) ? clientes.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              // Actualizar/crear clientes del servidor (parcial, no se eliminan locales)
-              for (const cliente of clientes) {
-                const existing = this.realm!.objectForPrimaryKey("ClienteFull", cliente.id) as any;
-
-                const clienteData: any = {
-                  id: cliente.id,
-                  nombre: cliente.nombre,
-                  longitud: cliente.longitud,
-                  latitud: cliente.latitud,
-                  idGrupo: cliente.idGrupo,
-                  credito: cliente.credito,
-                  facturacionMovil: cliente.facturacionMovil,
-                  listaPrecio: cliente.listaPrecio,
-                  domicilio: cliente.domicilio || null,
-                  fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
-                  correoFactura: cliente.correo_factura || null,
-                  syncedAt: new Date(),
-                  syncedAr: nowMexico,
-                };
-
-                if (existing) {
-                  this.realm!.create("ClienteFull", clienteData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("ClienteFull", clienteData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] Clientes: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/clientes?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}&sucursal=${sucursal}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
             );
 
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
+            try {
+              console.log(
+                "[Incremental] Clientes desde",
+                fechaInicial,
+                "sucursal:",
+                sucursal
+              );
+              console.log("[Incremental] URL completa:", url);
 
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "UsuariosIncremental",
-        run: async () => {
-          const tableName = "Usuario";
-          let last = this.getLastSyncedAr(tableName);
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/octet-stream" },
+              });
+              if (!response.ok) {
+                console.error(
+                  `[Incremental] Error HTTP ${response.status} al llamar: ${url}`
+                );
+                throw new Error(`HTTP ${response.status} Clientes`);
+              }
 
-          if (!last) {
-            last = new Date("1900-01-01T00:00:00");
-          }
+              const clientes = await response.json();
+              console.log({ clientes });
+              const registrosLeidos = Array.isArray(clientes)
+                ? clientes.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
 
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/usuarios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
+              this.realm!.write(() => {
+                // Actualizar/crear clientes del servidor (parcial, no se eliminan locales)
+                for (const cliente of clientes) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "ClienteFull",
+                    cliente.id
+                  ) as any;
 
-          try {
-            console.log("[Incremental] Usuarios desde", fechaInicial, url);
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/json" },
-            });
-            if (!response.ok) {
-              console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
-              throw new Error(`HTTP ${response.status} Usuarios`);
-            }
-
-            const usuarios = await response.json();
-            console.log({ usuarios });
-            const registrosLeidos = Array.isArray(usuarios) ? usuarios.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              for (const usuario of usuarios) {
-                const existing = this.realm!.objectForPrimaryKey("Usuario", usuario.id) as any;
-
-                const usuarioData: any = {
-                  id: usuario.id,
-                  nombre: usuario.nombre,
-                  perfil: usuario.perfil,
-                  descripcionPerfil: usuario.descripcionPerfil,
-                  puesto: usuario.puesto,
-                  descripcionPuesto: usuario.descripcionPuesto,
-                  claveEmpleado: usuario.claveEmpleado,
-                  password: usuario.password,
-                  sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? usuario.sucursal,
-                  sucursalNombre: usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
-                  metros: usuario.metros,
-                  reubicacion:
-                    typeof usuario.reubicacion === "boolean"
-                      ? usuario.reubicacion
-                      : usuario.reubicacion === 1
-                      ? true
-                      : usuario.reubicacion === 0
-                      ? false
+                  const clienteData: any = {
+                    id: cliente.id,
+                    nombre: cliente.nombre,
+                    longitud: cliente.longitud,
+                    latitud: cliente.latitud,
+                    idGrupo: cliente.idGrupo,
+                    credito: cliente.credito,
+                    facturacionMovil: cliente.facturacionMovil,
+                    listaPrecio: cliente.listaPrecio,
+                    domicilio: cliente.domicilio || null,
+                    fechaAct: cliente.fecha_act
+                      ? new Date(cliente.fecha_act)
                       : null,
-                  rfc: usuario.rfc ?? null,
-                  domicilio: usuario.domicilio ?? null,
-                  regimenFiscal: usuario.regimenFiscal ?? null,
-                  nombreCia: usuario.nombreCia ?? null,
-                  telefono: usuario.telefono ?? null,
-                  ticketFinal: usuario.ticketFinal ?? null,
-                  permisoDomicilioTicket:
-                    typeof usuario.permisoDomicilioTicket === "boolean"
-                      ? usuario.permisoDomicilioTicket
-                      : usuario.permisoDomicilioTicket === 1
-                      ? true
-                      : usuario.permisoDomicilioTicket === 0
-                      ? false
-                      : null,
-                  dobleTicket:
-                    typeof usuario.dobleTicket === "boolean"
-                      ? usuario.dobleTicket
-                      : usuario.dobleTicket === 1
-                      ? true
-                      : usuario.dobleTicket === 0
-                      ? false
-                      : null,
-                  envaseRuta:
-                    typeof usuario.envaseRuta === "boolean"
-                      ? usuario.envaseRuta
-                      : usuario.envaseRuta === 1
-                      ? true
-                      : usuario.envaseRuta === 0
-                      ? false
-                      : null,
-                  syncedAt: nowMexico,
-                };
+                    correoFactura: cliente.correo_factura || null,
+                    syncedAt: new Date(),
+                    syncedAr: nowMexico,
+                  };
 
-                if (existing) {
-                  this.realm!.create("Usuario", usuarioData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("Usuario", usuarioData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "PedidosIncremental",
-        run: () =>
-          this.syncPedidosIncrementalEndpoint(
-            "Pedido",
-            "/api/MovilesVentas/sp_MovilesPedidos",
-            "pedidos",
-            idUsuario,
-            sucursal,
-            pedidosIncrementalSince,
-            rutaPedido,
-          ),
-      },
-      {
-        name: "PedidosDiferenciasIncremental",
-        run: () =>
-          this.syncPedidosIncrementalEndpoint(
-            "PedidoDiferencias",
-            "/api/MovilesVentas/sp_MovilesPedidosDiferenciasIncremental",
-            "diferencias",
-            idUsuario,
-            sucursal,
-            pedidosIncrementalSince,
-          ),
-      },
-      {
-        name: "PedidosNoAtencionIncremental",
-        run: () =>
-          this.syncPedidosIncrementalEndpoint(
-            "PedidoNoAtencion",
-            "/api/MovilesVentas/sp_MovilesPedidosNoAtencionIncremental",
-            "noAtencion",
-            idUsuario,
-            sucursal,
-            pedidosIncrementalSince,
-          ),
-      },
-      {
-        name: "PedidosEstatusIncremental",
-        run: () =>
-          this.syncPedidosIncrementalEndpoint(
-            "PedidoEstatus",
-            "/api/MovilesVentas/sp_MovilesPedidosEstatusIncremental",
-            "estatus",
-            idUsuario,
-            sucursal,
-            pedidosIncrementalSince,
-          ),
-      },
-      {
-        name: "ProductosIncremental",
-        run: async () => {
-          const tableName = "Producto"; // nombre del schema en Realm
-          const syncLogTableName = "Productos"; // nombre para bitácora de sync
-          let last = this.getLastSyncedAr(tableName);
-
-          if (!last) {
-            last = new Date("1900-01-01T00:00:00");
-          }
-
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/productos?fechaInicial=${encodeURIComponent(fechaInicial)}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            syncLogTableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Productos desde", fechaInicial, url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/json" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} Productos`);
-            }
-
-            const productos = await response.json();
-            const registrosLeidos = Array.isArray(productos) ? productos.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              // Actualizar/crear productos del servidor (parcial, no se eliminan locales)
-              for (const producto of productos) {
-                const existing = this.realm!.objectForPrimaryKey(tableName, producto.id) as any;
-
-                const productoData: any = {
-                  ...producto,
-                  syncedAt: new Date(),
-                  syncedAr: nowMexico,
-                };
-
-                if (existing) {
-                  this.realm!.create(tableName, productoData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create(tableName, productoData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: syncLogTableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: error instanceof Error ? error.message : "Error desconocido",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "PreciosIncremental",
-        run: async () => {
-          const tableName = "Precio";
-          let last = this.getLastSyncedAr(tableName);
-
-          if (!last) {
-            last = new Date();
-            last.setDate(last.getDate() - 1);
-          }
-
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(fechaInicial)}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Precios desde", fechaInicial, url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/octet-stream" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} Precios`);
-            }
-
-            const precios = await response.json();
-            const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              for (const precio of precios) {
-                const existing = this.realm!.objectForPrimaryKey("Precio", precio.id) as any;
-
-                const precioData: any = {
-                  ...precio,
-                  syncedAt: new Date(),
-                  syncedAr: nowMexico,
-                };
-
-                if (existing) {
-                  this.realm!.create("Precio", precioData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("Precio", precioData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "PreciosPromoIncremental",
-        run: async () => {
-          const tableName = "PrecioPromo";
-          let last = this.getLastSyncedAr(tableName);
-
-          if (!last) {
-            last = new Date();
-            last.setDate(last.getDate() - 1);
-          }
-
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
-            fechaInicial,
-          )}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] PreciosPromo desde", fechaInicial, url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/octet-stream" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} PreciosPromo`);
-            }
-
-            const precios = await response.json();
-            const registrosLeidos = Array.isArray(precios) ? precios.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              for (const precio of precios) {
-                const existing = this.realm!.objectForPrimaryKey("PrecioPromo", precio.id) as any;
-
-                const precioData: any = {
-                  ...precio,
-                  syncedAt: new Date(),
-                  syncedAr: nowMexico,
-                };
-
-                if (existing) {
-                  this.realm!.create("PrecioPromo", precioData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("PrecioPromo", precioData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      // {
-      //   name: "CarteraIncremental",
-      //   run: async () => {
-      //     const tableName = "Cartera";
-      //     const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera/full`;
-      //     const idBitacora = await BitacoraService.registrarInicioSync(
-      //       tableName,
-      //       "incremental",
-      //       "background",
-      //       idUsuario,
-      //       sucursal,
-      //       url,
-      //     );
-
-      //     try {
-      //       console.log("[Incremental] Cartera full desde", url);
-
-      //       const response = await fetchWithTimeout(url, {
-      //         headers: { accept: "application/octet-stream" },
-      //       });
-      //       if (!response.ok) {
-      //         console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
-      //         throw new Error(`HTTP ${response.status} Cartera`);
-      //       }
-
-      //       const cartera = await response.json();
-      //       const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
-      //       let registrosGuardados = 0;
-      //       let registrosActualizados = 0;
-
-      //       this.realm!.write(() => {
-      //         for (const item of cartera) {
-      //           const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
-
-      //           const carteraData: any = {
-      //             ...item,
-      //             syncedAt: new Date(),
-      //             syncedAr: item.fechaLog ? new Date(item.fechaLog) : null,
-      //           };
-
-      //           if (existing) {
-      //             this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
-      //             registrosActualizados++;
-      //           } else {
-      //             this.realm!.create("Cartera", carteraData);
-      //             registrosGuardados++;
-      //           }
-      //         }
-      //       });
-
-      //       console.log(
-      //         `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-      //       );
-
-      //       await BitacoraService.registrarFinSync(idBitacora, {
-      //         exitoso: true,
-      //         registrosLeidos,
-      //       });
-
-      //       return {
-      //         tabla: tableName,
-      //         endpoint: url,
-      //         registrosLeidos,
-      //         registrosGuardados,
-      //         registrosActualizados,
-      //       };
-      //     } catch (error) {
-      //       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-      //       await BitacoraService.registrarFinSync(idBitacora, {
-      //         exitoso: false,
-      //         error: errorMsg,
-      //         errorCode: "500",
-      //       });
-      //       throw error;
-      //     }
-      //   },
-      // },
-      {
-        name: "VentasIncremental",
-        run: async () => {
-          const tableName = "Venta";
-          let last = this.getLastSyncedAr(tableName);
-
-          if (!last) {
-            last = new Date();
-            last.setDate(last.getDate() - 1);
-          }
-
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
-            fechaInicial,
-          )}&sucursal=${encodeURIComponent(String(sucursal))}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Ventas desde", fechaInicial, url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/octet-stream" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} Ventas`);
-            }
-
-            const ventas = await response.json();
-            console.log("[Incremental] 🔍 VENTAS RECIBIDAS DEL SERVIDOR:", {
-              total: Array.isArray(ventas) ? ventas.length : 0,
-              primerasVentas: Array.isArray(ventas)
-                ? ventas.slice(0, 3).map((v: any) => ({
-                    id: v.id,
-                    noVenta: v.noVenta,
-                    idMovil: v.idMovil,
-                    tieneIdMovil: v.idMovil !== undefined && v.idMovil !== null,
-                    nombreProducto: v.nombreProducto,
-                    fecha: v.fecha,
-                  }))
-                : [],
-            });
-            console.log(ventas, "Ventas sincronizadas");
-            const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            // Encontrar el registro con el ás alto del servidor
-            let maxIdVenta = null;
-            let maxId = 0;
-            for (const venta of ventas) {
-              if (venta.id && venta.id > maxId) {
-                maxId = venta.id;
-                maxIdVenta = venta;
-              }
-            }
-
-            // Obtener el fechaLog del registro con el ID más alto
-            const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
-            console.log(ventas);
-            console.log(`[Incremental] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`);
-
-            this.realm!.write(() => {
-              for (const venta of ventas) {
-                const idMovil = venta.idMovil ?? null;
-
-                // Primero verificar si existe por ID (primary key)
-                const existingById = this.realm!.objectForPrimaryKey("Venta", venta.id);
-
-                if (existingById) {
-                  // Actualizar registro existente por ID
-                  (existingById as any).idMovil = venta.idMovil ?? null;
-                  (existingById as any).noVenta = venta.noVenta;
-                  (existingById as any).cantProducto = venta.cantProducto;
-                  (existingById as any).precio = venta.precio;
-                  (existingById as any).importe = venta.importe;
-                  (existingById as any).folioFactura = venta.folioFactura;
-                  (existingById as any).facturacionMovil = venta.facturacionMovil;
-                  (existingById as any).syncedAt = venta.fechaLog ?? nowMexico;
-                  registrosActualizados++;
-                } else {
-                  // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
-                  const localVentas =
-                    idMovil === null
-                      ? []
-                      : this.realm!.objects("Venta").filtered(
-                          "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
-                          idMovil,
-                          venta.claveProd,
-                        );
-
-                  if (localVentas.length > 0) {
-                    // Actualizar solo los campos específicos en cada registro encontrado
-                    for (const localVenta of localVentas) {
-                      (localVenta as any).idMovil = venta.idMovil ?? null;
-                      (localVenta as any).noVenta = venta.noVenta;
-                      (localVenta as any).cantProducto = venta.cantProducto;
-                      (localVenta as any).precio = venta.precio;
-                      (localVenta as any).importe = venta.importe;
-                      (localVenta as any).folioFactura = venta.folioFactura;
-                      (localVenta as any).facturacionMovil = venta.facturacionMovil;
-                      (localVenta as any).syncedAt = venta.fechaLog ?? nowMexico;
-                      registrosActualizados++;
-                    }
+                  if (existing) {
+                    this.realm!.create(
+                      "ClienteFull",
+                      clienteData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
                   } else {
-                    // Crear registro porque no existe ni por ID ni por idMovil
-                    this.realm!.create("Venta", {
-                      id: venta.id,
-                      idMovil: venta.idMovil ?? null,
-                      sucursal: venta.sucursal ?? null,
-                      noVenta: venta.noVenta ?? null,
-                      claveProd: venta.claveProd ?? null,
-                      nombreProducto: venta.nombreProducto ?? null,
-                      cantProducto: venta.cantProducto ?? null,
-                      precio: venta.precio ?? null,
-                      importe: venta.importe ?? null,
-                      cveCliente: venta.cveCliente ?? null,
-                      nombreCliente: venta.nombreCliente ?? null,
-                      fecha: venta.fecha ? new Date(venta.fecha) : null,
-                      tipoPago: venta.tipoPago ?? null,
-                      descripcionMedioPago: venta.descripcionMedioPago ?? null,
-                      vendedor: venta.vendedor ?? null,
-                      folioFactura: venta.folioFactura ?? false,
-                      facturacionMovil: venta.facturacionMovil ?? false,
-                      syncedAt: venta.fechaLog ?? nowMexico,
-                      syncedAr: syncedArValue,
-                    });
+                    this.realm!.create("ClienteFull", clienteData);
                     registrosGuardados++;
                   }
                 }
-              }
+              });
 
-              // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
-              const allLocalVentas = this.realm!.objects("Venta");
-              for (const localVenta of allLocalVentas) {
-                (localVenta as any).syncedAr = syncedArValue;
-              }
-            });
-
-            console.log(
-              `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "VisitasIncrementalSucursalPibote",
-        run: async () => {
-          const tableName = "Visita";
-          const last = this.getLastSyncedAr(tableName) ?? new Date("1900-01-01T00:00:00");
-          const fechaInicial = this.formatDateTimeForApi(last);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-pibote-incremental/${sucursal}?fechaInicial=${encodeURIComponent(
-            fechaInicial,
-          )}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Visitas Pivote desde", url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/json" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} VisitasPivote`);
-            }
-
-            const responseText = await response.text();
-            const visitasData = responseText.trim() ? JSON.parse(responseText) : [];
-            const registrosLeidos = Array.isArray(visitasData) ? visitasData.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              for (const visita of visitasData) {
-                const fechaVisita = visita.fecha ? new Date(visita.fecha) : new Date();
-                const fechaStr = fechaVisita.toISOString().split("T")[0];
-                const idCompuesto = `${visita.id}-${fechaStr}`;
-                const existing = this.realm!.objectForPrimaryKey("Visita", idCompuesto) as any;
-
-                // Preservar estado local 'visitado' si ya estaba marcado
-                const visitadoFinal =
-                  existing?.visitado === 1
-                    ? 1
-                    : typeof visita.visitado === "boolean"
-                    ? visita.visitado
-                      ? 1
-                      : 0
-                    : Number(visita.visitado);
-
-                const visitaData: any = {
-                  id: idCompuesto,
-                  idOriginal: visita.id,
-                  idCliente: visita.idCliente,
-                  ruta: visita.ruta ?? "",
-                  fecha: fechaVisita,
-                  orden: Number(visita.orden),
-                  tipo: Number(visita.tipo),
-                  visitado: visitadoFinal,
-                  syncedAr: nowMexico.toISOString(),
-                };
-
-                if (existing) {
-                  this.realm!.create("Visita", visitaData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("Visita", visitaData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] Visitas Pivote leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "DetalleVisitasArrastre",
-        run: async () => {
-          const tableName = "DetalleVisitas";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${idUsuario}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] DetalleVisitas - Enviando visitas pendientes...");
-
-            const detallesVisitas = this.realm!.objects("DetalleVisitas").filtered("sincronizado == false");
-
-            if (detallesVisitas.length === 0) {
-              console.log("[Incremental] DetalleVisitas - No hay visitas pendientes");
+              console.log(
+                `[Incremental] Clientes: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
 
               await BitacoraService.registrarFinSync(idBitacora, {
                 exitoso: true,
-                registrosLeidos: 0,
+                registrosLeidos,
               });
 
               return {
                 tabla: tableName,
                 endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "UsuariosIncremental",
+          run: async () => {
+            const tableName = "Usuario";
+            let last = this.getLastSyncedAr(tableName);
+
+            if (!last) {
+              last = new Date("1900-01-01T00:00:00");
+            }
+
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/usuarios?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Usuarios desde", fechaInicial, url);
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                console.error(
+                  `[Incremental] Error HTTP ${response.status} al llamar: ${url}`
+                );
+                throw new Error(`HTTP ${response.status} Usuarios`);
+              }
+
+              const usuarios = await response.json();
+              console.log({ usuarios });
+              const registrosLeidos = Array.isArray(usuarios)
+                ? usuarios.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                for (const usuario of usuarios) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "Usuario",
+                    usuario.id
+                  ) as any;
+
+                  const usuarioData: any = {
+                    id: usuario.id,
+                    nombre: usuario.nombre,
+                    perfil: usuario.perfil,
+                    descripcionPerfil: usuario.descripcionPerfil,
+                    puesto: usuario.puesto,
+                    descripcionPuesto: usuario.descripcionPuesto,
+                    claveEmpleado: usuario.claveEmpleado,
+                    password: usuario.password,
+                    sucursalOrigen:
+                      usuario.sucursal_origen ??
+                      usuario.sucursalOrigen ??
+                      usuario.sucursal,
+                    sucursalNombre:
+                      usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
+                    metros: usuario.metros,
+                    reubicacion:
+                      typeof usuario.reubicacion === "boolean"
+                        ? usuario.reubicacion
+                        : usuario.reubicacion === 1
+                        ? true
+                        : usuario.reubicacion === 0
+                        ? false
+                        : null,
+                    rfc: usuario.rfc ?? null,
+                    domicilio: usuario.domicilio ?? null,
+                    regimenFiscal: usuario.regimenFiscal ?? null,
+                    nombreCia: usuario.nombreCia ?? null,
+                    telefono: usuario.telefono ?? null,
+                    ticketFinal: usuario.ticketFinal ?? null,
+                    permisoDomicilioTicket:
+                      typeof usuario.permisoDomicilioTicket === "boolean"
+                        ? usuario.permisoDomicilioTicket
+                        : usuario.permisoDomicilioTicket === 1
+                        ? true
+                        : usuario.permisoDomicilioTicket === 0
+                        ? false
+                        : null,
+                    dobleTicket:
+                      typeof usuario.dobleTicket === "boolean"
+                        ? usuario.dobleTicket
+                        : usuario.dobleTicket === 1
+                        ? true
+                        : usuario.dobleTicket === 0
+                        ? false
+                        : null,
+                    envaseRuta:
+                      typeof usuario.envaseRuta === "boolean"
+                        ? usuario.envaseRuta
+                        : usuario.envaseRuta === 1
+                        ? true
+                        : usuario.envaseRuta === 0
+                        ? false
+                        : null,
+                    syncedAt: nowMexico,
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      "Usuario",
+                      usuarioData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("Usuario", usuarioData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "PedidosDiferenciasIncremental",
+          run: () =>
+            this.syncPedidosIncrementalEndpoint(
+              "PedidoDiferencias",
+              "/api/MovilesVentas/sp_MovilesPedidosDiferenciasIncremental",
+              "diferencias",
+              idUsuario,
+              sucursal,
+              pedidosIncrementalSince
+            ),
+        },
+        {
+          name: "PedidosNoAtencionIncremental",
+          run: () =>
+            this.syncPedidosIncrementalEndpoint(
+              "PedidoNoAtencion",
+              "/api/MovilesVentas/sp_MovilesPedidosNoAtencionIncremental",
+              "noAtencion",
+              idUsuario,
+              sucursal,
+              pedidosIncrementalSince
+            ),
+        },
+        {
+          name: "PedidosEstatusIncremental",
+          run: () =>
+            this.syncPedidosIncrementalEndpoint(
+              "PedidoEstatus",
+              "/api/MovilesVentas/sp_MovilesPedidosEstatusIncremental",
+              "estatus",
+              idUsuario,
+              sucursal,
+              pedidosIncrementalSince
+            ),
+        },
+        {
+          name: "ProductosIncremental",
+          run: async () => {
+            const tableName = "Producto"; // nombre del schema en Realm
+            const syncLogTableName = "Productos"; // nombre para bitácora de sync
+            let last = this.getLastSyncedAr(tableName);
+
+            if (!last) {
+              last = new Date("1900-01-01T00:00:00");
+            }
+
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/productos?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              syncLogTableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Productos desde", fechaInicial, url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} Productos`);
+              }
+
+              const productos = await response.json();
+              const registrosLeidos = Array.isArray(productos)
+                ? productos.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                // Actualizar/crear productos del servidor (parcial, no se eliminan locales)
+                for (const producto of productos) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    tableName,
+                    producto.id
+                  ) as any;
+
+                  const productoData: any = {
+                    ...producto,
+                    syncedAt: new Date(),
+                    syncedAr: nowMexico,
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      tableName,
+                      productoData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create(tableName, productoData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: syncLogTableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error:
+                  error instanceof Error ? error.message : "Error desconocido",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "PreciosIncremental",
+          run: async () => {
+            const tableName = "Precio";
+            let last = this.getLastSyncedAr(tableName);
+
+            if (!last) {
+              last = new Date();
+              last.setDate(last.getDate() - 1);
+            }
+
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/precios?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Precios desde", fechaInicial, url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/octet-stream" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} Precios`);
+              }
+
+              const precios = await response.json();
+              const registrosLeidos = Array.isArray(precios)
+                ? precios.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                for (const precio of precios) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "Precio",
+                    precio.id
+                  ) as any;
+
+                  const precioData: any = {
+                    ...precio,
+                    syncedAt: new Date(),
+                    syncedAr: nowMexico,
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      "Precio",
+                      precioData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("Precio", precioData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              console.log(
+                `[Incremental] Precios leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "PreciosPromoIncremental",
+          run: async () => {
+            const tableName = "PrecioPromo";
+            let last = this.getLastSyncedAr(tableName);
+
+            if (!last) {
+              last = new Date();
+              last.setDate(last.getDate() - 1);
+            }
+
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/precios-promo?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log(
+                "[Incremental] PreciosPromo desde",
+                fechaInicial,
+                url
+              );
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/octet-stream" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} PreciosPromo`);
+              }
+
+              const precios = await response.json();
+              const registrosLeidos = Array.isArray(precios)
+                ? precios.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                for (const precio of precios) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "PrecioPromo",
+                    precio.id
+                  ) as any;
+
+                  const precioData: any = {
+                    ...precio,
+                    syncedAt: new Date(),
+                    syncedAr: nowMexico,
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      "PrecioPromo",
+                      precioData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("PrecioPromo", precioData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              console.log(
+                `[Incremental] PreciosPromo leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        // {
+        //   name: "CarteraIncremental",
+        //   run: async () => {
+        //     const tableName = "Cartera";
+        //     const url = `${this.apiBaseUrl}/api/MovilesVentas/cartera/full`;
+        //     const idBitacora = await BitacoraService.registrarInicioSync(
+        //       tableName,
+        //       "incremental",
+        //       "background",
+        //       idUsuario,
+        //       sucursal,
+        //       url,
+        //     );
+
+        //     try {
+        //       console.log("[Incremental] Cartera full desde", url);
+
+        //       const response = await fetchWithTimeout(url, {
+        //         headers: { accept: "application/octet-stream" },
+        //       });
+        //       if (!response.ok) {
+        //         console.error(`[Incremental] Error HTTP ${response.status} al llamar: ${url}`);
+        //         throw new Error(`HTTP ${response.status} Cartera`);
+        //       }
+
+        //       const cartera = await response.json();
+        //       const registrosLeidos = Array.isArray(cartera) ? cartera.length : 0;
+        //       let registrosGuardados = 0;
+        //       let registrosActualizados = 0;
+
+        //       this.realm!.write(() => {
+        //         for (const item of cartera) {
+        //           const existing = this.realm!.objectForPrimaryKey("Cartera", item.id) as any;
+
+        //           const carteraData: any = {
+        //             ...item,
+        //             syncedAt: new Date(),
+        //             syncedAr: item.fechaLog ? new Date(item.fechaLog) : null,
+        //           };
+
+        //           if (existing) {
+        //             this.realm!.create("Cartera", carteraData, UpdateMode.Modified);
+        //             registrosActualizados++;
+        //           } else {
+        //             this.realm!.create("Cartera", carteraData);
+        //             registrosGuardados++;
+        //           }
+        //         }
+        //       });
+
+        //       console.log(
+        //         `[Incremental] Cartera leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+        //       );
+
+        //       await BitacoraService.registrarFinSync(idBitacora, {
+        //         exitoso: true,
+        //         registrosLeidos,
+        //       });
+
+        //       return {
+        //         tabla: tableName,
+        //         endpoint: url,
+        //         registrosLeidos,
+        //         registrosGuardados,
+        //         registrosActualizados,
+        //       };
+        //     } catch (error) {
+        //       const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+        //       await BitacoraService.registrarFinSync(idBitacora, {
+        //         exitoso: false,
+        //         error: errorMsg,
+        //         errorCode: "500",
+        //       });
+        //       throw error;
+        //     }
+        //   },
+        // },
+        {
+          name: "VentasIncremental",
+          run: async () => {
+            const tableName = "Venta";
+            let last = this.getLastSyncedAr(tableName);
+
+            if (!last) {
+              last = new Date();
+              last.setDate(last.getDate() - 1);
+            }
+
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/ventas/erp-movil?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}&sucursal=${encodeURIComponent(String(sucursal))}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Ventas desde", fechaInicial, url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/octet-stream" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} Ventas`);
+              }
+
+              const ventas = await response.json();
+              console.log("[Incremental] 🔍 VENTAS RECIBIDAS DEL SERVIDOR:", {
+                total: Array.isArray(ventas) ? ventas.length : 0,
+                primerasVentas: Array.isArray(ventas)
+                  ? ventas.slice(0, 3).map((v: any) => ({
+                      id: v.id,
+                      noVenta: v.noVenta,
+                      idMovil: v.idMovil,
+                      tieneIdMovil:
+                        v.idMovil !== undefined && v.idMovil !== null,
+                      nombreProducto: v.nombreProducto,
+                      fecha: v.fecha,
+                    }))
+                  : [],
+              });
+              console.log(ventas, "Ventas sincronizadas");
+              const registrosLeidos = Array.isArray(ventas) ? ventas.length : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              // Encontrar el registro con el ás alto del servidor
+              let maxIdVenta = null;
+              let maxId = 0;
+              for (const venta of ventas) {
+                if (venta.id && venta.id > maxId) {
+                  maxId = venta.id;
+                  maxIdVenta = venta;
+                }
+              }
+
+              // Obtener el fechaLog del registro con el ID más alto
+              const syncedArValue = maxIdVenta?.fecha ?? nowMexico;
+              console.log(ventas);
+              console.log(
+                `[Incremental] ID más alto del servidor: ${maxId}, fechaLog: ${syncedArValue}`
+              );
+
+              this.realm!.write(() => {
+                for (const venta of ventas) {
+                  const idMovil = venta.idMovil ?? null;
+
+                  // Primero verificar si existe por ID (primary key)
+                  const existingById = this.realm!.objectForPrimaryKey(
+                    "Venta",
+                    venta.id
+                  );
+
+                  if (existingById) {
+                    // Actualizar registro existente por ID
+                    (existingById as any).idMovil = venta.idMovil ?? null;
+                    (existingById as any).noVenta = venta.noVenta;
+                    (existingById as any).cantProducto = venta.cantProducto;
+                    (existingById as any).precio = venta.precio;
+                    (existingById as any).importe = venta.importe;
+                    (existingById as any).folioFactura = venta.folioFactura;
+                    (existingById as any).facturacionMovil =
+                      venta.facturacionMovil;
+                    (existingById as any).syncedAt =
+                      venta.fechaLog ?? nowMexico;
+                    registrosActualizados++;
+                  } else {
+                    // Buscar por idMovil Y claveProd exactos en registros locales (id > 1700000000)
+                    const localVentas =
+                      idMovil === null
+                        ? []
+                        : this.realm!.objects("Venta").filtered(
+                            "idMovil == $0 AND claveProd == $1 AND id > 1700000000",
+                            idMovil,
+                            venta.claveProd
+                          );
+
+                    if (localVentas.length > 0) {
+                      // Actualizar solo los campos específicos en cada registro encontrado
+                      for (const localVenta of localVentas) {
+                        (localVenta as any).idMovil = venta.idMovil ?? null;
+                        (localVenta as any).noVenta = venta.noVenta;
+                        (localVenta as any).cantProducto = venta.cantProducto;
+                        (localVenta as any).precio = venta.precio;
+                        (localVenta as any).importe = venta.importe;
+                        (localVenta as any).folioFactura = venta.folioFactura;
+                        (localVenta as any).facturacionMovil =
+                          venta.facturacionMovil;
+                        (localVenta as any).syncedAt =
+                          venta.fechaLog ?? nowMexico;
+                        registrosActualizados++;
+                      }
+                    } else {
+                      // Crear registro porque no existe ni por ID ni por idMovil
+                      this.realm!.create("Venta", {
+                        id: venta.id,
+                        idMovil: venta.idMovil ?? null,
+                        sucursal: venta.sucursal ?? null,
+                        noVenta: venta.noVenta ?? null,
+                        claveProd: venta.claveProd ?? null,
+                        nombreProducto: venta.nombreProducto ?? null,
+                        cantProducto: venta.cantProducto ?? null,
+                        precio: venta.precio ?? null,
+                        importe: venta.importe ?? null,
+                        cveCliente: venta.cveCliente ?? null,
+                        nombreCliente: venta.nombreCliente ?? null,
+                        fecha: venta.fecha ? new Date(venta.fecha) : null,
+                        tipoPago: venta.tipoPago ?? null,
+                        descripcionMedioPago:
+                          venta.descripcionMedioPago ?? null,
+                        vendedor: venta.vendedor ?? null,
+                        folioFactura: venta.folioFactura ?? false,
+                        facturacionMovil: venta.facturacionMovil ?? false,
+                        syncedAt: venta.fechaLog ?? nowMexico,
+                        syncedAr: syncedArValue,
+                      });
+                      registrosGuardados++;
+                    }
+                  }
+                }
+
+                // Actualizar syncedAr en TODOS los registros locales con el fechaLog del ID más alto del servidor
+                const allLocalVentas = this.realm!.objects("Venta");
+                for (const localVenta of allLocalVentas) {
+                  (localVenta as any).syncedAr = syncedArValue;
+                }
+              });
+
+              console.log(
+                `[Incremental] Ventas leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "VisitasIncrementalSucursalPibote",
+          run: async () => {
+            const tableName = "Visita";
+            const last =
+              this.getLastSyncedAr(tableName) ??
+              new Date("1900-01-01T00:00:00");
+            const fechaInicial = this.formatDateTimeForApi(last);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/visitas/full-incremental-sucursal-pibote-incremental/${sucursal}?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Visitas Pivote desde", url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} VisitasPivote`);
+              }
+
+              const responseText = await response.text();
+              const visitasData = responseText.trim()
+                ? JSON.parse(responseText)
+                : [];
+              const registrosLeidos = Array.isArray(visitasData)
+                ? visitasData.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                for (const visita of visitasData) {
+                  const fechaVisita = visita.fecha
+                    ? new Date(visita.fecha)
+                    : new Date();
+                  const fechaStr = fechaVisita.toISOString().split("T")[0];
+                  const idCompuesto = `${visita.id}-${fechaStr}`;
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "Visita",
+                    idCompuesto
+                  ) as any;
+
+                  // Preservar estado local 'visitado' si ya estaba marcado
+                  const visitadoFinal =
+                    existing?.visitado === 1
+                      ? 1
+                      : typeof visita.visitado === "boolean"
+                      ? visita.visitado
+                        ? 1
+                        : 0
+                      : Number(visita.visitado);
+
+                  const visitaData: any = {
+                    id: idCompuesto,
+                    idOriginal: visita.id,
+                    idCliente: visita.idCliente,
+                    ruta: visita.ruta ?? "",
+                    fecha: fechaVisita,
+                    orden: Number(visita.orden),
+                    tipo: Number(visita.tipo),
+                    visitado: visitadoFinal,
+                    syncedAr: nowMexico.toISOString(),
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      "Visita",
+                      visitaData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("Visita", visitaData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              console.log(
+                `[Incremental] Visitas Pivote leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "DetalleVisitasArrastre",
+          run: async () => {
+            const tableName = "DetalleVisitas";
+            const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesVisitasArrastreJSON?idUsuario=${idUsuario}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log(
+                "[Incremental] DetalleVisitas - Enviando visitas pendientes..."
+              );
+
+              const detallesVisitas = this.realm!.objects(
+                "DetalleVisitas"
+              ).filtered("sincronizado == false");
+
+              if (detallesVisitas.length === 0) {
+                console.log(
+                  "[Incremental] DetalleVisitas - No hay visitas pendientes"
+                );
+
+                await BitacoraService.registrarFinSync(idBitacora, {
+                  exitoso: true,
+                  registrosLeidos: 0,
+                });
+
+                return {
+                  tabla: tableName,
+                  endpoint: url,
+                  registrosLeidos: 0,
+                  registrosGuardados: 0,
+                  registrosActualizados: 0,
+                };
+              }
+
+              const isValidDate = (date: Date | null | undefined): boolean => {
+                if (!date) return false;
+                const year = date.getFullYear();
+                // Validar que la fecha esté en un rango razonable para evitar DATEDIFF overflow
+                return year >= 1900 && year <= 2100;
+              };
+
+              const formatDateForMexico = (date: Date): string => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, "0");
+                const day = String(date.getDate()).padStart(2, "0");
+                const hours = String(date.getHours()).padStart(2, "0");
+                const minutes = String(date.getMinutes()).padStart(2, "0");
+                const seconds = String(date.getSeconds()).padStart(2, "0");
+                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+              };
+
+              const nowStr = formatDateForMexico(nowMexico);
+              const visitasArray = Array.from(detallesVisitas)
+                .map((detalle: any) => ({
+                  fechaInicio: isValidDate(detalle.fechaInicio)
+                    ? formatDateForMexico(detalle.fechaInicio)
+                    : nowStr,
+                  fechaFin: isValidDate(detalle.fechaFin)
+                    ? formatDateForMexico(detalle.fechaFin)
+                    : nowStr,
+                  idCliente: detalle.idCliente,
+                  idUsuario: detalle.idUsuario,
+                  idRuta: detalle.idRuta,
+                  tipo: detalle.tipoVisita,
+                }))
+                .filter(
+                  (visita: any) =>
+                    visita.tipo !== null && visita.tipo !== undefined
+                );
+
+              console.log(
+                `[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor (filtradas sin tipo null)`
+              );
+              console.log(
+                "[Incremental] DetalleVisitas arrastre - Payload:",
+                JSON.stringify(visitasArray)
+              );
+
+              const response = await fetchWithTimeout(url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  accept: "application/octet-stream",
+                },
+                body: JSON.stringify(visitasArray),
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text().catch(() => "");
+                throw new Error(
+                  `HTTP ${response.status}: ${errorText || response.statusText}`
+                );
+              }
+
+              const nowSync = this.getMexicoNow();
+              this.realm!.write(() => {
+                for (const detalle of detallesVisitas) {
+                  (detalle as any).syncedAt = nowSync;
+                  (detalle as any).sincronizado = true;
+                }
+              });
+
+              console.log(
+                `[Incremental] DetalleVisitas - ✅ ${visitasArray.length} visitas sincronizadas`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos: visitasArray.length,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos: visitasArray.length,
+                registrosGuardados: 0,
+                registrosActualizados: visitasArray.length,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              console.error("[Incremental] DetalleVisitas - Error:", error);
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+
+              throw error;
+            }
+          },
+        },
+        {
+          name: "VisitasVisitadosSucursal",
+          run: async () => {
+            const tableName = "DetalleVisitas";
+            const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-visitados/${sucursal}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Visitas Visitados desde", url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} VisitasVisitados`);
+              }
+
+              const visitadosData = await response.json();
+              const registros = Array.isArray(visitadosData)
+                ? visitadosData
+                : [];
+              const registrosLeidos = registros.length;
+
+              this.realm!.write(() => {
+                // Eliminar información anterior proveniente del servidor (ya sincronizada),
+                // preservando los registros locales pendientes de enviar (sincronizado == false)
+                const sincronizados = this.realm!.objects(
+                  "DetalleVisitas"
+                ).filtered("sincronizado == true");
+                this.realm!.delete(sincronizados);
+
+                // Insertar la lista autoritativa del servidor
+                for (const v of registros) {
+                  const fechaInicio = v.fechaInicio
+                    ? new Date(v.fechaInicio)
+                    : null;
+                  const fechaFin = v.fechaFin ? new Date(v.fechaFin) : null;
+
+                  this.realm!.create(
+                    "DetalleVisitas",
+                    {
+                      id: String(v.id),
+                      fechaInicio,
+                      fechaFin,
+                      idCliente:
+                        v.idCliente != null ? Number(v.idCliente) : null,
+                      idUsuario:
+                        v.idUsuario != null ? Number(v.idUsuario) : null,
+                      idRuta: v.idRuta != null ? Number(v.idRuta) : null,
+                      tipoVisita:
+                        v.tipoVisita != null ? Number(v.tipoVisita) : null,
+                      agenda: v.agenda != null ? Number(v.agenda) : null,
+                      syncedAt: nowMexico,
+                      sincronizado: true,
+                    },
+                    UpdateMode.Modified
+                  );
+                }
+              });
+
+              console.log(
+                `[Incremental] Visitas Visitados - ✅ ${registrosLeidos} registros insertados`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados: registrosLeidos,
+                registrosActualizados: 0,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              console.error("[Incremental] Visitas Visitados - Error:", error);
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+
+              throw error;
+            }
+          },
+        },
+        {
+          name: "InventarioIncremental",
+          run: async () => {
+            const tableName = "Inventario";
+            const nowMexico = this.getMexicoNow();
+            // Agregar 2 minutos de buffer para incluir registros guardados recientemente
+            const fechaConBuffer = new Date(
+              nowMexico.getTime() + 2 * 60 * 1000
+            );
+            const fechaMovto = this.formatMexicoDateForServer(fechaConBuffer);
+            const url = `${
+              this.apiBaseUrl
+            }/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+              String(sucursal)
+            )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log("[Incremental] Inventario desde", url);
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/octet-stream" },
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status} Inventario`);
+              }
+
+              const inventario = await response.json();
+              const registrosLeidos = Array.isArray(inventario)
+                ? inventario.length
+                : 0;
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              this.realm!.write(() => {
+                for (const item of inventario) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "Inventario",
+                    item.id
+                  );
+
+                  const inventarioData = {
+                    ...item,
+                    sucursal: sucursal,
+                    syncedAt: item.fechaArrastre
+                      ? new Date(item.fechaArrastre)
+                      : new Date(),
+                    syncedAr: nowMexico,
+                  };
+
+                  if (existing) {
+                    this.realm!.create(
+                      "Inventario",
+                      inventarioData,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("Inventario", inventarioData);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              console.log(
+                `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+              throw error;
+            }
+          },
+        },
+        {
+          name: "InventarioEnvasesHistorialIncremental",
+          run: async () => {
+            const tableName = "InventarioEnvasesHistorial";
+            const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-envases/full/${sucursal}`;
+
+            try {
+              console.log(
+                "[Incremental] InventarioEnvasesHistorial desde",
+                url
+              );
+
+              const response = await fetchWithTimeout(url, {
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                throw new Error(
+                  `HTTP ${response.status} InventarioEnvasesHistorial`
+                );
+              }
+
+              const data = await response.json();
+              console.log({ data });
+              console.log("INVENTARIO HISTORIAL DE ENVASES ");
+              const registrosLeidos = Array.isArray(data) ? data.length : 0;
+              const nowMexico = this.getMexicoNow();
+              let registrosGuardados = 0;
+              let registrosActualizados = 0;
+
+              if (data.length > 0) {
+                console.log(
+                  "[InventarioEnvasesHistorial] Ejemplo item del servidor:",
+                  data[0]
+                );
+                console.log(
+                  "[InventarioEnvasesHistorial] fechaMovto del item:",
+                  data[0].fechaMovto
+                );
+              }
+
+              // Eliminar solo registros con fechaMovto null (datos corruptos de sincronización anterior)
+              this.realm!.write(() => {
+                const registrosCorruptos = this.realm!.objects(
+                  "InventarioEnvasesHistorial"
+                ).filtered("fechaMovto == null");
+                if (registrosCorruptos.length > 0) {
+                  console.log(
+                    `[InventarioEnvasesHistorial] Eliminando ${registrosCorruptos.length} registros con fechaMovto null...`
+                  );
+                  this.realm!.delete(registrosCorruptos);
+                }
+              });
+
+              this.realm!.write(() => {
+                for (const item of data) {
+                  const existing = this.realm!.objectForPrimaryKey(
+                    "InventarioEnvasesHistorial",
+                    item.id
+                  );
+                  const record = {
+                    id: item.id,
+                    sucursal: item.sucursal ?? null,
+                    almacen: item.almacen ?? null,
+                    claveProd: item.claveProd ?? null,
+                    descripcionCorta: item.descripcionCorta ?? null,
+                    fechaMovto: item.fechaMovto
+                      ? new Date(item.fechaMovto)
+                      : null,
+                    folioMovto: item.folioMovto ?? null,
+                    cantidadEntrada: item.cantidadEntrada ?? null,
+                    cantidadSalida: item.cantidadSalida ?? null,
+                    tipoMovto: item.tipoMovto ?? null,
+                    idMovil: item.idMovil ?? null,
+                    syncedAt: nowMexico,
+                  };
+                  if (existing) {
+                    this.realm!.create(
+                      "InventarioEnvasesHistorial",
+                      record,
+                      UpdateMode.Modified
+                    );
+                    registrosActualizados++;
+                  } else {
+                    this.realm!.create("InventarioEnvasesHistorial", record);
+                    registrosGuardados++;
+                  }
+                }
+              });
+
+              console.log(
+                `[Incremental] InventarioEnvasesHistorial leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
+              );
+
+              return {
+                tabla: tableName,
+                endpoint: url,
+                registrosLeidos,
+                registrosGuardados,
+                registrosActualizados,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              console.error(
+                "[Incremental] InventarioEnvasesHistorial - Error:",
+                errorMsg
+              );
+              throw error;
+            }
+          },
+        },
+        {
+          name: "CierreRutaFetch",
+          run: async () => {
+            const tableName = "CierreRuta";
+            const url = `${this.apiBaseUrl}/api/MovilesVentas/cierre-ruta/full/${sucursal}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
+
+            try {
+              console.log(
+                `[Incremental] CierreRuta - Obteniendo estado del servidor para sucursal=${sucursal}, vendedor=${idUsuario}...`
+              );
+
+              const result = await this.fetchCierreRutaFromServer(
+                sucursal,
+                idUsuario ?? 0
+              );
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: result.success,
+                registrosLeidos: result.registros,
+                error: result.error,
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: "sp_MovilesCierreRutaGet",
+                registrosLeidos: result.registros,
+                registrosGuardados: result.registros,
+                registrosActualizados: 0,
+              };
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error ? error.message : "Error desconocido";
+              console.error("[Incremental] CierreRuta - Error:", error);
+
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
+
+              return {
+                tabla: tableName,
+                endpoint: "sp_MovilesCierreRutaGet",
                 registrosLeidos: 0,
                 registrosGuardados: 0,
                 registrosActualizados: 0,
               };
             }
-
-            const isValidDate = (date: Date | null | undefined): boolean => {
-              if (!date) return false;
-              const year = date.getFullYear();
-              // Validar que la fecha esté en un rango razonable para evitar DATEDIFF overflow
-              return year >= 1900 && year <= 2100;
-            };
-
-            const formatDateForMexico = (date: Date): string => {
-              const year = date.getFullYear();
-              const month = String(date.getMonth() + 1).padStart(2, "0");
-              const day = String(date.getDate()).padStart(2, "0");
-              const hours = String(date.getHours()).padStart(2, "0");
-              const minutes = String(date.getMinutes()).padStart(2, "0");
-              const seconds = String(date.getSeconds()).padStart(2, "0");
-              return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-            };
-
-            const nowStr = formatDateForMexico(nowMexico);
-            const visitasArray = Array.from(detallesVisitas)
-              .map((detalle: any) => ({
-                fechaInicio: isValidDate(detalle.fechaInicio) ? formatDateForMexico(detalle.fechaInicio) : nowStr,
-                fechaFin: isValidDate(detalle.fechaFin) ? formatDateForMexico(detalle.fechaFin) : nowStr,
-                idCliente: detalle.idCliente,
-                idUsuario: detalle.idUsuario,
-                idRuta: detalle.idRuta,
-                tipo: detalle.tipoVisita,
-              }))
-              .filter((visita: any) => visita.tipo !== null && visita.tipo !== undefined);
-
-            console.log(
-              `[Incremental] DetalleVisitas - Enviando ${visitasArray.length} visitas al servidor (filtradas sin tipo null)`,
-            );
-            console.log("[Incremental] DetalleVisitas arrastre - Payload:", JSON.stringify(visitasArray));
-
-            const response = await fetchWithTimeout(url, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                accept: "application/octet-stream",
-              },
-              body: JSON.stringify(visitasArray),
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text().catch(() => "");
-              throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-            }
-
-            const nowSync = this.getMexicoNow();
-            this.realm!.write(() => {
-              for (const detalle of detallesVisitas) {
-                (detalle as any).syncedAt = nowSync;
-                (detalle as any).sincronizado = true;
-              }
-            });
-
-            console.log(`[Incremental] DetalleVisitas - ✅ ${visitasArray.length} visitas sincronizadas`);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos: visitasArray.length,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos: visitasArray.length,
-              registrosGuardados: 0,
-              registrosActualizados: visitasArray.length,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            console.error("[Incremental] DetalleVisitas - Error:", error);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-
-            throw error;
-          }
+          },
         },
-      },
-      {
-        name: "VisitasVisitadosSucursal",
-        run: async () => {
-          const tableName = "DetalleVisitas";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/visitas/full-incremental-sucursal-visitados/${sucursal}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Visitas Visitados desde", url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/json" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} VisitasVisitados`);
-            }
-
-            const visitadosData = await response.json();
-            const registros = Array.isArray(visitadosData) ? visitadosData : [];
-            const registrosLeidos = registros.length;
-
-            this.realm!.write(() => {
-              // Eliminar información anterior proveniente del servidor (ya sincronizada),
-              // preservando los registros locales pendientes de enviar (sincronizado == false)
-              const sincronizados = this.realm!.objects("DetalleVisitas").filtered("sincronizado == true");
-              this.realm!.delete(sincronizados);
-
-              // Insertar la lista autoritativa del servidor
-              for (const v of registros) {
-                const fechaInicio = v.fechaInicio ? new Date(v.fechaInicio) : null;
-                const fechaFin = v.fechaFin ? new Date(v.fechaFin) : null;
-
-                this.realm!.create(
-                  "DetalleVisitas",
-                  {
-                    id: String(v.id),
-                    fechaInicio,
-                    fechaFin,
-                    idCliente: v.idCliente != null ? Number(v.idCliente) : null,
-                    idUsuario: v.idUsuario != null ? Number(v.idUsuario) : null,
-                    idRuta: v.idRuta != null ? Number(v.idRuta) : null,
-                    tipoVisita: v.tipoVisita != null ? Number(v.tipoVisita) : null,
-                    agenda: v.agenda != null ? Number(v.agenda) : null,
-                    syncedAt: nowMexico,
-                    sincronizado: true,
-                  },
-                  UpdateMode.Modified,
-                );
-              }
-            });
-
-            console.log(`[Incremental] Visitas Visitados - ✅ ${registrosLeidos} registros insertados`);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados: registrosLeidos,
-              registrosActualizados: 0,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            console.error("[Incremental] Visitas Visitados - Error:", error);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-
-            throw error;
-          }
-        },
-      },
-      {
-        name: "InventarioIncremental",
-        run: async () => {
-          const tableName = "Inventario";
-          const nowMexico = this.getMexicoNow();
-          // Agregar 2 minutos de buffer para incluir registros guardados recientemente
-          const fechaConBuffer = new Date(nowMexico.getTime() + 2 * 60 * 1000);
-          const fechaMovto = this.formatMexicoDateForServer(fechaConBuffer);
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
-            String(sucursal),
-          )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log("[Incremental] Inventario desde", url);
-
-            const response = await fetchWithTimeout(url, {
-              headers: { accept: "application/octet-stream" },
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} Inventario`);
-            }
-
-            const inventario = await response.json();
-            const registrosLeidos = Array.isArray(inventario) ? inventario.length : 0;
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            this.realm!.write(() => {
-              for (const item of inventario) {
-                const existing = this.realm!.objectForPrimaryKey("Inventario", item.id);
-
-                const inventarioData = {
-                  ...item,
-                  sucursal: sucursal,
-                  syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
-                  syncedAr: nowMexico,
-                };
-
-                if (existing) {
-                  this.realm!.create("Inventario", inventarioData, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("Inventario", inventarioData);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] Inventario leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: true,
-              registrosLeidos,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: url,
-              registrosLeidos,
-              registrosGuardados,
-              registrosActualizados,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-            throw error;
-          }
-        },
-      },
-      {
-        name: "InventarioEnvasesHistorialIncremental",
-        run: async () => {
-          const tableName = "InventarioEnvasesHistorial";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-envases/full/${sucursal}`;
-
-          try {
-            console.log("[Incremental] InventarioEnvasesHistorial desde", url);
-
-            const response = await fetchWithTimeout(url, { headers: { accept: "application/json" } });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status} InventarioEnvasesHistorial`);
-            }
-
-            const data = await response.json();
-            console.log({ data });
-            console.log("INVENTARIO HISTORIAL DE ENVASES ");
-            const registrosLeidos = Array.isArray(data) ? data.length : 0;
-            const nowMexico = this.getMexicoNow();
-            let registrosGuardados = 0;
-            let registrosActualizados = 0;
-
-            if (data.length > 0) {
-              console.log("[InventarioEnvasesHistorial] Ejemplo item del servidor:", data[0]);
-              console.log("[InventarioEnvasesHistorial] fechaMovto del item:", data[0].fechaMovto);
-            }
-
-            // Eliminar solo registros con fechaMovto null (datos corruptos de sincronización anterior)
-            this.realm!.write(() => {
-              const registrosCorruptos =
-                this.realm!.objects("InventarioEnvasesHistorial").filtered("fechaMovto == null");
-              if (registrosCorruptos.length > 0) {
-                console.log(
-                  `[InventarioEnvasesHistorial] Eliminando ${registrosCorruptos.length} registros con fechaMovto null...`,
-                );
-                this.realm!.delete(registrosCorruptos);
-              }
-            });
-
-            this.realm!.write(() => {
-              for (const item of data) {
-                const existing = this.realm!.objectForPrimaryKey("InventarioEnvasesHistorial", item.id);
-                const record = {
-                  id: item.id,
-                  sucursal: item.sucursal ?? null,
-                  almacen: item.almacen ?? null,
-                  claveProd: item.claveProd ?? null,
-                  descripcionCorta: item.descripcionCorta ?? null,
-                  fechaMovto: item.fechaMovto ? new Date(item.fechaMovto) : null,
-                  folioMovto: item.folioMovto ?? null,
-                  cantidadEntrada: item.cantidadEntrada ?? null,
-                  cantidadSalida: item.cantidadSalida ?? null,
-                  tipoMovto: item.tipoMovto ?? null,
-                  idMovil: item.idMovil ?? null,
-                  syncedAt: nowMexico,
-                };
-                if (existing) {
-                  this.realm!.create("InventarioEnvasesHistorial", record, UpdateMode.Modified);
-                  registrosActualizados++;
-                } else {
-                  this.realm!.create("InventarioEnvasesHistorial", record);
-                  registrosGuardados++;
-                }
-              }
-            });
-
-            console.log(
-              `[Incremental] InventarioEnvasesHistorial leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
-            );
-
-            return { tabla: tableName, endpoint: url, registrosLeidos, registrosGuardados, registrosActualizados };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            console.error("[Incremental] InventarioEnvasesHistorial - Error:", errorMsg);
-            throw error;
-          }
-        },
-      },
-      {
-        name: "CierreRutaFetch",
-        run: async () => {
-          const tableName = "CierreRuta";
-          const url = `${this.apiBaseUrl}/api/MovilesVentas/cierre-ruta/full/${sucursal}`;
-          const idBitacora = await BitacoraService.registrarInicioSync(
-            tableName,
-            "incremental",
-            "background",
-            idUsuario,
-            sucursal,
-            url,
-          );
-
-          try {
-            console.log(
-              `[Incremental] CierreRuta - Obteniendo estado del servidor para sucursal=${sucursal}, vendedor=${idUsuario}...`,
-            );
-
-            const result = await this.fetchCierreRutaFromServer(sucursal, idUsuario ?? 0);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: result.success,
-              registrosLeidos: result.registros,
-              error: result.error,
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: "sp_MovilesCierreRutaGet",
-              registrosLeidos: result.registros,
-              registrosGuardados: result.registros,
-              registrosActualizados: 0,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Error desconocido";
-            console.error("[Incremental] CierreRuta - Error:", error);
-
-            await BitacoraService.registrarFinSync(idBitacora, {
-              exitoso: false,
-              error: errorMsg,
-              errorCode: "500",
-            });
-
-            return {
-              tabla: tableName,
-              endpoint: "sp_MovilesCierreRutaGet",
-              registrosLeidos: 0,
-              registrosGuardados: 0,
-              registrosActualizados: 0,
-            };
-          }
-        },
-      },
-    ];
+      ];
 
     const totalTasks = tasks.length;
     let currentTask = 0;
@@ -2400,14 +3091,22 @@ class FullSyncService {
     for (const task of tasks) {
       // Verificar cancelación antes de iniciar la siguiente tarea
       if (isCancelled?.()) {
-        console.log(`[FullSyncService] ⛔ Sincronización incremental cancelada antes de ${task.name}`);
+        console.log(
+          `[FullSyncService] ⛔ Sincronización incremental cancelada antes de ${task.name}`
+        );
         wasCancelled = true;
         break;
       }
 
       currentTask++;
       const fechaInicioTask = new Date();
-      notify(task.name, currentTask, totalTasks, "syncing", `Sincronizando ${task.name}...`);
+      notify(
+        task.name,
+        currentTask,
+        totalTasks,
+        "syncing",
+        `Sincronizando ${task.name}...`
+      );
 
       try {
         const result = await task.run();
@@ -2432,12 +3131,27 @@ class FullSyncService {
           });
         });
 
-        notify(task.name, currentTask, totalTasks, "success", `${task.name} sincronizado`);
+        notify(
+          task.name,
+          currentTask,
+          totalTasks,
+          "success",
+          `${task.name} sincronizado`
+        );
       } catch (error: any) {
         const msg = error?.message || "Error desconocido";
-        console.error(`[FullSyncService] Error incremental en ${task.name}:`, msg);
+        console.error(
+          `[FullSyncService] Error incremental en ${task.name}:`,
+          msg
+        );
         errors.push(`${task.name}: ${msg}`);
-        notify(task.name, currentTask, totalTasks, "error", `Error en ${task.name}: ${msg}`);
+        notify(
+          task.name,
+          currentTask,
+          totalTasks,
+          "error",
+          `Error en ${task.name}: ${msg}`
+        );
       }
     }
 
@@ -2480,7 +3194,7 @@ class FullSyncService {
   async syncAll(
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
-    idUsuario: number = 1,
+    idUsuario: number = 1
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -2491,7 +3205,9 @@ class FullSyncService {
     }
 
     // Crear SyncLog principal
-    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const syncLogId = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
     const fechaInicio = new Date();
 
     try {
@@ -2501,14 +3217,29 @@ class FullSyncService {
         await BitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
         console.log("[FullSync] Enviando bitácoras GPS pendientes...");
         await GpsBitacoraService.enviarBitacorasPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de tracking GPS pendientes...");
+        console.log(
+          "[FullSync] Enviando bitácoras de tracking GPS pendientes..."
+        );
         await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de validación de ubicación pendientes...");
-        await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
-        console.log("[FullSync] Enviando bitácoras de tiempos de venta pendientes...");
-        await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
+        console.log(
+          "[FullSync] Enviando bitácoras de validación de ubicación pendientes..."
+        );
+        await GpsBitacoraService.enviarValidacionesPendientes(
+          sucursal,
+          idUsuario
+        );
+        console.log(
+          "[FullSync] Enviando bitácoras de tiempos de venta pendientes..."
+        );
+        await GpsBitacoraService.enviarTiemposVentaPendientes(
+          sucursal,
+          idUsuario
+        );
       } catch (error) {
-        console.warn("[FullSync] Error enviando bitácoras, continuando:", error);
+        console.warn(
+          "[FullSync] Error enviando bitácoras, continuando:",
+          error
+        );
       }
 
       // Guardar log inicial
@@ -2526,33 +3257,66 @@ class FullSyncService {
       // );
 
       // Crear orquestador y ejecutar todas las tareas
-      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, idUsuario, onProgress);
+      const orchestrator = new SyncOrchestrator(
+        this.realm,
+        syncLogId,
+        sucursal,
+        idUsuario,
+        onProgress
+      );
 
       const result = await orchestrator.executeAll();
+
+      try {
+        const PedidoNotificacionService = (
+          await import("./PedidoNotificacionService")
+        ).default;
+        PedidoNotificacionService.setRealm(this.realm);
+        await PedidoNotificacionService.notificarConfirmadosPendientes();
+      } catch (notificationError) {
+        console.warn(
+          "[FullSync] Error al notificar pedidos confirmados pendientes:",
+          notificationError
+        );
+      }
 
       // PASO POST-SYNC: Obtener estado de cierre de ruta del servidor
       // Esto asegura que al iniciar sesión se sepa si la ruta está cerrada o abierta
       if (idUsuario) {
         try {
-          console.log("[FullSync] Post-sync - Obteniendo estado de cierre de ruta...");
-          const cierreResult = await this.fetchCierreRutaFromServer(sucursal, idUsuario);
+          console.log(
+            "[FullSync] Post-sync - Obteniendo estado de cierre de ruta..."
+          );
+          const cierreResult = await this.fetchCierreRutaFromServer(
+            sucursal,
+            idUsuario
+          );
           if (cierreResult.success && cierreResult.registros > 0) {
-            console.log(`[FullSync] ✅ Cierre de ruta sincronizado: ${cierreResult.registros} registro(s)`);
+            console.log(
+              `[FullSync] ✅ Cierre de ruta sincronizado: ${cierreResult.registros} registro(s)`
+            );
           } else if (cierreResult.success) {
             console.log("[FullSync] ℹ️ No hay cierres de ruta en el servidor");
           } else {
-            console.warn("[FullSync] ⚠️ Error al obtener cierre de ruta:", cierreResult.error);
+            console.warn(
+              "[FullSync] ⚠️ Error al obtener cierre de ruta:",
+              cierreResult.error
+            );
           }
         } catch (cierreError) {
-          console.warn("[FullSync] ⚠️ Error post-sync cierre de ruta:", cierreError);
+          console.warn(
+            "[FullSync] ⚠️ Error post-sync cierre de ruta:",
+            cierreError
+          );
         }
       }
 
       // Actualizar log final
       const fechaFinal = new Date();
       const totalRegistros = Array.from(result.results.values()).reduce(
-        (sum, r) => sum + (r.registrosGuardados || 0) + (r.registrosActualizados || 0),
-        0,
+        (sum, r) =>
+          sum + (r.registrosGuardados || 0) + (r.registrosActualizados || 0),
+        0
       );
 
       this.realm.write(() => {
@@ -2617,7 +3381,7 @@ class FullSyncService {
     tableName: string,
     sucursal: number = 1,
     onProgress?: SyncProgressCallback,
-    idUsuario: number = 1,
+    idUsuario: number = 1
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -2628,7 +3392,9 @@ class FullSyncService {
     }
 
     // Crear SyncLog principal
-    const syncLogId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const syncLogId = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
     const fechaInicio = new Date();
 
     try {
@@ -2647,7 +3413,13 @@ class FullSyncService {
       // );
 
       // Crear orquestador y ejecutar tarea específica
-      const orchestrator = new SyncOrchestrator(this.realm, syncLogId, sucursal, idUsuario, onProgress);
+      const orchestrator = new SyncOrchestrator(
+        this.realm,
+        syncLogId,
+        sucursal,
+        idUsuario,
+        onProgress
+      );
 
       const result = await orchestrator.executeTask(tableName);
 
@@ -2657,7 +3429,8 @@ class FullSyncService {
 
       // Actualizar log final
       const fechaFinal = new Date();
-      const totalRegistros = (result.registrosGuardados || 0) + (result.registrosActualizados || 0);
+      const totalRegistros =
+        (result.registrosGuardados || 0) + (result.registrosActualizados || 0);
 
       this.realm.write(() => {
         const log = this.realm!.objectForPrimaryKey("SyncLog", syncLogId);
@@ -2697,7 +3470,10 @@ class FullSyncService {
         console.error("[FullSyncService] Error al actualizar log:", logError);
       }
 
-      console.error(`[FullSyncService] Error en sincronización de ${tableName}:`, error);
+      console.error(
+        `[FullSyncService] Error en sincronización de ${tableName}:`,
+        error
+      );
       return {
         success: false,
         error: error?.message || "Error desconocido",
@@ -2716,14 +3492,16 @@ class FullSyncService {
           lastSyncDate: new Date(),
           status: success ? "completed" : "failed",
         },
-        UpdateMode.Modified,
+        UpdateMode.Modified
       );
     });
   }
 
   async getSucursales(): Promise<{ id: number; nombre: string }[]> {
     try {
-      const response = await fetchWithTimeout(`${this.apiBaseUrl}/api/MovilesVentas/sucursales`);
+      const response = await fetchWithTimeout(
+        `${this.apiBaseUrl}/api/MovilesVentas/sucursales`
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -2748,7 +3526,9 @@ class FullSyncService {
   // Métodos para consultar datos
   getVentas(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Venta").sorted("fecha", true).slice(0, limit));
+    return Array.from(
+      this.realm.objects("Venta").sorted("fecha", true).slice(0, limit)
+    );
   }
 
   getVentasPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -2757,7 +3537,7 @@ class FullSyncService {
       this.realm
         .objects("Venta")
         .sorted("fecha", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -2769,7 +3549,11 @@ class FullSyncService {
   getVentasBySucursal(sucursal: number, limit: number = 10000): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
-      this.realm.objects("Venta").filtered("sucursal == $0", sucursal).sorted("fecha", true).slice(0, limit),
+      this.realm
+        .objects("Venta")
+        .filtered("sucursal == $0", sucursal)
+        .sorted("fecha", true)
+        .slice(0, limit)
     );
   }
 
@@ -2801,7 +3585,7 @@ class FullSyncService {
       observacion?: string | null;
       idPedido?: number | null;
       idLista?: number | null;
-    }[],
+    }[]
   ): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -2842,7 +3626,9 @@ class FullSyncService {
 
   getVentasByMovilId(idMovil: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Venta").filtered("idMovil == $0", idMovil));
+    return Array.from(
+      this.realm.objects("Venta").filtered("idMovil == $0", idMovil)
+    );
   }
 
   /**
@@ -2857,7 +3643,7 @@ class FullSyncService {
       cantidad: number;
       esKit?: boolean;
       idProducto?: number;
-    }[],
+    }[]
   ): Promise<void> {
     console.log("[FullSync] updateInventarioAfterSale called with", {
       itemsCount: items.length,
@@ -2876,31 +3662,41 @@ class FullSyncService {
     }
 
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      console.log("[FullSync] updateInventarioAfterSale: Initializing realm...");
+      console.log(
+        "[FullSync] updateInventarioAfterSale: Initializing realm..."
+      );
       await this.initialize();
     }
     if (!this.realm || this.realm.isClosed) {
-      console.error("[FullSync] updateInventarioAfterSale: Realm not available after init!");
+      console.error(
+        "[FullSync] updateInventarioAfterSale: Realm not available after init!"
+      );
       return;
     }
 
     console.log("[FullSync] updateInventarioAfterSale: Starting realm.write()");
     this.realm.write(() => {
       items.forEach((item, index) => {
-        console.log(`[FullSync] Processing item ${index + 1}/${items.length}:`, {
-          sucursal: item.sucursal,
-          claveProd: item.claveProd,
-          cantidad: item.cantidad,
-          esKit: item.esKit,
-          idProducto: item.idProducto,
-        });
+        console.log(
+          `[FullSync] Processing item ${index + 1}/${items.length}:`,
+          {
+            sucursal: item.sucursal,
+            claveProd: item.claveProd,
+            cantidad: item.cantidad,
+            esKit: item.esKit,
+            idProducto: item.idProducto,
+          }
+        );
 
         if (item.esKit && item.idProducto) {
           // Es un kit: descontar los insumos según la tabla Kit
-          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
+          const componentes = this.realm!.objects("Kit").filtered(
+            "idProducto == $0",
+            item.idProducto
+          );
 
           console.log(
-            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`,
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
           );
 
           componentes.forEach((comp: any) => {
@@ -2909,7 +3705,9 @@ class FullSyncService {
             const cantidadTotal = cantidadInsumo * item.cantidad;
 
             if (!idInsumo || cantidadInsumo <= 0) {
-              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
+              console.warn(
+                `[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`
+              );
               return;
             }
 
@@ -2917,7 +3715,7 @@ class FullSyncService {
             const inventario = this.realm!.objects("Inventario").filtered(
               "sucursal == $0 AND claveProd == $1",
               item.sucursal,
-              idInsumo,
+              idInsumo
             )[0] as any;
 
             if (inventario) {
@@ -2925,10 +3723,12 @@ class FullSyncService {
               inventario.saldo = saldoAnterior + cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
-                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
               );
             } else {
-              console.warn(`[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`);
+              console.warn(
+                `[FullSync] No se encontró inventario para Insumo ${idInsumo} en Sucursal ${item.sucursal}`
+              );
             }
           });
         } else {
@@ -2938,10 +3738,10 @@ class FullSyncService {
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND claveProd == $1",
             item.sucursal,
-            idProductoBuscar,
+            idProductoBuscar
           );
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`,
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, idProducto=${idProductoBuscar}, encontrados: ${inventarioResults.length}`
           );
 
           const inventario = inventarioResults[0] as any;
@@ -2951,17 +3751,19 @@ class FullSyncService {
             inventario.saldo = saldoAnterior + item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+              `[FullSync] Producto id=${idProductoBuscar} descargado: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`,
+              `[FullSync] No se encontró inventario para Producto id=${idProductoBuscar} en Sucursal ${item.sucursal}`
             );
           }
         }
       });
     });
-    console.log("[FullSync] updateInventarioAfterSale: realm.write() completed successfully");
+    console.log(
+      "[FullSync] updateInventarioAfterSale: realm.write() completed successfully"
+    );
   }
 
   async updateInventarioAfterSaleScreen(
@@ -2971,7 +3773,7 @@ class FullSyncService {
       cantidad: number;
       esKit?: boolean;
       idProducto?: number;
-    }[],
+    }[]
   ): Promise<void> {
     console.log("[FullSync] updateInventarioAfterSaleScreen called with", {
       itemsCount: items.length,
@@ -2985,38 +3787,52 @@ class FullSyncService {
     });
 
     if (!items.length) {
-      console.log("[FullSync] updateInventarioAfterSaleScreen: No items to process");
+      console.log(
+        "[FullSync] updateInventarioAfterSaleScreen: No items to process"
+      );
       return;
     }
 
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      console.log("[FullSync] updateInventarioAfterSaleScreen: Initializing realm...");
+      console.log(
+        "[FullSync] updateInventarioAfterSaleScreen: Initializing realm..."
+      );
       await this.initialize();
     }
     if (!this.realm || this.realm.isClosed) {
-      console.error("[FullSync] updateInventarioAfterSaleScreen: Realm not available after init!");
+      console.error(
+        "[FullSync] updateInventarioAfterSaleScreen: Realm not available after init!"
+      );
       return;
     }
 
-    console.log("[FullSync] updateInventarioAfterSaleScreen: Starting realm.write()");
+    console.log(
+      "[FullSync] updateInventarioAfterSaleScreen: Starting realm.write()"
+    );
     this.realm.write(() => {
       items.forEach((item, index) => {
-        console.log(`[FullSync] Processing item ${index + 1}/${items.length}:`, {
-          sucursal: item.sucursal,
-          claveProd: item.claveProd,
-          cantidad: item.cantidad,
-          esKit: item.esKit,
-          idProducto: item.idProducto,
-        });
+        console.log(
+          `[FullSync] Processing item ${index + 1}/${items.length}:`,
+          {
+            sucursal: item.sucursal,
+            claveProd: item.claveProd,
+            cantidad: item.cantidad,
+            esKit: item.esKit,
+            idProducto: item.idProducto,
+          }
+        );
 
         if (item.esKit && item.idProducto) {
           // Es un kit: descontar los insumos según la tabla Kit
           console.log(item.idProducto, "SAAAA");
 
-          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
+          const componentes = this.realm!.objects("Kit").filtered(
+            "idProducto == $0",
+            item.idProducto
+          );
 
           console.log(
-            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`,
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), descargando ${componentes.length} insumos`
           );
 
           componentes.forEach((comp: any) => {
@@ -3025,7 +3841,9 @@ class FullSyncService {
             const cantidadTotal = cantidadInsumo * item.cantidad;
 
             if (!idInsumo || cantidadInsumo <= 0) {
-              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
+              console.warn(
+                `[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`
+              );
               return;
             }
 
@@ -3033,7 +3851,7 @@ class FullSyncService {
             const inventario = this.realm!.objects("Inventario").filtered(
               "sucursal == $0 AND claveProd == $1 AND id < 10000",
               item.sucursal,
-              idInsumo,
+              idInsumo
             )[0] as any;
 
             if (inventario) {
@@ -3041,11 +3859,11 @@ class FullSyncService {
               inventario.saldo = saldoAnterior - cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
-                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+                `[FullSync] Insumo ${idInsumo} descargado: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
               );
             } else {
               console.warn(
-                `[FullSync] No se encontró inventario (ID<10000) para Insumo ${idInsumo} en Sucursal ${item.sucursal}`,
+                `[FullSync] No se encontró inventario (ID<10000) para Insumo ${idInsumo} en Sucursal ${item.sucursal}`
               );
             }
           });
@@ -3053,16 +3871,18 @@ class FullSyncService {
           // No es kit: descontar el producto directamente
           // Buscar por claveProd y SOLO registros con ID < 10000 (sincronizados del servidor)
           const idProductoBuscar = item.idProducto ?? item.claveProd;
-          console.log(`[FullSync] Buscando inventario por claveProd: ${idProductoBuscar} (ID < 10000)`);
+          console.log(
+            `[FullSync] Buscando inventario por claveProd: ${idProductoBuscar} (ID < 10000)`
+          );
 
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND claveProd == $1 AND id < 10000",
             item.sucursal,
-            idProductoBuscar,
+            idProductoBuscar
           );
 
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, claveProd=${idProductoBuscar}, ID<10000, encontrados: ${inventarioResults.length}`,
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, claveProd=${idProductoBuscar}, ID<10000, encontrados: ${inventarioResults.length}`
           );
 
           const inventario = inventarioResults[0] as any;
@@ -3072,17 +3892,19 @@ class FullSyncService {
             inventario.saldo = saldoAnterior - item.cantidad;
             inventario.fechaArrastre = new Date();
             console.log(
-              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) RESTADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) RESTADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
             );
           } else {
             console.warn(
-              `[FullSync] No se encontró inventario con claveProd=${idProductoBuscar} en Sucursal ${item.sucursal}`,
+              `[FullSync] No se encontró inventario con claveProd=${idProductoBuscar} en Sucursal ${item.sucursal}`
             );
           }
         }
       });
     });
-    console.log("[FullSync] updateInventarioAfterSaleScreen: realm.write() completed successfully");
+    console.log(
+      "[FullSync] updateInventarioAfterSaleScreen: realm.write() completed successfully"
+    );
   }
 
   /**
@@ -3094,7 +3916,7 @@ class FullSyncService {
       sucursal: number;
       claveProd: number;
       cantidad: number;
-    }[],
+    }[]
   ): Promise<void> {
     if (!items.length) return;
 
@@ -3109,7 +3931,7 @@ class FullSyncService {
         const inventario = this.realm!.objects("Inventario").filtered(
           "sucursal == $0 AND claveProd == $1",
           item.sucursal,
-          item.claveProd,
+          item.claveProd
         )[0] as any;
 
         if (inventario) {
@@ -3125,7 +3947,7 @@ class FullSyncService {
           // );
         } else {
           console.warn(
-            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`,
+            `[FullSync] No se encontró inventario para Producto ${item.claveProd} en Sucursal ${item.sucursal}`
           );
         }
       });
@@ -3146,7 +3968,7 @@ class FullSyncService {
       cantidad: number;
       esKit?: boolean;
       idProducto?: number;
-    }[],
+    }[]
   ): Promise<void> {
     console.log("[FullSync] updateInventarioAfterTraspaso called with", {
       itemsCount: items.length,
@@ -3160,36 +3982,50 @@ class FullSyncService {
     });
 
     if (!items.length) {
-      console.log("[FullSync] updateInventarioAfterTraspaso: No items to process");
+      console.log(
+        "[FullSync] updateInventarioAfterTraspaso: No items to process"
+      );
       return;
     }
 
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      console.log("[FullSync] updateInventarioAfterTraspaso: Initializing realm...");
+      console.log(
+        "[FullSync] updateInventarioAfterTraspaso: Initializing realm..."
+      );
       await this.initialize();
     }
     if (!this.realm || this.realm.isClosed) {
-      console.error("[FullSync] updateInventarioAfterTraspaso: Realm not available after init!");
+      console.error(
+        "[FullSync] updateInventarioAfterTraspaso: Realm not available after init!"
+      );
       return;
     }
 
-    console.log("[FullSync] updateInventarioAfterTraspaso: Starting realm.write()");
+    console.log(
+      "[FullSync] updateInventarioAfterTraspaso: Starting realm.write()"
+    );
     this.realm.write(() => {
       items.forEach((item, index) => {
-        console.log(`[FullSync] Processing traspaso item ${index + 1}/${items.length}:`, {
-          sucursal: item.sucursal,
-          claveProd: item.claveProd,
-          cantidad: item.cantidad,
-          esKit: item.esKit,
-          idProducto: item.idProducto,
-        });
+        console.log(
+          `[FullSync] Processing traspaso item ${index + 1}/${items.length}:`,
+          {
+            sucursal: item.sucursal,
+            claveProd: item.claveProd,
+            cantidad: item.cantidad,
+            esKit: item.esKit,
+            idProducto: item.idProducto,
+          }
+        );
 
         if (item.esKit && item.idProducto) {
           // Es un kit: SUMAR los insumos según la tabla Kit
-          const componentes = this.realm!.objects("Kit").filtered("idProducto == $0", item.idProducto);
+          const componentes = this.realm!.objects("Kit").filtered(
+            "idProducto == $0",
+            item.idProducto
+          );
 
           console.log(
-            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), sumando ${componentes.length} insumos`,
+            `[FullSync] Kit detectado (idProducto: ${item.idProducto}), sumando ${componentes.length} insumos`
           );
 
           componentes.forEach((comp: any) => {
@@ -3198,7 +4034,9 @@ class FullSyncService {
             const cantidadTotal = cantidadInsumo * item.cantidad;
 
             if (!idInsumo || cantidadInsumo <= 0) {
-              console.warn(`[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`);
+              console.warn(
+                `[FullSync] Componente de kit inválido: idInsumo=${idInsumo}, cantidad=${cantidadInsumo}`
+              );
               return;
             }
 
@@ -3206,7 +4044,7 @@ class FullSyncService {
             const inventario = this.realm!.objects("Inventario").filtered(
               "sucursal == $0 AND claveProd == $1 AND id < 10000",
               item.sucursal,
-              idInsumo,
+              idInsumo
             )[0] as any;
 
             if (inventario) {
@@ -3214,7 +4052,7 @@ class FullSyncService {
               inventario.saldo = saldoAnterior + cantidadTotal;
               inventario.fechaArrastre = new Date();
               console.log(
-                `[FullSync] Insumo ${idInsumo} SUMADO: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+                `[FullSync] Insumo ${idInsumo} SUMADO: ${cantidadTotal} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
               );
             } else {
               // Crear renglón si no existe
@@ -3229,7 +4067,7 @@ class FullSyncService {
                 syncedAt: new Date(0),
               });
               console.log(
-                `[FullSync] Insumo ${idInsumo} CREADO con saldo: ${cantidadTotal} (ID inventario: ${idInsumo})`,
+                `[FullSync] Insumo ${idInsumo} CREADO con saldo: ${cantidadTotal} (ID inventario: ${idInsumo})`
               );
             }
           });
@@ -3237,15 +4075,17 @@ class FullSyncService {
           // No es kit: SUMAR el producto directamente
           // Buscar por ID del inventario (que debe ser igual al ID del producto)
           const idInventarioBuscar = item.idProducto;
-          console.log(`[FullSync] Buscando inventario por ID: ${idInventarioBuscar} (idProducto: ${item.idProducto})`);
+          console.log(
+            `[FullSync] Buscando inventario por ID: ${idInventarioBuscar} (idProducto: ${item.idProducto})`
+          );
 
           const inventarioResults = this.realm!.objects("Inventario").filtered(
             "sucursal == $0 AND id == $1",
             item.sucursal,
-            idInventarioBuscar,
+            idInventarioBuscar
           );
           console.log(
-            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, id=${idInventarioBuscar}, encontrados: ${inventarioResults.length}`,
+            `[FullSync] Búsqueda inventario sucursal=${item.sucursal}, id=${idInventarioBuscar}, encontrados: ${inventarioResults.length}`
           );
 
           const inventario = inventarioResults[0] as any;
@@ -3257,20 +4097,26 @@ class FullSyncService {
 
             // Actualizar descripción si no existe
             if (!inventario.descripcion) {
-              const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
+              const producto = this.realm!.objects("Producto").filtered(
+                "id == $0",
+                idInventarioBuscar
+              )[0] as any;
               if (producto) {
                 inventario.descripcion = producto.descripcion || null;
               }
             }
 
             console.log(
-              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) SUMADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`,
+              `[FullSync] Inventario ID=${inventario.id} (claveProd=${inventario.claveProd}) SUMADO: ${item.cantidad} unidades (saldo: ${saldoAnterior} → ${inventario.saldo})`
             );
           } else {
             // Crear renglón si no existe
             // IMPORTANTE: El ID del inventario debe ser igual al ID del producto
             // Buscar descripción del producto
-            const producto = this.realm!.objects("Producto").filtered("id == $0", idInventarioBuscar)[0] as any;
+            const producto = this.realm!.objects("Producto").filtered(
+              "id == $0",
+              idInventarioBuscar
+            )[0] as any;
             const descripcion = producto?.descripcion || null;
 
             this.realm!.create("Inventario", {
@@ -3283,13 +4129,15 @@ class FullSyncService {
               syncedAt: new Date(0),
             });
             console.log(
-              `[FullSync] Inventario ID=${idInventarioBuscar} CREADO con saldo: ${item.cantidad}, descripcion: ${descripcion}`,
+              `[FullSync] Inventario ID=${idInventarioBuscar} CREADO con saldo: ${item.cantidad}, descripcion: ${descripcion}`
             );
           }
         }
       });
     });
-    console.log("[FullSync] updateInventarioAfterTraspaso: realm.write() completed successfully");
+    console.log(
+      "[FullSync] updateInventarioAfterTraspaso: realm.write() completed successfully"
+    );
   }
 
   /**
@@ -3304,7 +4152,7 @@ class FullSyncService {
       saldo: number;
       fechaArrastre?: Date | null;
       descripcion?: string | null;
-    }[],
+    }[]
   ): Promise<void> {
     if (!movimientos.length) return;
 
@@ -3316,8 +4164,14 @@ class FullSyncService {
     this.realm.write(() => {
       movimientos.forEach((m) => {
         const idValue = Number(m.id);
-        const sucursalValue = m.sucursal === null || m.sucursal === undefined ? null : Number(m.sucursal);
-        const claveProdValue = m.claveProd === null || m.claveProd === undefined ? null : Number(m.claveProd);
+        const sucursalValue =
+          m.sucursal === null || m.sucursal === undefined
+            ? null
+            : Number(m.sucursal);
+        const claveProdValue =
+          m.claveProd === null || m.claveProd === undefined
+            ? null
+            : Number(m.claveProd);
 
         this.realm!.create("Inventario", {
           id: idValue,
@@ -3348,7 +4202,7 @@ class FullSyncService {
       idSegmento?: number | null;
       noVenta?: number | null;
       tipoPago?: number | null;
-    }[],
+    }[]
   ): Promise<void> {
     if (!movimientos.length) return;
 
@@ -3397,7 +4251,9 @@ class FullSyncService {
 
   getUsuarios(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Usuario").sorted("nombre").slice(0, limit));
+    return Array.from(
+      this.realm.objects("Usuario").sorted("nombre").slice(0, limit)
+    );
   }
 
   getUsuariosPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -3406,13 +4262,15 @@ class FullSyncService {
       this.realm
         .objects("Usuario")
         .sorted("nombre")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
   getProductos(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Producto").sorted("descripcion").slice(0, limit));
+    return Array.from(
+      this.realm.objects("Producto").sorted("descripcion").slice(0, limit)
+    );
   }
 
   getProductosPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -3421,7 +4279,7 @@ class FullSyncService {
       this.realm
         .objects("Producto")
         .sorted("descripcion")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -3437,9 +4295,16 @@ class FullSyncService {
    * Obtiene los IDs de productos que tienen recuperaEnvase=true en algún kit
    */
   getProductosConRecuperaEnvase(): Set<number> {
-    if (!this.isInitialized || !this.realm || this.realm.isClosed) return new Set();
-    const kitsConRecuperaEnvase = Array.from(this.realm.objects("Kit").filtered("recuperaEnvase == true")) as any[];
-    return new Set<number>(kitsConRecuperaEnvase.map((k) => k.idProducto).filter((id: number | null) => id != null));
+    if (!this.isInitialized || !this.realm || this.realm.isClosed)
+      return new Set();
+    const kitsConRecuperaEnvase = Array.from(
+      this.realm.objects("Kit").filtered("recuperaEnvase == true")
+    ) as any[];
+    return new Set<number>(
+      kitsConRecuperaEnvase
+        .map((k) => k.idProducto)
+        .filter((id: number | null) => id != null)
+    );
   }
 
   /**
@@ -3455,7 +4320,9 @@ class FullSyncService {
    */
   getKitsByProducto(idProducto: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Kit").filtered("idProducto == $0", idProducto));
+    return Array.from(
+      this.realm.objects("Kit").filtered("idProducto == $0", idProducto)
+    );
   }
 
   /**
@@ -3463,7 +4330,9 @@ class FullSyncService {
    */
   getKitsByInsumo(idInsumo: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo));
+    return Array.from(
+      this.realm.objects("Kit").filtered("idInsumo == $0", idInsumo)
+    );
   }
 
   /**
@@ -3479,7 +4348,9 @@ class FullSyncService {
    */
   clearAllDataExceptUsers(): void {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
-      console.warn("[FullSyncService] Realm no inicializado o cerrado, no se pueden limpiar datos");
+      console.warn(
+        "[FullSyncService] Realm no inicializado o cerrado, no se pueden limpiar datos"
+      );
       return;
     }
 
@@ -3512,23 +4383,45 @@ class FullSyncService {
           "VentaCancelacion",
           "VentaModificacion",
           "FormaPago",
+          "CatalogoEstatusPedido",
+          "CatalogoCausaDiferencia",
+          "CatalogoCausaNoAtencion",
         ];
+
+        const pedidosSinCambiosLocales = this.realm!.objects("Pedido").filtered(
+          "modificadoLocal == false"
+        );
+        this.realm!.delete(pedidosSinCambiosLocales);
+        this.realm!.delete(
+          this.realm!.objects("PedidoBitacora").filtered("enviado == true")
+        );
+        this.realm!.delete(
+          this.realm!.objects("PedidoEstado").filtered("enviado == true")
+        );
 
         tablesToDelete.forEach((tableName) => {
           const objects = this.realm!.objects(tableName);
           this.realm!.delete(objects);
-          console.log(`[FullSyncService] Tabla ${tableName} limpiada: ${objects.length} registros eliminados`);
+          console.log(
+            `[FullSyncService] Tabla ${tableName} limpiada: ${objects.length} registros eliminados`
+          );
         });
 
-        const reubicacionesEnviadas = this.realm!.objects("Reubicacion").filtered("enviado == true");
+        const reubicacionesEnviadas =
+          this.realm!.objects("Reubicacion").filtered("enviado == true");
         const enviadasCount = reubicacionesEnviadas.length;
         this.realm!.delete(reubicacionesEnviadas);
-        const pendientesCount = this.realm!.objects("Reubicacion").filtered("enviado == false").length;
+        const pendientesCount =
+          this.realm!.objects("Reubicacion").filtered(
+            "enviado == false"
+          ).length;
         console.log(
-          `[FullSyncService] Reubicaciones: ${enviadasCount} enviadas eliminadas, ${pendientesCount} pendientes conservadas`,
+          `[FullSyncService] Reubicaciones: ${enviadasCount} enviadas eliminadas, ${pendientesCount} pendientes conservadas`
         );
 
-        console.log("[FullSyncService] ✅ Todos los datos eliminados excepto Usuario y reubicaciones pendientes");
+        console.log(
+          "[FullSyncService] ✅ Todos los datos eliminados excepto Usuario y reubicaciones pendientes"
+        );
       });
     } catch (error) {
       console.error("[FullSyncService] Error al limpiar datos:", error);
@@ -3537,7 +4430,9 @@ class FullSyncService {
 
   getPrecios(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Precio").sorted("descripcion").slice(0, limit));
+    return Array.from(
+      this.realm.objects("Precio").sorted("descripcion").slice(0, limit)
+    );
   }
 
   getPreciosPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -3546,7 +4441,7 @@ class FullSyncService {
       this.realm
         .objects("Precio")
         .sorted("descripcion")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -3557,13 +4452,18 @@ class FullSyncService {
 
   getInventarioPaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Inventario").slice(offset, offset + limit));
+    return Array.from(
+      this.realm.objects("Inventario").slice(offset, offset + limit)
+    );
   }
 
   /**
    * Obtiene el inventario por clave de producto y sucursal
    */
-  getInventarioByClaveProdSucursal(claveProd: number, sucursal: number): any | null {
+  getInventarioByClaveProdSucursal(
+    claveProd: number,
+    sucursal: number
+  ): any | null {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
     const inventarios = this.realm
       .objects("Inventario")
@@ -3573,7 +4473,9 @@ class FullSyncService {
 
   getCartera(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Cartera").sorted("nombreCliente").slice(0, limit));
+    return Array.from(
+      this.realm.objects("Cartera").sorted("nombreCliente").slice(0, limit)
+    );
   }
 
   getCarteraPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -3582,7 +4484,7 @@ class FullSyncService {
       this.realm
         .objects("Cartera")
         .sorted("nombreCliente")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -3594,7 +4496,8 @@ class FullSyncService {
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
-    let query = "fecha >= $0 AND fecha <= $1 AND tipoPago == 1 and noVenta>0 AND idMovil == NULL";
+    let query =
+      "fecha >= $0 AND fecha <= $1 AND tipoPago == 1 and noVenta>0 AND idMovil == NULL";
     const args: any[] = [start, end];
 
     if (sucursal !== undefined) {
@@ -3642,7 +4545,11 @@ class FullSyncService {
     return Array.from(this.realm.objects("Venta").filtered(query, ...args));
   }
 
-  getInventarioABordoForDate(startOfDay: Date, endOfDay: Date, sucursal?: number): any[] {
+  getInventarioABordoForDate(
+    startOfDay: Date,
+    endOfDay: Date,
+    sucursal?: number
+  ): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     const todos = Array.from(this.realm.objects("Inventario")) as any[];
     return todos.filter((item: any) => {
@@ -3660,10 +4567,20 @@ class FullSyncService {
       return [];
     }
 
-    console.log("[getTodosEnvasesHistorial] Buscando entre:", startOfDay, "y", endOfDay);
+    console.log(
+      "[getTodosEnvasesHistorial] Buscando entre:",
+      startOfDay,
+      "y",
+      endOfDay
+    );
 
-    const todosLosRegistros = Array.from(this.realm.objects("InventarioEnvasesHistorial")) as any[];
-    console.log("[getTodosEnvasesHistorial] Total registros en Realm:", todosLosRegistros.length);
+    const todosLosRegistros = Array.from(
+      this.realm.objects("InventarioEnvasesHistorial")
+    ) as any[];
+    console.log(
+      "[getTodosEnvasesHistorial] Total registros en Realm:",
+      todosLosRegistros.length
+    );
     if (todosLosRegistros.length > 0) {
       console.log("[getTodosEnvasesHistorial] Ejemplo de fechas almacenadas:", {
         primera: todosLosRegistros[0]?.fechaMovto,
@@ -3674,10 +4591,13 @@ class FullSyncService {
     const registros = Array.from(
       this.realm
         .objects("InventarioEnvasesHistorial")
-        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay),
+        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay)
     ) as any[];
 
-    console.log("[getTodosEnvasesHistorial] Registros filtrados:", registros.length);
+    console.log(
+      "[getTodosEnvasesHistorial] Registros filtrados:",
+      registros.length
+    );
 
     return registros.map((r) => ({
       id: r.id,
@@ -3696,7 +4616,7 @@ class FullSyncService {
 
   getEnvasesHistorialForDate(
     startOfDay: Date,
-    endOfDay: Date,
+    endOfDay: Date
   ): {
     envVendido: number;
     envVendidoEco: number;
@@ -3704,12 +4624,36 @@ class FullSyncService {
     envCambiadoEco: number;
     envPrestado: number;
     envPrestadoEco: number;
-    cambiadosPorProducto: Array<{ descripcionCorta: string; claveProd: number; cantidadEntrada: number }>;
-    intercambioPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
-    prestamoPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
-    vendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
-    recuperadosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
-    envasesVendidosPorProducto: Array<{ descripcion: string; claveProd: number; cantidad: number }>;
+    cambiadosPorProducto: Array<{
+      descripcionCorta: string;
+      claveProd: number;
+      cantidadEntrada: number;
+    }>;
+    intercambioPorProducto: Array<{
+      descripcion: string;
+      claveProd: number;
+      cantidad: number;
+    }>;
+    prestamoPorProducto: Array<{
+      descripcion: string;
+      claveProd: number;
+      cantidad: number;
+    }>;
+    vendidosPorProducto: Array<{
+      descripcion: string;
+      claveProd: number;
+      cantidad: number;
+    }>;
+    recuperadosPorProducto: Array<{
+      descripcion: string;
+      claveProd: number;
+      cantidad: number;
+    }>;
+    envasesVendidosPorProducto: Array<{
+      descripcion: string;
+      claveProd: number;
+      cantidad: number;
+    }>;
   } {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) {
       return {
@@ -3728,15 +4672,23 @@ class FullSyncService {
       };
     }
 
-    console.log("[getEnvasesHistorialForDate] Buscando entre:", startOfDay, "y", endOfDay);
+    console.log(
+      "[getEnvasesHistorialForDate] Buscando entre:",
+      startOfDay,
+      "y",
+      endOfDay
+    );
 
     const registros = Array.from(
       this.realm
         .objects("InventarioEnvasesHistorial")
-        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay),
+        .filtered("fechaMovto >= $0 AND fechaMovto <= $1", startOfDay, endOfDay)
     ) as any[];
     console.log("registros", registros);
-    console.log("[getEnvasesHistorialForDate] Registros encontrados:", registros.length);
+    console.log(
+      "[getEnvasesHistorialForDate] Registros encontrados:",
+      registros.length
+    );
     if (registros.length > 0) {
       console.log(
         "[getEnvasesHistorialForDate] Primeros 3 registros:",
@@ -3745,42 +4697,67 @@ class FullSyncService {
           claveProd: r.claveProd,
           cantidadSalida: r.cantidadSalida,
           cantidadEntrada: r.cantidadEntrada,
-          fechaMovto: r.fechaMovto instanceof Date ? r.fechaMovto.toISOString() : String(r.fechaMovto),
-        })),
+          fechaMovto:
+            r.fechaMovto instanceof Date
+              ? r.fechaMovto.toISOString()
+              : String(r.fechaMovto),
+        }))
       );
 
       // Obtener detalles del inventario para claveProd 18 (envases)
       try {
-        const inventarioEnvases = this.realm?.objectForPrimaryKey("Inventario", 18);
+        const inventarioEnvases = this.realm?.objectForPrimaryKey(
+          "Inventario",
+          18
+        );
         if (inventarioEnvases) {
-          console.log("[getEnvasesHistorialForDate] 📦 Inventario claveProd=18:", {
-            id: (inventarioEnvases as any).id,
-            descripcion: (inventarioEnvases as any).descripcion,
-            saldo: (inventarioEnvases as any).saldo,
-            entrada: (inventarioEnvases as any).entrada,
-            salida: (inventarioEnvases as any).salida,
-          });
+          console.log(
+            "[getEnvasesHistorialForDate] 📦 Inventario claveProd=18:",
+            {
+              id: (inventarioEnvases as any).id,
+              descripcion: (inventarioEnvases as any).descripcion,
+              saldo: (inventarioEnvases as any).saldo,
+              entrada: (inventarioEnvases as any).entrada,
+              salida: (inventarioEnvases as any).salida,
+            }
+          );
         } else {
-          console.log("[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=18");
+          console.log(
+            "[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=18"
+          );
         }
       } catch (err) {
-        console.log("[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:", err);
+        console.log(
+          "[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:",
+          err
+        );
       }
       try {
-        const inventarioEnvases = this.realm?.objectForPrimaryKey("Inventario", 16);
+        const inventarioEnvases = this.realm?.objectForPrimaryKey(
+          "Inventario",
+          16
+        );
         if (inventarioEnvases) {
-          console.log("[getEnvasesHistorialForDate] 📦 Inventario claveProd=16:", {
-            id: (inventarioEnvases as any).id,
-            descripcion: (inventarioEnvases as any).descripcion,
-            saldo: (inventarioEnvases as any).saldo,
-            entrada: (inventarioEnvases as any).entrada,
-            salida: (inventarioEnvases as any).salida,
-          });
+          console.log(
+            "[getEnvasesHistorialForDate] 📦 Inventario claveProd=16:",
+            {
+              id: (inventarioEnvases as any).id,
+              descripcion: (inventarioEnvases as any).descripcion,
+              saldo: (inventarioEnvases as any).saldo,
+              entrada: (inventarioEnvases as any).entrada,
+              salida: (inventarioEnvases as any).salida,
+            }
+          );
         } else {
-          console.log("[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=16");
+          console.log(
+            "[getEnvasesHistorialForDate] ⚠️ No se encontró inventario para claveProd=16"
+          );
         }
       } catch (err) {
-        console.log("[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:", err);
+        console.log(
+          "[getEnvasesHistorialForDate] ❌ Error obteniendo inventario:",
+          err
+        );
       }
     }
 
@@ -3790,26 +4767,45 @@ class FullSyncService {
     let envCambiadoEco = 0;
     let envPrestado = 0;
     let envPrestadoEco = 0;
-    const cambiadosPorProd: Record<number, { descripcionCorta: string; cantidadEntrada: number }> = {};
+    const cambiadosPorProd: Record<
+      number,
+      { descripcionCorta: string; cantidadEntrada: number }
+    > = {};
 
     // Obtener productos con intercambio (recuperaEnvaseOtro), préstamo (controlPresamo), recuperaEnvase y envases vendidos (noRecuperaEnvase) desde Kits
-    const kitsConIntercambio = Array.from(this.realm.objects("Kit").filtered("recuperaEnvaseOtro == true")) as any[];
-    const kitsConPrestamo = Array.from(this.realm.objects("Kit").filtered("controlPresamo == true")) as any[];
-    const kitsConRecuperaEnvase = Array.from(this.realm.objects("Kit").filtered("recuperaEnvase == true")) as any[];
-    const kitsConEnvaseVendido = Array.from(this.realm.objects("Kit").filtered("noRecuperaEnvase == true")) as any[];
+    const kitsConIntercambio = Array.from(
+      this.realm.objects("Kit").filtered("recuperaEnvaseOtro == true")
+    ) as any[];
+    const kitsConPrestamo = Array.from(
+      this.realm.objects("Kit").filtered("controlPresamo == true")
+    ) as any[];
+    const kitsConRecuperaEnvase = Array.from(
+      this.realm.objects("Kit").filtered("recuperaEnvase == true")
+    ) as any[];
+    const kitsConEnvaseVendido = Array.from(
+      this.realm.objects("Kit").filtered("noRecuperaEnvase == true")
+    ) as any[];
 
     // Extraer los idProducto (claves de producto) únicos
     const clavesIntercambio = new Set<number>(
-      kitsConIntercambio.map((k) => k.idProducto).filter((id: number | null) => id != null),
+      kitsConIntercambio
+        .map((k) => k.idProducto)
+        .filter((id: number | null) => id != null)
     );
     const clavesPrestamo = new Set<number>(
-      kitsConPrestamo.map((k) => k.idProducto).filter((id: number | null) => id != null),
+      kitsConPrestamo
+        .map((k) => k.idProducto)
+        .filter((id: number | null) => id != null)
     );
     const clavesRecuperaEnvase = new Set<number>(
-      kitsConRecuperaEnvase.map((k) => k.idProducto).filter((id: number | null) => id != null),
+      kitsConRecuperaEnvase
+        .map((k) => k.idProducto)
+        .filter((id: number | null) => id != null)
     );
     const clavesEnvaseVendido = new Set<number>(
-      kitsConEnvaseVendido.map((k) => k.idProducto).filter((id: number | null) => id != null),
+      kitsConEnvaseVendido
+        .map((k) => k.idProducto)
+        .filter((id: number | null) => id != null)
     );
 
     // Mapas de producto -> cantidad de insumo para cada tipo de kit
@@ -3825,7 +4821,8 @@ class FullSyncService {
       if (kit.idProducto != null) {
         // Usar cantRecEnvOtro (cantidad de envases a recibir), si es 0 o null usar 1
         const cantRecEnvOtro = kit.cantRecEnvOtro;
-        cantidadInsumoIntercambio[kit.idProducto] = cantRecEnvOtro != null && cantRecEnvOtro > 0 ? cantRecEnvOtro : 1;
+        cantidadInsumoIntercambio[kit.idProducto] =
+          cantRecEnvOtro != null && cantRecEnvOtro > 0 ? cantRecEnvOtro : 1;
       }
     }
 
@@ -3846,16 +4843,36 @@ class FullSyncService {
     // Extraer los idInsumo (envases) de kits con recuperaEnvaseOtro, controlPresamo, o envaseVendido
     // Estos NO deben sumarse al total genérico de envases vendidos
     const insumosExcluirVenta = new Set<number>([
-      ...kitsConIntercambio.map((k) => k.idInsumo).filter((id: number | null) => id != null),
-      ...kitsConPrestamo.map((k) => k.idInsumo).filter((id: number | null) => id != null),
-      ...kitsConRecuperaEnvase.map((k) => k.idInsumo).filter((id: number | null) => id != null),
-      ...kitsConEnvaseVendido.map((k) => k.idInsumo).filter((id: number | null) => id != null),
+      ...kitsConIntercambio
+        .map((k) => k.idInsumo)
+        .filter((id: number | null) => id != null),
+      ...kitsConPrestamo
+        .map((k) => k.idInsumo)
+        .filter((id: number | null) => id != null),
+      ...kitsConRecuperaEnvase
+        .map((k) => k.idInsumo)
+        .filter((id: number | null) => id != null),
+      ...kitsConEnvaseVendido
+        .map((k) => k.idInsumo)
+        .filter((id: number | null) => id != null),
     ]);
 
-    console.log("[getEnvasesHistorialForDate] Productos con intercambio:", Array.from(clavesIntercambio));
-    console.log("[getEnvasesHistorialForDate] Productos con préstamo:", Array.from(clavesPrestamo));
-    console.log("[getEnvasesHistorialForDate] Productos con envaseVendido:", Array.from(clavesEnvaseVendido));
-    console.log("[getEnvasesHistorialForDate] Insumos a excluir de totales de venta:", Array.from(insumosExcluirVenta));
+    console.log(
+      "[getEnvasesHistorialForDate] Productos con intercambio:",
+      Array.from(clavesIntercambio)
+    );
+    console.log(
+      "[getEnvasesHistorialForDate] Productos con préstamo:",
+      Array.from(clavesPrestamo)
+    );
+    console.log(
+      "[getEnvasesHistorialForDate] Productos con envaseVendido:",
+      Array.from(clavesEnvaseVendido)
+    );
+    console.log(
+      "[getEnvasesHistorialForDate] Insumos a excluir de totales de venta:",
+      Array.from(insumosExcluirVenta)
+    );
 
     // Obtener descripciones de áreas de productos (acumulables por área)
     const getAreaDescripcion = (prod: any): string => {
@@ -3893,23 +4910,45 @@ class FullSyncService {
     }
 
     // Buscar ventas de estos productos en el rango de fechas - acumulados por AREA
-    const intercambioPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
-    const prestamoPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
-    const recuperadosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
-    const envasesVendidosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
+    const intercambioPorArea: Record<
+      string,
+      { descripcion: string; cantidad: number }
+    > = {};
+    const prestamoPorArea: Record<
+      string,
+      { descripcion: string; cantidad: number }
+    > = {};
+    const recuperadosPorArea: Record<
+      string,
+      { descripcion: string; cantidad: number }
+    > = {};
+    const envasesVendidosPorArea: Record<
+      string,
+      { descripcion: string; cantidad: number }
+    > = {};
 
     try {
       const ventas = Array.from(
-        this.realm.objects("Venta").filtered("fecha >= $0 AND fecha <= $1", startOfDay, endOfDay),
+        this.realm
+          .objects("Venta")
+          .filtered("fecha >= $0 AND fecha <= $1", startOfDay, endOfDay)
       ) as any[];
-      console.log("[getEnvasesHistorialForDate] Total ventas en período:", ventas.length);
+      console.log(
+        "[getEnvasesHistorialForDate] Total ventas en período:",
+        ventas.length
+      );
 
       for (const v of ventas) {
         const claveProd = v.claveProd;
         const cantidad = v.cantProducto ?? 0;
         const area = areaPorProducto[claveProd];
 
-        if (claveProd && clavesIntercambio.has(claveProd) && cantidad > 0 && area) {
+        if (
+          claveProd &&
+          clavesIntercambio.has(claveProd) &&
+          cantidad > 0 &&
+          area
+        ) {
           if (!intercambioPorArea[area]) {
             intercambioPorArea[area] = { descripcion: area, cantidad: 0 };
           }
@@ -3917,11 +4956,16 @@ class FullSyncService {
           const cantidadTotal = cantidad * cantidadInsumo;
           intercambioPorArea[area].cantidad += cantidadTotal;
           console.log(
-            `[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+            `[getEnvasesHistorialForDate] Intercambio area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`
           );
         }
 
-        if (claveProd && clavesPrestamo.has(claveProd) && cantidad > 0 && area) {
+        if (
+          claveProd &&
+          clavesPrestamo.has(claveProd) &&
+          cantidad > 0 &&
+          area
+        ) {
           if (!prestamoPorArea[area]) {
             prestamoPorArea[area] = { descripcion: area, cantidad: 0 };
           }
@@ -3929,11 +4973,16 @@ class FullSyncService {
           const cantidadTotal = cantidad * cantidadInsumo;
           prestamoPorArea[area].cantidad += cantidadTotal;
           console.log(
-            `[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+            `[getEnvasesHistorialForDate] Préstamo area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`
           );
         }
 
-        if (claveProd && clavesRecuperaEnvase.has(claveProd) && cantidad > 0 && area) {
+        if (
+          claveProd &&
+          clavesRecuperaEnvase.has(claveProd) &&
+          cantidad > 0 &&
+          area
+        ) {
           if (!recuperadosPorArea[area]) {
             recuperadosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
@@ -3941,12 +4990,17 @@ class FullSyncService {
           const cantidadTotal = cantidad * cantidadInsumo;
           recuperadosPorArea[area].cantidad += cantidadTotal;
           console.log(
-            `[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+            `[getEnvasesHistorialForDate] Recuperado envase area ${area} += ${cantidadTotal} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`
           );
         }
 
         // Procesar ventas de productos con envaseVendido
-        if (claveProd && clavesEnvaseVendido.has(claveProd) && cantidad > 0 && area) {
+        if (
+          claveProd &&
+          clavesEnvaseVendido.has(claveProd) &&
+          cantidad > 0 &&
+          area
+        ) {
           if (!envasesVendidosPorArea[area]) {
             envasesVendidosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
@@ -3954,7 +5008,7 @@ class FullSyncService {
           const cantidadEnvases = cantidad * cantidadInsumo;
           envasesVendidosPorArea[area].cantidad += cantidadEnvases;
           console.log(
-            `[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidadEnvases} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`,
+            `[getEnvasesHistorialForDate] Envase vendido area ${area} += ${cantidadEnvases} (ventas: ${cantidad} * insumo: ${cantidadInsumo})`
           );
         }
       }
@@ -3963,7 +5017,10 @@ class FullSyncService {
     }
 
     // Track vendidos por insumo para mostrar individualmente - acumulados por AREA
-    const vendidosPorArea: Record<string, { descripcion: string; cantidad: number }> = {};
+    const vendidosPorArea: Record<
+      string,
+      { descripcion: string; cantidad: number }
+    > = {};
 
     for (const r of registros) {
       const tipo: number = r.tipoMovto ?? 0;
@@ -3977,7 +5034,9 @@ class FullSyncService {
         // Si este insumo está en kits con recuperaEnvase/controlPresamo, NO sumar al total genérico
         // pero SÍ agregar a la lista individual por AREA
         if (insumosExcluirVenta.has(clave) && area) {
-          console.log(`[getEnvasesHistorialForDate] ⏩ Envase ${clave} excluido de totales, acumulado en area ${area}`);
+          console.log(
+            `[getEnvasesHistorialForDate] ⏩ Envase ${clave} excluido de totales, acumulado en area ${area}`
+          );
           if (!vendidosPorArea[area]) {
             vendidosPorArea[area] = { descripcion: area, cantidad: 0 };
           }
@@ -3985,31 +5044,64 @@ class FullSyncService {
         } else {
           // Sumar al total genérico
           if (clave === 18) {
-            console.log("[getEnvasesHistorialForDate] ✅ envVendido += ", salida, " (tipo=2, clave=18)");
+            console.log(
+              "[getEnvasesHistorialForDate] ✅ envVendido += ",
+              salida,
+              " (tipo=2, clave=18)"
+            );
             envVendido += salida;
           } else if (clave === 16) {
-            console.log("[getEnvasesHistorialForDate] ✅ envVendidoEco += ", salida, " (tipo=2, clave=16)");
+            console.log(
+              "[getEnvasesHistorialForDate] ✅ envVendidoEco += ",
+              salida,
+              " (tipo=2, clave=16)"
+            );
             envVendidoEco += salida;
           }
         }
       } else if (tipo === 1100 && clave === 18) {
-        console.log("[getEnvasesHistorialForDate] ✅ envCambiado += ", salida, " (tipo=1100, clave=18)");
+        console.log(
+          "[getEnvasesHistorialForDate] ✅ envCambiado += ",
+          salida,
+          " (tipo=1100, clave=18)"
+        );
         envCambiado += salida;
       } else if (tipo === 1100 && clave === 16) {
-        console.log("[getEnvasesHistorialForDate] ✅ envCambiadoEco += ", salida, " (tipo=1100, clave=16)");
+        console.log(
+          "[getEnvasesHistorialForDate] ✅ envCambiadoEco += ",
+          salida,
+          " (tipo=1100, clave=16)"
+        );
         envCambiadoEco += salida;
       } else if (tipo === 1200 && clave === 18) {
-        console.log("[getEnvasesHistorialForDate] ✅ envPrestado += ", salida, " (tipo=1200, clave=18)");
+        console.log(
+          "[getEnvasesHistorialForDate] ✅ envPrestado += ",
+          salida,
+          " (tipo=1200, clave=18)"
+        );
         envPrestado += salida;
       } else if (tipo === 1200 && clave === 16) {
-        console.log("[getEnvasesHistorialForDate] ✅ envPrestadoEco += ", salida, " (tipo=1200, clave=16)");
+        console.log(
+          "[getEnvasesHistorialForDate] ✅ envPrestadoEco += ",
+          salida,
+          " (tipo=1200, clave=16)"
+        );
         envPrestadoEco += salida;
       }
 
       if (tipo === 1000 && entrada > 0) {
-        console.log("[getEnvasesHistorialForDate] ✅ cambiadosPorProd[", clave, "] += ", entrada, " (tipo=1000)");
+        console.log(
+          "[getEnvasesHistorialForDate] ✅ cambiadosPorProd[",
+          clave,
+          "] += ",
+          entrada,
+          " (tipo=1000)"
+        );
         if (!cambiadosPorProd[clave]) {
-          cambiadosPorProd[clave] = { descripcionCorta: r.descripcionCorta ?? String(clave), cantidadEntrada: 0 };
+          cambiadosPorProd[clave] = {
+            descripcionCorta: r.descripcionCorta ?? String(clave),
+            cantidadEntrada: 0,
+          };
         }
         cambiadosPorProd[clave].cantidadEntrada += entrada;
       }
@@ -4028,38 +5120,50 @@ class FullSyncService {
       vendidosPorAreaCount: Object.keys(vendidosPorArea).length,
     });
 
-    const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(([clave, val]: [string, any]) => ({
-      claveProd: parseInt(clave, 10),
-      descripcionCorta: val.descripcionCorta,
-      cantidadEntrada: val.cantidadEntrada,
-    }));
+    const cambiadosPorProducto = Object.entries(cambiadosPorProd).map(
+      ([clave, val]: [string, any]) => ({
+        claveProd: parseInt(clave, 10),
+        descripcionCorta: val.descripcionCorta,
+        cantidadEntrada: val.cantidadEntrada,
+      })
+    );
 
     // Mapear resultados por área - usando descripcionArea como identificador
-    const intercambioPorProducto = Object.entries(intercambioPorArea).map(([area, val]: [string, any]) => ({
-      claveProd: 0, // No aplica clave de producto cuando es por área
-      descripcion: val.descripcion,
-      cantidad: val.cantidad,
-    }));
+    const intercambioPorProducto = Object.entries(intercambioPorArea).map(
+      ([area, val]: [string, any]) => ({
+        claveProd: 0, // No aplica clave de producto cuando es por área
+        descripcion: val.descripcion,
+        cantidad: val.cantidad,
+      })
+    );
 
-    const prestamoPorProducto = Object.entries(prestamoPorArea).map(([area, val]: [string, any]) => ({
-      claveProd: 0,
-      descripcion: val.descripcion,
-      cantidad: val.cantidad,
-    }));
+    const prestamoPorProducto = Object.entries(prestamoPorArea).map(
+      ([area, val]: [string, any]) => ({
+        claveProd: 0,
+        descripcion: val.descripcion,
+        cantidad: val.cantidad,
+      })
+    );
 
-    const recuperadosPorProducto = Object.entries(recuperadosPorArea).map(([area, val]: [string, any]) => ({
-      claveProd: 0,
-      descripcion: val.descripcion,
-      cantidad: val.cantidad,
-    }));
+    const recuperadosPorProducto = Object.entries(recuperadosPorArea).map(
+      ([area, val]: [string, any]) => ({
+        claveProd: 0,
+        descripcion: val.descripcion,
+        cantidad: val.cantidad,
+      })
+    );
 
-    const vendidosPorProducto = Object.entries(vendidosPorArea).map(([area, val]: [string, any]) => ({
-      claveProd: 0,
-      descripcion: val.descripcion,
-      cantidad: val.cantidad,
-    }));
+    const vendidosPorProducto = Object.entries(vendidosPorArea).map(
+      ([area, val]: [string, any]) => ({
+        claveProd: 0,
+        descripcion: val.descripcion,
+        cantidad: val.cantidad,
+      })
+    );
 
-    const envasesVendidosPorProducto = Object.entries(envasesVendidosPorArea).map(([area, val]: [string, any]) => ({
+    const envasesVendidosPorProducto = Object.entries(
+      envasesVendidosPorArea
+    ).map(([area, val]: [string, any]) => ({
       claveProd: 0,
       descripcion: val.descripcion,
       cantidad: val.cantidad,
@@ -4084,7 +5188,9 @@ class FullSyncService {
   getRutaForDate(startOfDay: Date, endOfDay: Date): string {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return "";
     try {
-      const visitas = this.realm.objects("Visita").filtered("fecha >= $0 AND fecha <= $1", startOfDay, endOfDay);
+      const visitas = this.realm
+        .objects("Visita")
+        .filtered("fecha >= $0 AND fecha <= $1", startOfDay, endOfDay);
       if (visitas.length > 0) {
         return (visitas[0] as any).ruta || "";
       }
@@ -4094,7 +5200,9 @@ class FullSyncService {
 
   getClientesFull(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("ClienteFull").sorted("nombre").slice(0, limit));
+    return Array.from(
+      this.realm.objects("ClienteFull").sorted("nombre").slice(0, limit)
+    );
   }
 
   getClientesFullPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -4103,7 +5211,7 @@ class FullSyncService {
       this.realm
         .objects("ClienteFull")
         .sorted("nombre")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4115,17 +5223,23 @@ class FullSyncService {
 
   getPreciosByCliente(idCliente: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Precio").filtered("idCliente == $0", idCliente));
+    return Array.from(
+      this.realm.objects("Precio").filtered("idCliente == $0", idCliente)
+    );
   }
 
   getPreciosByListaPrecio(listaPrecio: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Precio").filtered("listaPrecio == $0", listaPrecio));
+    return Array.from(
+      this.realm.objects("Precio").filtered("listaPrecio == $0", listaPrecio)
+    );
   }
 
   getPreciosPromo(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("PrecioPromo").sorted("descripcion").slice(0, limit));
+    return Array.from(
+      this.realm.objects("PrecioPromo").sorted("descripcion").slice(0, limit)
+    );
   }
 
   getPreciosPromoPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -4134,7 +5248,7 @@ class FullSyncService {
       this.realm
         .objects("PrecioPromo")
         .sorted("descripcion")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4142,13 +5256,20 @@ class FullSyncService {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     // Incluir precios promo específicos del cliente Y precios promo generales (idCliente == null o 0)
     return Array.from(
-      this.realm.objects("PrecioPromo").filtered("idCliente == $0 OR idCliente == null OR idCliente == 0", idCliente),
+      this.realm
+        .objects("PrecioPromo")
+        .filtered(
+          "idCliente == $0 OR idCliente == null OR idCliente == 0",
+          idCliente
+        )
     );
   }
 
   getPreciosPromoByProducto(claveProd: number): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("PrecioPromo").filtered("claveProd == $0", claveProd));
+    return Array.from(
+      this.realm.objects("PrecioPromo").filtered("claveProd == $0", claveProd)
+    );
   }
 
   getSyncStatus(entity: string = "all"): any {
@@ -4189,7 +5310,7 @@ class FullSyncService {
       this.realm
         .objects("SyncTableLog")
         .sorted("fechaInicio", true) // Más recientes primero
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4199,7 +5320,7 @@ class FullSyncService {
       this.realm
         .objects("SyncStatus")
         .sorted("lastSyncDate", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4209,7 +5330,7 @@ class FullSyncService {
       this.realm
         .objects("SyncLog")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4219,7 +5340,7 @@ class FullSyncService {
       this.realm
         .objects("CierreRuta")
         .sorted("updatedAt", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4229,13 +5350,15 @@ class FullSyncService {
       this.realm
         .objects("DetalleVisitas")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
   getTipoVisitasPaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("TipoVisita").slice(offset, offset + limit));
+    return Array.from(
+      this.realm.objects("TipoVisita").slice(offset, offset + limit)
+    );
   }
 
   getBitacoraSyncPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -4244,7 +5367,7 @@ class FullSyncService {
       this.realm
         .objects("BitacoraSync")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4254,42 +5377,53 @@ class FullSyncService {
       this.realm
         .objects("BitacoraGps")
         .sorted("fecha", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
-  getBitacoraValidacionPaginated(offset: number = 0, limit: number = 50): any[] {
+  getBitacoraValidacionPaginated(
+    offset: number = 0,
+    limit: number = 50
+  ): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("BitacoraValidacion")
         .sorted("fecha", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
-  getBitacoraTiemposVentaPaginated(offset: number = 0, limit: number = 50): any[] {
+  getBitacoraTiemposVentaPaginated(
+    offset: number = 0,
+    limit: number = 50
+  ): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("BitacoraTiemposVenta")
         .sorted("fecha", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
   getInventarioEnvasePaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("InventarioEnvase").slice(offset, offset + limit));
+    return Array.from(
+      this.realm.objects("InventarioEnvase").slice(offset, offset + limit)
+    );
   }
 
-  getInventarioEnvasesHistorialPaginated(offset: number = 0, limit: number = 50): any[] {
+  getInventarioEnvasesHistorialPaginated(
+    offset: number = 0,
+    limit: number = 50
+  ): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("InventarioEnvasesHistorial")
         .sorted("fechaMovto", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4299,17 +5433,20 @@ class FullSyncService {
       this.realm
         .objects("Reubicacion")
         .sorted("fecha", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
-  getVisitasRealizadasPaginated(offset: number = 0, limit: number = 5000): any[] {
+  getVisitasRealizadasPaginated(
+    offset: number = 0,
+    limit: number = 5000
+  ): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     return Array.from(
       this.realm
         .objects("VisitaRealizada")
         .sorted("fechaInicio", true)
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 
@@ -4321,6 +5458,7 @@ class FullSyncService {
   async sendPendingVentasToServer(
     sucursal: number,
     idUsuario: number,
+    timeoutMs: number = ARRASTRE_REQUEST_TIMEOUT_MS
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     const LOCAL_SALE_ID_THRESHOLD = 1700000000;
 
@@ -4329,14 +5467,19 @@ class FullSyncService {
         await this.initialize();
       }
       if (!this.realm || this.realm.isClosed) {
-        return { success: false, sent: 0, error: "Realm no inicializado o cerrado" };
+        return {
+          success: false,
+          sent: 0,
+          error: "Realm no inicializado o cerrado",
+        };
       }
 
       const ventasRealm = this.getVentas();
 
       // Solo enviar ventas locales (id >= threshold) y sin número de venta asignado
       const ventasLocales = ventasRealm.filter(
-        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD,
+        (venta: any) =>
+          venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD
       );
 
       console.log("[FullSyncService] Filtering local sales", {
@@ -4351,11 +5494,15 @@ class FullSyncService {
       }
 
       const payload = ventasLocales.map((venta: any) => {
-        const cliente = venta.cveCliente ? this.getClienteFullById(venta.cveCliente) : null;
+        const cliente = venta.cveCliente
+          ? this.getClienteFullById(venta.cveCliente)
+          : null;
 
         const fechaVenta = venta.fecha ?? this.getMexicoNow();
         const fechaFormateada = this.formatMexicoDateForServer(fechaVenta);
-        const fechaTransferFormateada = this.formatMexicoDateForServer(this.getMexicoNow());
+        const fechaTransferFormateada = this.formatMexicoDateForServer(
+          this.getMexicoNow()
+        );
 
         console.log("📤 [FullSync] FECHA ENVIADA AL SERVIDOR:", {
           ventaId: venta.id,
@@ -4388,18 +5535,26 @@ class FullSyncService {
       // Usar el mismo endpoint que el sincronizador periódico (que funciona correctamente)
       const url = `${this.apiBaseUrl}/api/SincronizacionMovil/sp_MovilesVentasArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
 
-      const response = await fetchWithTimeout(url, {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+        timeoutMs
+      );
       console.log({ payload });
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
-        console.error("[FullSyncService] ❌ Error arrastre ventas", response.status, errorText);
+        console.error(
+          "[FullSyncService] ❌ Error arrastre ventas",
+          response.status,
+          errorText
+        );
         return {
           success: false,
           sent: 0,
@@ -4407,11 +5562,14 @@ class FullSyncService {
         };
       }
 
-      console.log(`[FullSyncService] ✅ Arrastre ventas exitoso: ${payload.length} registros`);
+      console.log(
+        `[FullSyncService] ✅ Arrastre ventas exitoso: ${payload.length} registros`
+      );
 
       return { success: true, sent: payload.length };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSyncService] Error sending ventas arrastre", error);
       return { success: false, sent: 0, error: errorMsg };
     }
@@ -4423,13 +5581,16 @@ class FullSyncService {
    */
   async sendPendingCierreRutaToServer(
     sucursal: number,
-    idUsuario: number,
+    idUsuario: number
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     if (this.cierreRutaSendInFlight) {
       return this.cierreRutaSendInFlight;
     }
 
-    const sendPromise = this.sendPendingCierreRutaToServerInternal(sucursal, idUsuario);
+    const sendPromise = this.sendPendingCierreRutaToServerInternal(
+      sucursal,
+      idUsuario
+    );
     this.cierreRutaSendInFlight = sendPromise;
 
     try {
@@ -4441,7 +5602,7 @@ class FullSyncService {
 
   private async sendPendingCierreRutaToServerInternal(
     sucursal: number,
-    idUsuario: number,
+    idUsuario: number
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     if (!this.realm || this.realm.isClosed) {
       return { success: false, sent: 0, error: "Realm no inicializado" };
@@ -4451,7 +5612,11 @@ class FullSyncService {
       // Obtener cierres no sincronizados (enviado == false o null)
       const cierresPendientes = this.realm
         .objects("CierreRuta")
-        .filtered("(enviado == false || enviado == null) AND sucursal == $0 AND vendedor == $1", sucursal, idUsuario);
+        .filtered(
+          "(enviado == false || enviado == null) AND sucursal == $0 AND vendedor == $1",
+          sucursal,
+          idUsuario
+        );
       console.log("CIERRE EJECUTANDO");
       if (cierresPendientes.length === 0) {
         console.log("SIN CIERRE");
@@ -4479,8 +5644,13 @@ class FullSyncService {
 
       const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesCierreRutaJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
 
-      console.log(`[FullSync-CierreRuta] 📤 Enviando ${payload.length} cierre(s)...`);
-      console.log(`[FullSync-CierreRuta] 📦 Payload:`, JSON.stringify(payload, null, 2));
+      console.log(
+        `[FullSync-CierreRuta] 📤 Enviando ${payload.length} cierre(s)...`
+      );
+      console.log(
+        `[FullSync-CierreRuta] 📦 Payload:`,
+        JSON.stringify(payload, null, 2)
+      );
       console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
 
       const response = await fetchWithTimeout(url, {
@@ -4499,29 +5669,60 @@ class FullSyncService {
             c.enviado = true;
           });
         });
-        console.log(`[FullSync-CierreRuta] ✅ ${payload.length} cierres enviados y marcados`);
+        console.log(
+          `[FullSync-CierreRuta] ✅ ${payload.length} cierres enviados y marcados`
+        );
         return { success: true, sent: payload.length };
       } else {
-        const errorText = await response.text().catch(() => "Error desconocido");
-        console.warn(`[FullSync-CierreRuta] ⚠️ Error HTTP ${response.status}: ${errorText}`);
-        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+        const errorText = await response
+          .text()
+          .catch(() => "Error desconocido");
+        console.warn(
+          `[FullSync-CierreRuta] ⚠️ Error HTTP ${response.status}: ${errorText}`
+        );
+        return {
+          success: false,
+          sent: 0,
+          error: `HTTP ${response.status}: ${errorText}`,
+        };
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSync-CierreRuta] ❌ Error:", error);
       return { success: false, sent: 0, error: errorMsg };
     }
   }
 
   async sendPendingPedidoEstadosToServer(
-    idUsuario: number,
+    idUsuario: number
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (this.pedidoEstadosSendInFlight) return this.pedidoEstadosSendInFlight;
+    const sendPromise =
+      this.sendPendingPedidoEstadosToServerInternal(idUsuario);
+    this.pedidoEstadosSendInFlight = sendPromise;
+    try {
+      return await sendPromise;
+    } finally {
+      if (this.pedidoEstadosSendInFlight === sendPromise) {
+        this.pedidoEstadosSendInFlight = null;
+      }
+    }
+  }
+
+  private async sendPendingPedidoEstadosToServerInternal(
+    idUsuario: number
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     if (!this.realm || this.realm.isClosed) {
       return { success: false, sent: 0, error: "Realm no inicializado" };
     }
 
     try {
-      const estadosPendientes = this.realm.objects("PedidoEstado").filtered("enviado == false");
+      const estadosPendientes = Array.from(
+        this.realm
+          .objects("PedidoEstado")
+          .filtered("enviado == false AND idVendedor == $0", idUsuario)
+      ) as any[];
       if (estadosPendientes.length === 0) {
         return { success: true, sent: 0 };
       }
@@ -4535,18 +5736,28 @@ class FullSyncService {
       }));
       const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_DetallePedidosEstadosArrastreJSON?idUsuario=${idUsuario}`;
 
-      const response = await fetchWithTimeout(url, {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+        ARRASTRE_REQUEST_TIMEOUT_MS
+      );
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "Error desconocido");
-        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+        const errorText = await response
+          .text()
+          .catch(() => "Error desconocido");
+        return {
+          success: false,
+          sent: 0,
+          error: `HTTP ${response.status}: ${errorText}`,
+        };
       }
 
       this.realm.write(() => {
@@ -4557,7 +5768,8 @@ class FullSyncService {
 
       return { success: true, sent: payload.length };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       return { success: false, sent: 0, error: errorMsg };
     }
   }
@@ -4567,22 +5779,43 @@ class FullSyncService {
    * Endpoint: sp_DetallePedidosBitacoraArrastreJSON
    */
   async sendPendingPedidoBitacoraToServer(
-    idUsuario: number,
+    idUsuario: number
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (this.pedidoBitacoraSendInFlight) return this.pedidoBitacoraSendInFlight;
+    const sendPromise =
+      this.sendPendingPedidoBitacoraToServerInternal(idUsuario);
+    this.pedidoBitacoraSendInFlight = sendPromise;
+    try {
+      return await sendPromise;
+    } finally {
+      if (this.pedidoBitacoraSendInFlight === sendPromise) {
+        this.pedidoBitacoraSendInFlight = null;
+      }
+    }
+  }
+
+  private async sendPendingPedidoBitacoraToServerInternal(
+    idUsuario: number
   ): Promise<{ success: boolean; sent: number; error?: string }> {
     if (!this.realm || this.realm.isClosed) {
       return { success: false, sent: 0, error: "Realm no inicializado" };
     }
 
     try {
-      const bitacorasPendientes = this.realm
-        .objects("PedidoBitacora")
-        .filtered(
-          "enviado == false AND (estatus == $0 OR estatus == $1 OR estatus == $2)",
-          2,
-          6,
-          7,
-        );
-      console.log(`[FullSync-PedidoBitacora] 📤 Bitácoras pendientes: ${bitacorasPendientes.length}`);
+      const bitacorasPendientes = Array.from(
+        this.realm
+          .objects("PedidoBitacora")
+          .filtered(
+            "enviado == false AND idVendedor == $0 AND (estatus == $1 OR estatus == $2 OR estatus == $3)",
+            idUsuario,
+            2,
+            6,
+            7
+          )
+      ) as any[];
+      console.log(
+        `[FullSync-PedidoBitacora] 📤 Bitácoras pendientes: ${bitacorasPendientes.length}`
+      );
 
       if (bitacorasPendientes.length === 0) {
         return { success: true, sent: 0 };
@@ -4621,16 +5854,23 @@ class FullSyncService {
       const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_DetallePedidosBitacoraArrastreJSON?idUsuario=${idUsuario}`;
 
       console.log(`[FullSync-PedidoBitacora] 🌐 URL: ${url}`);
-      console.log(`[FullSync-PedidoBitacora] 📦 Payload:`, JSON.stringify(payload, null, 2));
+      console.log(
+        `[FullSync-PedidoBitacora] 📦 Payload:`,
+        JSON.stringify(payload, null, 2)
+      );
 
-      const response = await fetchWithTimeout(url, {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+        ARRASTRE_REQUEST_TIMEOUT_MS
+      );
 
       if (response.ok) {
         this.realm.write(() => {
@@ -4638,15 +5878,26 @@ class FullSyncService {
             b.enviado = true;
           });
         });
-        console.log(`[FullSync-PedidoBitacora] ✅ ${payload.length} bitácoras enviadas y marcadas`);
+        console.log(
+          `[FullSync-PedidoBitacora] ✅ ${payload.length} bitácoras enviadas y marcadas`
+        );
         return { success: true, sent: payload.length };
       } else {
-        const errorText = await response.text().catch(() => "Error desconocido");
-        console.warn(`[FullSync-PedidoBitacora] ⚠️ Error HTTP ${response.status}: ${errorText}`);
-        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+        const errorText = await response
+          .text()
+          .catch(() => "Error desconocido");
+        console.warn(
+          `[FullSync-PedidoBitacora] ⚠️ Error HTTP ${response.status}: ${errorText}`
+        );
+        return {
+          success: false,
+          sent: 0,
+          error: `HTTP ${response.status}: ${errorText}`,
+        };
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSync-PedidoBitacora] ❌ Error:", error);
       return { success: false, sent: 0, error: errorMsg };
     }
@@ -4658,7 +5909,7 @@ class FullSyncService {
    */
   async fetchCierreRutaFromServer(
     sucursal: number,
-    vendedor: number,
+    vendedor: number
   ): Promise<{ success: boolean; registros: number; error?: string }> {
     if (!this.realm || this.realm.isClosed) {
       return { success: false, registros: 0, error: "Realm no inicializado" };
@@ -4667,7 +5918,9 @@ class FullSyncService {
     try {
       const url = `${this.apiBaseUrl}/api/MovilesVentas/cierre-ruta/full/${sucursal}`;
 
-      console.log(`[FullSync-CierreRuta] 📥 Obteniendo cierres del servidor...`);
+      console.log(
+        `[FullSync-CierreRuta] 📥 Obteniendo cierres del servidor...`
+      );
       console.log(`[FullSync-CierreRuta] 🌐 URL: ${url}`);
 
       const response = await fetchWithTimeout(url, {
@@ -4688,14 +5941,21 @@ class FullSyncService {
         for (const cierre of cierres) {
           const cierreSucursal = cierre.sucursal ?? sucursal;
           const cierreVendedor = cierre.vendedor ?? vendedor;
-          const rutaCerrada = cierre.rutaCerrada === true || cierre.rutaCerrada === 1 || cierre.rutaCerrada === "1";
+          const rutaCerrada =
+            cierre.rutaCerrada === true ||
+            cierre.rutaCerrada === 1 ||
+            cierre.rutaCerrada === "1";
           const data = {
             id: `${cierreSucursal}-${cierreVendedor}`,
             sucursal: cierreSucursal,
             vendedor: cierreVendedor,
-            fechaCierre: cierre.fechaCierre ? new Date(cierre.fechaCierre) : null,
+            fechaCierre: cierre.fechaCierre
+              ? new Date(cierre.fechaCierre)
+              : null,
             rutaCerrada,
-            updatedAt: cierre.updatedAt ? new Date(cierre.updatedAt) : new Date(),
+            updatedAt: cierre.updatedAt
+              ? new Date(cierre.updatedAt)
+              : new Date(),
             enviado: true,
           };
 
@@ -4703,10 +5963,13 @@ class FullSyncService {
         }
       });
 
-      console.log(`[FullSync-CierreRuta] ✅ ${cierres.length} cierres descargados del servidor`);
+      console.log(
+        `[FullSync-CierreRuta] ✅ ${cierres.length} cierres descargados del servidor`
+      );
       return { success: true, registros: cierres.length };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      const errorMsg =
+        error instanceof Error ? error.message : "Error desconocido";
       console.error("[FullSync-CierreRuta] ❌ Error fetch:", error);
       return { success: false, registros: 0, error: errorMsg };
     }
@@ -4716,7 +5979,10 @@ class FullSyncService {
    * Sincroniza el inventario incremental desde el servidor
    * Usado después de recibir traspasos para actualizar el inventario local
    */
-  async syncInventarioIncremental(sucursal: number, idUsuario: number): Promise<void> {
+  async syncInventarioIncremental(
+    sucursal: number,
+    idUsuario: number
+  ): Promise<void> {
     if (!this.isInitialized || !this.realm) {
       await this.initialize();
     }
@@ -4729,11 +5995,15 @@ class FullSyncService {
     // Agregar 2 minutos de buffer para incluir registros guardados recientemente
     const fechaConBuffer = new Date(nowMexico.getTime() + 2 * 60 * 1000);
     const fechaMovto = this.formatMexicoDateForServer(fechaConBuffer);
-    const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
-      String(sucursal),
+    const url = `${
+      this.apiBaseUrl
+    }/api/MovilesVentas/inventario/erp-movil?sucursal=${encodeURIComponent(
+      String(sucursal)
     )}&fechaMovto=${encodeURIComponent(fechaMovto)}`;
 
-    console.log(`[FullSync] Sincronizando inventario incremental desde: ${url}`);
+    console.log(
+      `[FullSync] Sincronizando inventario incremental desde: ${url}`
+    );
 
     const response = await fetchWithTimeout(url, {
       headers: { accept: "application/octet-stream" },
@@ -4755,7 +6025,9 @@ class FullSyncService {
         const inventarioData = {
           ...item,
           sucursal: sucursal,
-          syncedAt: item.fechaArrastre ? new Date(item.fechaArrastre) : new Date(),
+          syncedAt: item.fechaArrastre
+            ? new Date(item.fechaArrastre)
+            : new Date(),
         };
 
         if (existing) {
@@ -4769,14 +6041,16 @@ class FullSyncService {
     });
 
     console.log(
-      `[FullSync] Inventario sincronizado: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`,
+      `[FullSync] Inventario sincronizado: leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
     );
 
     // Sincronizar productos (full)
     if (this.realm && !this.realm.isClosed) {
-      console.log(`[FullSync] Sincronizando productos para sucursal ${sucursal}...`);
+      console.log(
+        `[FullSync] Sincronizando productos para sucursal ${sucursal}...`
+      );
       const productosUrl = `${this.apiBaseUrl}/api/MovilesVentas/productos/full`;
-      
+
       // Registrar inicio en BitacoraSync
       const idBitacora = await BitacoraService.registrarInicioSync(
         "Productos",
@@ -4801,7 +6075,10 @@ class FullSyncService {
 
           this.realm.write(() => {
             for (const producto of productos) {
-              const existing = this.realm!.objectForPrimaryKey("Producto", producto.id);
+              const existing = this.realm!.objectForPrimaryKey(
+                "Producto",
+                producto.id
+              );
 
               const productoData = {
                 ...producto,
@@ -4810,7 +6087,11 @@ class FullSyncService {
               };
 
               if (existing) {
-                this.realm!.create("Producto", productoData, UpdateMode.Modified);
+                this.realm!.create(
+                  "Producto",
+                  productoData,
+                  UpdateMode.Modified
+                );
                 productosActualizados++;
               } else {
                 this.realm!.create("Producto", productoData);
@@ -4820,7 +6101,7 @@ class FullSyncService {
           });
 
           console.log(
-            `[FullSync] ✅ Productos sincronizados: guardados=${productosGuardados}, actualizados=${productosActualizados}`,
+            `[FullSync] ✅ Productos sincronizados: guardados=${productosGuardados}, actualizados=${productosActualizados}`
           );
 
           // Registrar fin en BitacoraSync
@@ -4830,8 +6111,10 @@ class FullSyncService {
           });
         }
       } else {
-        console.warn(`[FullSync] ⚠️ Error sincronizando productos: HTTP ${productosResponse.status}`);
-        
+        console.warn(
+          `[FullSync] ⚠️ Error sincronizando productos: HTTP ${productosResponse.status}`
+        );
+
         // Registrar error en BitacoraSync
         await BitacoraService.registrarFinSync(idBitacora, {
           exitoso: false,
@@ -4843,7 +6126,9 @@ class FullSyncService {
 
     // Sincronizar formas de pago
     if (this.realm && !this.realm.isClosed) {
-      console.log(`[FullSync] Sincronizando formas de pago para sucursal ${sucursal}...`);
+      console.log(
+        `[FullSync] Sincronizando formas de pago para sucursal ${sucursal}...`
+      );
       const formasPagoUrl = `${this.apiBaseUrl}/api/MovilesVentas/formas-pagos?sucursal=${sucursal}`;
       const formasPagoResponse = await fetchWithTimeout(formasPagoUrl, {
         headers: { accept: "application/json" },
@@ -4874,10 +6159,14 @@ class FullSyncService {
               });
             });
           });
-          console.log(`[FullSync] ✅ Formas de pago sincronizadas: ${formasPago.length} registros`);
+          console.log(
+            `[FullSync] ✅ Formas de pago sincronizadas: ${formasPago.length} registros`
+          );
         }
       } else {
-        console.warn(`[FullSync] ⚠️ Error sincronizando formas de pago: HTTP ${formasPagoResponse.status}`);
+        console.warn(
+          `[FullSync] ⚠️ Error sincronizando formas de pago: HTTP ${formasPagoResponse.status}`
+        );
       }
     }
   }
@@ -4897,7 +6186,7 @@ class FullSyncService {
       tipoMovto: number;
       idMovil: number;
       observacion: string;
-    }[],
+    }[]
   ): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -4926,7 +6215,9 @@ class FullSyncService {
       });
     });
 
-    console.log(`[FullSync] ✅ ${items.length} registros de InventarioEnvase creados`);
+    console.log(
+      `[FullSync] ✅ ${items.length} registros de InventarioEnvase creados`
+    );
   }
 
   /**
@@ -4936,7 +6227,9 @@ class FullSyncService {
   getInventarioEnvasesPendientes(): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
     const epoch = new Date(0);
-    return Array.from(this.realm.objects("InventarioEnvase").filtered("syncedAt == $0", epoch));
+    return Array.from(
+      this.realm.objects("InventarioEnvase").filtered("syncedAt == $0", epoch)
+    );
   }
 
   /**
@@ -4947,7 +6240,10 @@ class FullSyncService {
     const now = new Date();
     this.realm.write(() => {
       ids.forEach((id) => {
-        const record = this.realm!.objectForPrimaryKey("InventarioEnvase", id) as any;
+        const record = this.realm!.objectForPrimaryKey(
+          "InventarioEnvase",
+          id
+        ) as any;
         if (record) {
           record.syncedAt = now;
         }
@@ -4960,7 +6256,12 @@ class FullSyncService {
    */
   getProductosByDescripcion(texto: string, limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Producto").filtered("descripcion CONTAINS[c] $0", texto).slice(0, limit));
+    return Array.from(
+      this.realm
+        .objects("Producto")
+        .filtered("descripcion CONTAINS[c] $0", texto)
+        .slice(0, limit)
+    );
   }
 
   /**
@@ -4968,7 +6269,12 @@ class FullSyncService {
    */
   getProductosEnvaseRecibe(limit: number = 100): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("Producto").filtered("envaseRecibe == true").slice(0, limit));
+    return Array.from(
+      this.realm
+        .objects("Producto")
+        .filtered("envaseRecibe == true")
+        .slice(0, limit)
+    );
   }
 
   /**
@@ -4977,7 +6283,9 @@ class FullSyncService {
    */
   getEnvasesIntercambioPorProducto(productoId: number): number[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    const intercambios = this.realm.objects("KitIntercambio").filtered(`idProducto == ${productoId}`);
+    const intercambios = this.realm
+      .objects("KitIntercambio")
+      .filtered(`idProducto == ${productoId}`);
     const todosIntercambios = this.realm.objects("KitIntercambio");
     const intercambiosArray = Array.from(todosIntercambios).map((k: any) => ({
       id: k.id,
@@ -4992,7 +6300,7 @@ class FullSyncService {
       .filter((id): id is number => id != null);
     console.log(
       `[FullSync] KitIntercambio para producto ${productoId}: encontrados ${idsEnvases.length} envases alternativos:`,
-      idsEnvases,
+      idsEnvases
     );
     return idsEnvases;
   }
@@ -5001,11 +6309,16 @@ class FullSyncService {
    * Obtiene el precioEnvase de KitIntercambio para una combinación de idProducto e idEnvaseOtro.
    * Retorna null si no se encuentra.
    */
-  getPrecioEnvaseIntercambio(idProducto: number, idEnvaseOtro: number): number | null {
+  getPrecioEnvaseIntercambio(
+    idProducto: number,
+    idEnvaseOtro: number
+  ): number | null {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
     const kits = this.realm
       .objects("KitIntercambio")
-      .filtered(`idProducto == ${idProducto} AND idEnvaseOtro == ${idEnvaseOtro}`);
+      .filtered(
+        `idProducto == ${idProducto} AND idEnvaseOtro == ${idEnvaseOtro}`
+      );
     if (kits.length === 0) return null;
     const kit: any = kits[0];
     return kit.precioEnvase != null ? kit.precioEnvase : null;
@@ -5016,7 +6329,9 @@ class FullSyncService {
    */
   getProductoByClaveProd(claveProd: string): any | null {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return null;
-    const productos = this.realm.objects("Producto").filtered("claveProd == $0", claveProd);
+    const productos = this.realm
+      .objects("Producto")
+      .filtered("claveProd == $0", claveProd);
     return productos.length > 0 ? productos[0] : null;
   }
 
@@ -5024,10 +6339,18 @@ class FullSyncService {
    * Obtiene productos por sus IDs (para buscar envases alternativos desde KitIntercambio).
    */
   getProductosPorIds(ids: number[]): any[] {
-    if (!this.isInitialized || !this.realm || this.realm.isClosed || ids.length === 0) return [];
+    if (
+      !this.isInitialized ||
+      !this.realm ||
+      this.realm.isClosed ||
+      ids.length === 0
+    )
+      return [];
     // Construir query IN con los IDs
     const idsQuery = ids.join(",");
-    const productos = this.realm.objects("Producto").filtered(`id IN {${idsQuery}}`);
+    const productos = this.realm
+      .objects("Producto")
+      .filtered(`id IN {${idsQuery}}`);
     return Array.from(productos);
   }
 
@@ -5083,7 +6406,9 @@ class FullSyncService {
       bitacoraGps: this.realm.objects("BitacoraGps").length,
       bitacoraValidacion: this.realm.objects("BitacoraValidacion").length,
       bitacoraTiemposVenta: this.realm.objects("BitacoraTiemposVenta").length,
-      inventarioEnvasesHistorial: this.realm.objects("InventarioEnvasesHistorial").length,
+      inventarioEnvasesHistorial: this.realm.objects(
+        "InventarioEnvasesHistorial"
+      ).length,
       reubicaciones: this.realm.objects("Reubicacion").length,
       visitasRealizadas: this.realm.objects("VisitaRealizada").length,
       formasPago: this.realm.objects("FormaPago").length,
@@ -5097,7 +6422,9 @@ class FullSyncService {
    */
   getKitIntercambioPaginated(offset: number = 0, limit: number = 50): any[] {
     if (!this.isInitialized || !this.realm || this.realm.isClosed) return [];
-    return Array.from(this.realm.objects("KitIntercambio").slice(offset, offset + limit));
+    return Array.from(
+      this.realm.objects("KitIntercambio").slice(offset, offset + limit)
+    );
   }
 
   getFormasPagoPaginated(offset: number = 0, limit: number = 50): any[] {
@@ -5106,7 +6433,7 @@ class FullSyncService {
       this.realm
         .objects("FormaPago")
         .sorted("tipo")
-        .slice(offset, offset + limit),
+        .slice(offset, offset + limit)
     );
   }
 

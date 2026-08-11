@@ -62,6 +62,7 @@ export interface PedidoBitacora {
   ruta: number;
   cliente: number;
   idCanal?: number;
+  fechaAtencion?: Date;
   idVendedor: number;
   idProducto?: number;
   cantPedido?: number;
@@ -203,13 +204,23 @@ class PedidosService {
             [ESTATUS_PEDIDO.EN_ATENCION, ESTATUS_PEDIDO.EN_CAPTURA].includes(Number(pedidoExistente.estatus)) &&
             !ESTADOS_FINALES.includes(estatusServidor);
           const estatusFinal = conservarLocal ? pedidoExistente.estatus : estatusServidor;
-          const fechaAtencionFinal = conservarLocal ? pedidoExistente.fechaAtencion : null;
-          const causaNoAtencionFinal = conservarLocal ? pedidoExistente.causaNoAtencion : null;
-          const obserNoAtencionFinal = conservarLocal ? pedidoExistente.obserNoAtencion : null;
+          const fechaAtencionFinal = conservarLocal
+            ? pedidoExistente.fechaAtencion
+            : row.fechaAtencion
+              ? new Date(row.fechaAtencion)
+              : pedidoExistente?.fechaAtencion ?? null;
+          const causaNoAtencionFinal = conservarLocal
+            ? pedidoExistente.causaNoAtencion
+            : row.causaNoAtencion ?? row.causa_no_atencion ?? pedidoExistente?.causaNoAtencion ?? null;
+          const obserNoAtencionFinal = conservarLocal
+            ? pedidoExistente.obserNoAtencion
+            : row.obserNoAtencion ?? row.obser_no_atencion ?? pedidoExistente?.obserNoAtencion ?? null;
 
           const producto = this.getProductoById(idProducto);
           const cantPedido = parseFloat(row.cantPedido) || 0;
-          const cantAtencionFinal = pedidoExistente?.cantAtencion ?? null;
+          const cantAtencionFinal = row.cantAtencion !== undefined
+            ? parseFloat(row.cantAtencion) || 0
+            : pedidoExistente?.cantAtencion ?? null;
           const tieneDiferencia =
             cantAtencionFinal !== null && cantAtencionFinal !== undefined && cantAtencionFinal < cantPedido;
 
@@ -350,9 +361,11 @@ class PedidosService {
   /**
    * Devuelve los folios unicos de una ruta (para listado de pedidos).
    */
-  getFoliosByRuta(ruta: number): number[] {
+  getFoliosByRuta(ruta: number, idVendedor?: number): number[] {
     const realm = this.getRealm();
-    const pedidos = realm.objects("Pedido").filtered("ruta = $0", ruta);
+    const pedidos = idVendedor
+      ? realm.objects("Pedido").filtered("ruta = $0 AND idVendedor = $1", ruta, idVendedor)
+      : realm.objects("Pedido").filtered("ruta = $0", ruta);
     const foliosCancelados = new Set<number>();
     const folios = new Set<number>();
 
@@ -385,9 +398,24 @@ class PedidosService {
     const realm = this.getRealm();
     const pedidos = realm.objects("Pedido").filtered("folio = $0", folio);
     const productos = Array.from(pedidos) as unknown as Pedido[];
+
+    const productosConNombre = productos.map((pedido: any) => {
+      if (pedido.productoNombre) return pedido;
+
+      const producto = this.getProductoById(Number(pedido.idProducto));
+      const productoNombre = producto?.descripcion || null;
+      if (productoNombre) {
+        realm.write(() => {
+          pedido.productoNombre = productoNombre;
+        });
+      }
+
+      return pedido;
+    });
+
     console.log(
-      `[PedidosService] Productos en Realm para folio ${folio}: ${productos.length}`,
-      productos.map((producto: any) => ({
+      `[PedidosService] Productos en Realm para folio ${folio}: ${productosConNombre.length}`,
+      productosConNombre.map((producto: any) => ({
         id: producto.id,
         folio: producto.folio,
         idProducto: producto.idProducto,
@@ -395,7 +423,7 @@ class PedidosService {
         cantPedido: producto.cantPedido,
       })),
     );
-    return productos;
+    return productosConNombre;
   }
 
   actualizarPedidosDesdeRespuesta(rows: any[]): number {
@@ -411,7 +439,55 @@ class PedidosService {
         if (!Number.isFinite(folio) || !Number.isFinite(idProducto)) return;
 
         const pedido = realm.objectForPrimaryKey("Pedido", this.buildPedidoId(folio, idProducto)) as any;
-        if (!pedido) return;
+        const producto = this.getProductoById(idProducto);
+        if (!pedido) {
+          const estatus = Number(row.estatus ?? ESTATUS_PEDIDO.CONFIRMADO);
+          const cantPedido = Number(row.cantPedido ?? row.cant_pedido ?? row.cantidad ?? 0) || 0;
+          realm.create(
+            "Pedido",
+            {
+              id: this.buildPedidoId(folio, idProducto),
+              idPedido: folio,
+              id_movil: null,
+              folio,
+              fecha: row.fecha ? new Date(row.fecha) : null,
+              ruta: Number(row.ruta ?? row.idRuta ?? 0),
+              cliente: Number(row.cliente ?? row.idCliente ?? 0),
+              clienteNombre: row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? null,
+              clienteDomicilio: row.clienteDomicilio ?? row.domicilioCliente ?? row.domicilio ?? null,
+              idCanal: null,
+              fechaAtencion: row.fechaAtencion ? new Date(row.fechaAtencion) : null,
+              idVendedor: Number(row.idVendedor ?? row.id_vendedor ?? 0),
+              numeroProductos: Number(row.numeroProductos ?? row.totalProductos ?? 1),
+              cantPedido,
+              listaPrecio: row.listaPrecio ?? row.lista_precio ?? null,
+              fechaEntrega: row.fechaEntrega ? new Date(row.fechaEntrega) : null,
+              estatus,
+              estatusDescripcion: this.getEstatusDescripcion(estatus),
+              fueraAgenda: row.fueraAgenda ?? row.fuera_agenda ?? null,
+              observaciones: row.observaciones ?? null,
+              no_venta: row.noVenta ?? row.no_venta ?? null,
+              tieneDiferencia: false,
+              causaNoAtencion: row.causaNoAtencion ?? row.causa_no_atencion ?? null,
+              obserNoAtencion: row.obserNoAtencion ?? row.obser_no_atencion ?? null,
+              syncedAt: new Date(),
+              syncedAr: null,
+              modificadoLocal: false,
+              idProducto,
+              productoNombre: producto?.descripcion ?? null,
+              cantAtencion: row.cantAtencion !== undefined ? Number(row.cantAtencion) || 0 : null,
+              precio: row.precio ?? null,
+              precioAtencion: null,
+              causaDiferencia: null,
+              causaDiferenciaDesc: null,
+              obserDiferencia: null,
+              atendido: false,
+            },
+            Realm.UpdateMode.Modified,
+          );
+          actualizados++;
+          return;
+        }
 
         const estatusServidor = Number(row.estatus);
         const conservarLocal =
@@ -452,8 +528,9 @@ class PedidosService {
     const pedidos = realm
       .objects("Pedido")
       .filtered(
-        "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3 AND estatus != $4",
+        "ruta = $0 AND estatus != $1 AND estatus != $2 AND estatus != $3 AND estatus != $4 AND estatus != $5",
         ruta,
+        ESTATUS_PEDIDO.PROGRAMADO,
         ESTATUS_PEDIDO.ENTREGADO,
         ESTATUS_PEDIDO.CANCELADO,
         ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
@@ -599,6 +676,10 @@ class PedidosService {
 
   actualizarCantAtencion(folio: number, idProducto: number, cantAtencion: number): boolean {
     try {
+      if (!Number.isFinite(cantAtencion) || cantAtencion < 0) {
+        console.error("[PedidosService] Cantidad de atención inválida:", cantAtencion);
+        return false;
+      }
       const realm = this.getRealm();
       const id = this.buildPedidoId(folio, idProducto);
       const renglon = realm.objectForPrimaryKey("Pedido", id) as any;
@@ -635,6 +716,10 @@ class PedidosService {
 
   actualizarPrecioAtencion(folio: number, idProducto: number, precioAtencion: number): boolean {
     try {
+      if (!Number.isFinite(precioAtencion) || precioAtencion < 0) {
+        console.error("[PedidosService] Precio de atención inválido:", precioAtencion);
+        return false;
+      }
       const realm = this.getRealm();
       const id = this.buildPedidoId(folio, idProducto);
       const renglon = realm.objectForPrimaryKey("Pedido", id) as any;
@@ -884,14 +969,15 @@ class PedidosService {
               fecha: ahora,
               ruta: renglon.ruta,
               cliente: renglon.cliente,
-              idCanal: null,
+              idCanal: renglon.idCanal ?? null,
+              fechaAtencion: renglon.fechaAtencion ?? ahora,
               idVendedor: renglon.idVendedor,
               idProducto: renglon.idProducto ?? null,
-              cantPedido: null,
+              cantPedido: renglon.cantPedido ?? null,
               precio: renglon.precio ?? null,
               observaciones: renglon.observaciones ?? null,
-              listaPrecio: null,
-              fechaEntrega: null,
+              listaPrecio: renglon.listaPrecio ?? null,
+              fechaEntrega: renglon.fechaEntrega ?? null,
               estatus: data.estatus,
               estatusAnterior: data.estatusAnterior,
               cantAtencion: renglon.cantAtencion ?? null,
@@ -901,7 +987,7 @@ class PedidosService {
               causaNoAtencion: data.causaNoAtencion ?? null,
               obserNoAtencion: data.obserNoAtencion ?? null,
               usrAlta: renglon.idVendedor ?? null,
-              fueraAgenda: null,
+              fueraAgenda: renglon.fueraAgenda ?? null,
               no_venta: renglon.no_venta ?? null,
               tipoCambio: data.tipoCambio,
               enviado: false,

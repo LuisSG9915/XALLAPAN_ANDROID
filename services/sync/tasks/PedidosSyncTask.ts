@@ -124,9 +124,17 @@ export class PedidosSyncTask extends SyncTask {
             [ESTATUS_PEDIDO_EN_ATENCION, ESTATUS_PEDIDO_EN_CAPTURA].includes(Number(pedidoExistente.estatus)) &&
             !ESTADOS_PEDIDO_FINALES.includes(estatusServidor);
           const estatusFinal = conservarLocal ? pedidoExistente.estatus : estatusServidor;
-          const fechaAtencionFinal = conservarLocal ? pedidoExistente.fechaAtencion : null;
-          const causaNoAtencionFinal = conservarLocal ? pedidoExistente.causaNoAtencion : null;
-          const obserNoAtencionFinal = conservarLocal ? pedidoExistente.obserNoAtencion : null;
+          const fechaAtencionFinal = conservarLocal
+            ? pedidoExistente.fechaAtencion
+            : row.fechaAtencion
+              ? new Date(row.fechaAtencion)
+              : pedidoExistente?.fechaAtencion ?? null;
+          const causaNoAtencionFinal = conservarLocal
+            ? pedidoExistente.causaNoAtencion
+            : row.causaNoAtencion ?? row.causa_no_atencion ?? pedidoExistente?.causaNoAtencion ?? null;
+          const obserNoAtencionFinal = conservarLocal
+            ? pedidoExistente.obserNoAtencion
+            : row.obserNoAtencion ?? row.obser_no_atencion ?? pedidoExistente?.obserNoAtencion ?? null;
 
           const clienteNombre =
             row.nombreCliente ?? row.clienteNombre ?? row.nombre_cliente ?? `Cliente #${row.cliente}`;

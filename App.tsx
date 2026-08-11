@@ -37,6 +37,7 @@ import ClienteGruposScreen from "./components/ClienteGruposScreen";
 import DataViewScreen from "./components/DataViewScreen";
 import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
 import CumplimientoScreen from "./components/CumplimientoScreen";
+import ClienteFotosScreen from "./components/ClienteFotosScreen";
 import PedidosScreen from "./components/PedidosScreen";
 import PedidoDetalleScreen from "./components/PedidoDetalleScreen";
 import EnvaseOperacionScreen from "./components/EnvaseOperacionScreen";
@@ -113,7 +114,7 @@ const resolverRutaParaCierre = (
   user: any,
   realm: any,
 ): { ruta: number; origen: string } => {
-  const rutaDeSesion = normalizarRuta(user?.ruta);
+  const rutaDeSesion = normalizarRuta(user?.ruta ?? user?.idRuta ?? user?.idSucursal);
   if (rutaDeSesion > 0) {
     return { ruta: rutaDeSesion, origen: "sesión" };
   }
@@ -441,6 +442,11 @@ function App() {
             options={{ title: "📅 Cumplimiento de Agenda" }}
           />
           <Stack.Screen
+            name="ClienteFotos"
+            component={ClienteFotosScreen}
+            options={{ title: "Fotos del cliente" }}
+          />
+          <Stack.Screen
             name="Pedidos"
             component={PedidosScreen}
             options={{ title: "📦 Pedidos de Central" }}
@@ -486,6 +492,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const pollingIntervalRef = useRef<any>(null);
   const pedidosPollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pedidosPollingInFlightRef = useRef(false);
+  const lastPedidosPollingStartedAtRef = useRef<number | null>(null);
   const [pressingCierre, setPressingCierre] = useState(false);
   const [pressProgress, setPressProgress] = useState(0);
   const pressTimerRef = useRef<any>(null);
@@ -569,25 +576,25 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   }, [currentUser, checkPendingTraspasos]);
 
   const checkNewPedidos = useCallback(async () => {
-    if (
-      !currentUser ||
-      !navigationRef.isReady() ||
-      navigationRef.getCurrentRoute()?.name !== "Pedidos"
-    ) {
-      return;
-    }
-    if (pedidosPollingInFlightRef.current) return;
+    if (!currentUser || pedidosPollingInFlightRef.current || AppState.currentState !== "active") return;
 
-    const ruta = Number(currentUser.idSucursal || currentUser.sucursal_origen || currentUser.sucursal || currentUser.ruta);
+    const now = Date.now();
+    const lastPollingStartedAt = lastPedidosPollingStartedAtRef.current;
+    if (lastPollingStartedAt !== null && now - lastPollingStartedAt < 5000) return;
+
+    const ruta = Number(currentUser.ruta ?? currentUser.idRuta ?? currentUser.idSucursal ?? 0);
     if (!Number.isFinite(ruta) || ruta <= 0) {
       console.warn("[App] Polling de pedidos omitido: usuario sin ruta válida", currentUser);
       return;
     }
 
-    console.log("[App] Ejecutando polling de pedidos para ruta", ruta);
     pedidosPollingInFlightRef.current = true;
+    lastPedidosPollingStartedAtRef.current = now;
     try {
+      // console.log("[App] Ejecutando polling de pedidos para ruta", ruta);
       await PedidoNotificacionService.verificarPedidosNuevos(ruta);
+    } catch (error) {
+      console.error("[App] Error al verificar pedidos nuevos:", error);
     } finally {
       pedidosPollingInFlightRef.current = false;
     }
@@ -597,16 +604,10 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     if (!currentUser) return;
 
     checkNewPedidos();
-    pedidosPollingIntervalRef.current = setInterval(() => {
-      if (AppState.currentState === "active") {
-        checkNewPedidos();
-      }
-    }, 5000);
+    pedidosPollingIntervalRef.current = setInterval(checkNewPedidos, 5000);
 
     const subscription = AppState.addEventListener("change", (nextAppState) => {
-      if (nextAppState === "active") {
-        checkNewPedidos();
-      }
+      if (nextAppState === "active") checkNewPedidos();
     });
 
     return () => {
@@ -838,7 +839,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
       Alert.alert(
         "⚠️ No se puede cerrar la ruta",
-        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) pendientes de hoy:\n\n${listaPedidos}\n\nDebe atender todos los pedidos de hoy antes de cerrar la ruta.`,
+        `Tiene ${validacionPedidos.pedidosBloqueantes.length} pedido(s) sin resolver de hoy:\n\n${listaPedidos}\n\nDebe atenderlos o registrar una causa válida antes de cerrar la ruta.`,
         [
           { text: "Entendido" },
           {
@@ -872,7 +873,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
             if (!validacionFinal.permitido) {
               Alert.alert(
                 "No se puede cerrar la ruta",
-                "La ruta tiene pedidos pendientes de hoy. Atienda todos los pedidos y vuelva a intentarlo.",
+                "La ruta tiene pedidos sin resolver de hoy. Atiéndalos o registre una causa válida y vuelva a intentarlo.",
               );
               return;
             }

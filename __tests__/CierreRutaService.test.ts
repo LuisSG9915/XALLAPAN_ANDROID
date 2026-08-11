@@ -36,8 +36,8 @@ const crearRealmMock = (pedidos: PedidoMock[]) => {
 };
 
 describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
-  it("bloquea los estados distintos de entregado y entregado parcial solo para pedidos de hoy", () => {
-    const estadosPendientes = [1, 3, 4, 5, 7, 8, 9, 10];
+  it("bloquea los estados no resueltos solo para pedidos de hoy", () => {
+    const estadosPendientes = [3, 4, 5, 8, 10];
     const pedidos: PedidoMock[] = estadosPendientes.map((estatus, index) => ({
       folio: 100 + index,
       ruta: 7,
@@ -45,8 +45,11 @@ describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
       estatus,
     }));
     pedidos.push(
+      { folio: 199, ruta: 7, fechaEntrega: fechaRelativa(0), estatus: 1 },
       { folio: 200, ruta: 7, fechaEntrega: fechaRelativa(0), estatus: 2 },
       { folio: 201, ruta: 7, fechaEntrega: fechaRelativa(0), estatus: 6 },
+      { folio: 202, ruta: 7, fechaEntrega: fechaRelativa(0), estatus: 7 },
+      { folio: 203, ruta: 7, fechaEntrega: fechaRelativa(0), estatus: 9 },
       { folio: 300, ruta: 7, fechaEntrega: fechaRelativa(-1), estatus: 1 },
       { folio: 301, ruta: 7, fechaEntrega: fechaRelativa(1), estatus: 1 },
       { folio: 302, ruta: 8, fechaEntrega: fechaRelativa(0), estatus: 1 }
@@ -59,7 +62,7 @@ describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
 
     expect(resultado.permitido).toBe(false);
     expect(resultado.pedidosBloqueantes.map((pedido) => pedido.folio)).toEqual([
-      100, 101, 102, 103, 104, 105, 106, 107,
+      100, 101, 102, 103, 104,
     ]);
     expect(filtered).toHaveBeenCalledWith("ruta == $0", 7);
   });

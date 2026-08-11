@@ -28,6 +28,7 @@ import { CatalogosPedidosSyncTask } from "./tasks/CatalogosPedidosSyncTask";
 import { PedidosSyncTask } from "./tasks/PedidosSyncTask";
 // import { PedidosDetalleSyncTask } from "./tasks/PedidosDetalleSyncTask";
 import { PedidoEstadoUploadSyncTask } from "./tasks/PedidoBitacoraUploadSyncTask";
+import { ClienteFotosSyncTask, ClienteFotosArrastreSyncTask } from "./tasks/ClienteFotosSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -69,6 +70,7 @@ export class SyncOrchestrator {
       new PreciosPromoSyncTask(this.realm, this.syncLogId),
       new PreciosSyncTask(this.realm, this.syncLogId),
       new ClientesSyncTask(this.realm, this.syncLogId, this.sucursal),
+      new ClienteFotosSyncTask(this.realm, this.syncLogId),
       new InventarioSyncTask(this.realm, this.syncLogId, this.sucursal),
       // new CarteraSyncTask(this.realm, this.syncLogId),
       new VentasSyncTask(this.realm, this.syncLogId, this.sucursal),
@@ -86,6 +88,7 @@ export class SyncOrchestrator {
       new InventarioEnvasesHistorialSyncTask(this.realm, this.syncLogId, this.sucursal),
       // Reubicaciones - prioridad 96
       new ReubicacionSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
+      new ClienteFotosArrastreSyncTask(this.realm, this.syncLogId, this.idUsuario),
       // Arrastre al final - prioridad 100
       new VentasArrastreSyncTask(this.realm, this.syncLogId, this.sucursal, this.idUsuario),
       // Catálogos de pedidos - prioridad 5 (alta, antes que Pedidos)

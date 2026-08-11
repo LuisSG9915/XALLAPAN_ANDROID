@@ -87,7 +87,7 @@ class PedidoNotificacionService {
     }
   }
 
-  async verificarPedidosNuevos(ruta: number): Promise<number> {
+  async verificarPedidosNuevos(ruta: number) {
     if (!Number.isFinite(ruta) || ruta <= 0) return 0;
 
     const stateKey = `${PEDIDOS_POLL_STATE_PREFIX}${ruta}`;
@@ -129,11 +129,11 @@ class PedidoNotificacionService {
     const url = `https://api.cbinformatica.net:9031/api/MovilesVentas/sp_MovilesPedidos/${ruta}?fechaInicial=${encodeURIComponent(
       `${fecha} ${hora}`,
     )}`;
-    console.log("[PedidoNotificacionService] Consultando pedidos", {
-      ruta,
-      fechaInicial: `${fecha} ${hora}`,
-      url,
-    });
+    // console.log("[PedidoNotificacionService] Consultando pedidos", {
+    //   ruta,
+    //   fechaInicial: `${fecha} ${hora}`,
+    //   url,
+    // });
 
     try {
       const response = await fetchWithTimeout(
@@ -372,50 +372,6 @@ class PedidoNotificacionService {
     };
   }
 
-  private async folioRegistradoEnPolling(folio: number): Promise<boolean> {
-    try {
-      const user = await AuthService.restoreSession();
-      const ruta = Number(user?.idSucursal ?? user?.sucursal_origen ?? user?.sucursal ?? user?.ruta);
-      if (!Number.isFinite(ruta) || ruta <= 0) return false;
-
-      const stored = await AsyncStorage.getItem(`${PEDIDOS_POLL_STATE_PREFIX}${ruta}`);
-      if (!stored) return false;
-
-      const parsed = JSON.parse(stored);
-      return Array.isArray(parsed?.knownFolios) && parsed.knownFolios.map(Number).includes(folio);
-    } catch {
-      return false;
-    }
-  }
-
-  private async registrarFolioEnPolling(folio: number): Promise<void> {
-    try {
-      const user = await AuthService.restoreSession();
-      const ruta = Number(user?.idSucursal ?? user?.sucursal_origen ?? user?.sucursal ?? user?.ruta);
-      if (!Number.isFinite(ruta) || ruta <= 0) return;
-
-      const stateKey = `${PEDIDOS_POLL_STATE_PREFIX}${ruta}`;
-      const stored = await AsyncStorage.getItem(stateKey);
-      const parsed = stored ? JSON.parse(stored) : {};
-      const knownFolios = new Set<number>(
-        Array.isArray(parsed?.knownFolios)
-          ? parsed.knownFolios.map(Number).filter((value: number) => Number.isFinite(value))
-          : [],
-      );
-      knownFolios.add(folio);
-
-      await AsyncStorage.setItem(
-        stateKey,
-        JSON.stringify({
-          initialized: parsed?.initialized === true,
-          knownFolios: Array.from(knownFolios).slice(-1000),
-        }),
-      );
-    } catch (error) {
-      console.warn("[PedidoNotificacionService] No se pudo guardar folio notificado:", error);
-    }
-  }
-
   /**
    * Debe llamarse desde index.js / top-level para que funcione cuando la app está en background/killed.
    */
@@ -441,10 +397,26 @@ class PedidoNotificacionService {
    * Recibe el listado de folios sincronizados y notifica solo los que aun no han sido notificados.
    * Usa el estatus NOTIFICADO (4) como control principal para no depender de AsyncStorage.
    */
+  async notificarConfirmadosPendientes(): Promise<number> {
+    if (!this.realm || this.realm.isClosed) return 0;
+    const pedidosConfirmados = this.realm.objects("Pedido").filtered(
+      "estatus == $0",
+      ESTATUS_PEDIDO.CONFIRMADO,
+    ) as any[];
+    const folios = Array.from(pedidosConfirmados).reduce<number[]>((result, pedido: any) => {
+      const folio = Number(pedido.folio);
+      if (Number.isFinite(folio) && !result.includes(folio)) result.push(folio);
+      return result;
+    }, []);
+    await this.procesarPedidosSincronizados(folios);
+    return folios.length;
+  }
+
   async procesarPedidosSincronizados(folios: number[]): Promise<void> {
     if (!folios || folios.length === 0) return;
 
     try {
+      await this.inicializar();
       const pedidosService = PedidosService.getInstance();
       if (this.realm) {
         pedidosService.setRealm(this.realm);
@@ -453,11 +425,6 @@ class PedidoNotificacionService {
       for (const folio of folios) {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (!pedido) continue;
-
-        if (await this.folioRegistradoEnPolling(folio)) {
-          this.marcarPedidoNotificado(folio);
-          continue;
-        }
 
         // Solo notificar pedidos confirmados, aun no notificados ni cerrados
         const ESTATUS_FINALES_NOTIF = [
@@ -489,7 +456,6 @@ class PedidoNotificacionService {
 
         // Marcar como notificado para evitar duplicados en futuras sincronizaciones
         this.marcarPedidoNotificado(folio);
-        await this.registrarFolioEnPolling(folio);
       }
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al procesar pedidos sincronizados:", error);
@@ -515,6 +481,7 @@ class PedidoNotificacionService {
         data: {
           folio: String(pedido.folio),
           cliente: String(pedido.cliente),
+          ruta: String(pedido.ruta ?? ""),
         },
         android: {
           channelId: CHANNEL_ID,
@@ -609,8 +576,13 @@ class PedidoNotificacionService {
       let pedido = pedidosService.getPedidoByFolio(folio);
 
       if (!pedido) {
-        const sucursal = Number(user?.sucursal_origen || user?.sucursal || 1);
-        await pedidosService.syncPedidos(sucursal);
+        const usuarioRealm = realm.objects("Usuario").filtered("claveEmpleado == $0", user.claveEmpleado)[0] as any;
+        const ruta = Number(data?.ruta ?? user?.ruta ?? user?.idRuta ?? usuarioRealm?.ruta ?? 0);
+        if (!Number.isFinite(ruta) || ruta <= 0) {
+          console.warn(`[PedidoNotificacionService] Usuario sin ruta para sincronizar pedido ${folio}`);
+          return false;
+        }
+        await pedidosService.syncPedidos(ruta);
         pedido = pedidosService.getPedidoByFolio(folio);
       }
 
@@ -699,7 +671,6 @@ class PedidoNotificacionService {
 
     await this.registrarVisitaFueraAgenda(pedido);
     this.marcarPedidoNotificado(folio);
-    await this.registrarFolioEnPolling(folio);
   }
 
   private marcarPedidoNotificado(folio: number): void {
@@ -774,7 +745,7 @@ class PedidoNotificacionService {
       const idCompuesto = `pedido-${pedido.folio}-${hoy.toISOString().split("T")[0]}`;
       const visitaExistente = this.realm.objectForPrimaryKey("Visita", idCompuesto) as any;
       if (visitaExistente) {
-        console.log(`[PedidoNotificacionService] Visita fuera de agenda ya existe para folio ${pedido.folio}`);
+        // console.log(`[PedidoNotificacionService] Visita fuera de agenda ya existe para folio ${pedido.folio}`);
         if (esClienteDiagnostico) {
           console.log("[PedidoNotificacionService][DEBUG 6606] Visita existente encontrada", {
             id: visitaExistente.id,
@@ -814,7 +785,7 @@ class PedidoNotificacionService {
         );
       });
 
-      console.log(`[PedidoNotificacionService] Visita fuera de agenda registrada para folio ${pedido.folio}`);
+      // console.log(`[PedidoNotificacionService] Visita fuera de agenda registrada para folio ${pedido.folio}`);
       if (esClienteDiagnostico) {
         const visitaRegistrada = this.realm.objectForPrimaryKey("Visita", idCompuesto) as any;
         console.log("[PedidoNotificacionService][DEBUG 6606] Visita registrada en Realm", {
