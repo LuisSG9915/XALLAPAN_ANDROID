@@ -98,6 +98,31 @@ IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('detalle_ped
     CREATE INDEX IX_bitacora_id_movil ON detalle_pedidos_bitacora(id_movil);
 GO
 
+IF OBJECT_ID('dbo.detalle_pedidos_estados', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.detalle_pedidos_estados (
+        id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ruta INT NOT NULL,
+        pedido INT NOT NULL,
+        fecha DATETIME NOT NULL,
+        estado INT NOT NULL,
+        idVendedor INT NOT NULL
+    );
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID('dbo.detalle_pedidos_estados')
+      AND name = 'UX_detalle_pedidos_estados_evento'
+)
+BEGIN
+    CREATE UNIQUE INDEX UX_detalle_pedidos_estados_evento
+        ON dbo.detalle_pedidos_estados(ruta, pedido, fecha, estado, idVendedor);
+END
+GO
+
 -- Procedimiento para insertar snapshot optimizado
 CREATE PROCEDURE sp_MovilesPedidosBitacora_Insert
     @id_pedido INT,
@@ -124,6 +149,10 @@ CREATE PROCEDURE sp_MovilesPedidosBitacora_Insert
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF @estatus NOT IN (2, 6, 7)
+        THROW 50003, 'detalle_pedidos_bitacora solo admite cierres 2, 6 y 7.', 1;
+
     BEGIN TRY
         BEGIN TRANSACTION;
 
@@ -207,13 +236,103 @@ BEGIN
 END
 GO
 
+CREATE OR ALTER PROCEDURE [dbo].[sp_DetallePedidosEstadosArrastreJSON]
+    @json NVARCHAR(MAX),
+    @idUsuario INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF ISJSON(@json) <> 1
+            THROW 50002, 'El formato del JSON de estados es inválido.', 1;
+
+        DECLARE @Ids TABLE (id BIGINT);
+
+        INSERT INTO dbo.detalle_pedidos_estados (ruta, pedido, fecha, estado, idVendedor)
+        OUTPUT inserted.id INTO @Ids
+        SELECT DISTINCT
+            j.ruta,
+            j.pedido,
+            j.fecha,
+            j.estado,
+            j.idVendedor
+        FROM OPENJSON(@json)
+        WITH (
+            ruta INT '$.ruta',
+            pedido INT '$.pedido',
+            fecha DATETIME '$.fecha',
+            estado INT '$.estado',
+            idVendedor INT '$.idVendedor'
+        ) j
+        WHERE j.ruta IS NOT NULL
+          AND j.pedido IS NOT NULL
+          AND j.fecha IS NOT NULL
+          AND j.estado IS NOT NULL
+          AND j.idVendedor IS NOT NULL
+          AND j.estado NOT IN (2, 6, 7)
+          AND NOT EXISTS (
+              SELECT 1
+              FROM dbo.detalle_pedidos_estados e WITH (UPDLOCK, HOLDLOCK)
+              WHERE e.ruta = j.ruta
+                AND e.pedido = j.pedido
+                AND e.fecha = j.fecha
+                AND e.estado = j.estado
+                AND e.idVendedor = j.idVendedor
+          );
+
+        DECLARE @id BIGINT,
+                @ruta INT,
+                @pedido INT,
+                @fecha DATETIME,
+                @estado INT;
+
+        DECLARE curEstados CURSOR LOCAL FAST_FORWARD FOR
+            SELECT e.id, e.ruta, e.pedido, e.fecha, e.estado
+            FROM dbo.detalle_pedidos_estados e
+            INNER JOIN @Ids i ON i.id = e.id
+            ORDER BY e.fecha ASC, e.ruta ASC, e.pedido ASC, e.id ASC;
+
+        OPEN curEstados;
+        FETCH NEXT FROM curEstados INTO @id, @ruta, @pedido, @fecha, @estado;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            UPDATE dbo.detalle_pedidos
+            SET estatus = @estado,
+                fechaAtencion = ISNULL(fechaAtencion, @fecha)
+            WHERE folio = @pedido
+              AND ruta = @ruta;
+
+            FETCH NEXT FROM curEstados INTO @id, @ruta, @pedido, @fecha, @estado;
+        END
+
+        CLOSE curEstados;
+        DEALLOCATE curEstados;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF CURSOR_STATUS('local', 'curEstados') >= 0
+            CLOSE curEstados;
+        IF CURSOR_STATUS('local', 'curEstados') > -2
+            DEALLOCATE curEstados;
+
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END
+GO
+
 -- =============================================
 -- Procedimiento de arrastre: inserta en bitácora y actualiza detalle_pedidos
 -- Procesa las bitácoras de fecha menor a mayor para que el estado final
 -- sea el de la última actualización. Marca cada renglón de bitácora como
 -- completado para no volver a aplicarlo.
 -- =============================================
-create or alter  PROCEDURE [dbo].[sp_DetallePedidosBitacoraArrastreJSON]
+CREATE OR ALTER PROCEDURE [dbo].[sp_DetallePedidosBitacoraArrastreJSON]
     @json NVARCHAR(MAX),
     @idUsuario INT
 AS
@@ -286,7 +405,8 @@ BEGIN
             enviado BIT,
             fecha_envio DATETIME
         ) j
-        WHERE NOT EXISTS (
+        WHERE j.estatus IN (2, 6, 7)
+          AND NOT EXISTS (
               SELECT 1 FROM detalle_pedidos_bitacora b
               WHERE b.folio = j.folio
                 AND b.fecha = j.fecha

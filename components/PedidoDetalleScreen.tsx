@@ -164,8 +164,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     try {
       const user = await AuthService.restoreSession();
       const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedidoActualizado?.idVendedor ?? 1);
-      const resultadoArrastre = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
-      console.log(`[PedidoDetalle] Arrastre bitácora EN_ATENCION folio=${folio}:`, resultadoArrastre);
+      const resultadoArrastre = await FullSyncService.sendPendingPedidoEstadosToServer(idUsuario);
+      console.log(`[PedidoDetalle] Arrastre estado EN_ATENCION folio=${folio}:`, resultadoArrastre);
     } catch (error) {
       console.warn(`[PedidoDetalle] No se pudo enviar arrastre EN_ATENCION folio=${folio}:`, error);
     }
@@ -646,9 +646,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         AuthService.restoreSession().then((user) => {
           if (!user) return;
           const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
-          FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario)
-            .then((r) => console.log(`[PedidoDetalle] Arrastre bitacora pedidos EN_CAPTURA folio ${folio}:`, r))
-            .catch((e) => console.warn("[PedidoDetalle] Error arrastre bitacora pedidos EN_CAPTURA:", e));
+          FullSyncService.sendPendingPedidoEstadosToServer(idUsuario)
+            .then((r) => console.log(`[PedidoDetalle] Arrastre estado pedidos EN_CAPTURA folio ${folio}:`, r))
+            .catch((e) => console.warn("[PedidoDetalle] Error arrastre estado pedidos EN_CAPTURA:", e));
         }).catch((e) => console.warn("[PedidoDetalle] Error obteniendo sesion EN_CAPTURA:", e));
       }
     }

@@ -634,8 +634,8 @@ class PedidoNotificacionService {
       await AsyncStorage.removeItem(PENDING_NAVIGATION_KEY);
 
       const idUsuario = Number(user?.id ?? user?.idUsuario ?? 1);
-      const bitacoraResult = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
-      console.log(`[PedidoNotificacionService] Bitácora del pedido ${folio}:`, bitacoraResult);
+      const estadoResult = await FullSyncService.sendPendingPedidoEstadosToServer(idUsuario);
+      console.log(`[PedidoNotificacionService] Estado del pedido ${folio}:`, estadoResult);
       return true;
     } catch (error) {
       console.error("[PedidoNotificacionService] Error al procesar navegación pendiente:", error);

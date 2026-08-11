@@ -1,9 +1,22 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
-apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 
 layout.buildDirectory.set(file("${System.getProperty('user.home')}/.xallapan/android-build"))
+
+project.ext.vectoricons = [
+    iconFontNames: ["MaterialIcons.ttf"],
+]
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+
+afterEvaluate {
+    def vectorIconFontsTask = tasks.named("copyReactNativeVectorIconFonts")
+    tasks.configureEach { task ->
+        if (task.name ==~ /(generate|merge|compress).+Assets/) {
+            task.dependsOn(vectorIconFontsTask)
+        }
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.

@@ -27,7 +27,7 @@ import { CiasSyncTask } from "./tasks/CiasSyncTask";
 import { CatalogosPedidosSyncTask } from "./tasks/CatalogosPedidosSyncTask";
 import { PedidosSyncTask } from "./tasks/PedidosSyncTask";
 // import { PedidosDetalleSyncTask } from "./tasks/PedidosDetalleSyncTask";
-import { PedidoBitacoraUploadSyncTask } from "./tasks/PedidoBitacoraUploadSyncTask";
+import { PedidoEstadoUploadSyncTask } from "./tasks/PedidoBitacoraUploadSyncTask";
 
 /**
  * Orquestador de sincronización
@@ -92,8 +92,8 @@ export class SyncOrchestrator {
       new CatalogosPedidosSyncTask(this.realm, this.syncLogId),
       // Pedidos de la ruta - prioridad 50 (cabecera + productos en el mismo endpoint)
       new PedidosSyncTask(this.realm, this.syncLogId),
-      // Envío de bitácora de pedidos al servidor - prioridad 1 (primero, antes de descargar)
-      new PedidoBitacoraUploadSyncTask(this.realm, this.syncLogId),
+      // Envío de estados de pedidos al servidor - prioridad 1 (primero, antes de descargar)
+      new PedidoEstadoUploadSyncTask(this.realm, this.syncLogId),
     ];
 
     // Asignar idUsuario a todas las tareas

@@ -28,7 +28,7 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 56,
+        schemaVersion: 57,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
           // Migración v56: Agregar idPedido e idLista a Venta.
           if (oldRealm.schemaVersion < 56) {
@@ -1031,14 +1031,21 @@ class FullSyncService {
       }
     }
 
-    // PASO 5.6: Enviar bitácoras de pedidos pendientes al servidor
+    // PASO 5.6: Enviar cambios de estado y cierres de pedidos pendientes al servidor
     if (idUsuario) {
-      console.log("[FullSync] PASO 5.6 - Enviando bitácoras de pedidos pendientes...");
+      console.log("[FullSync] PASO 5.6 - Enviando estados de pedidos pendientes...");
+      const estadosResult = await this.sendPendingPedidoEstadosToServer(idUsuario);
+      if (estadosResult.success && estadosResult.sent > 0) {
+        console.log(`[FullSync] ✅ ${estadosResult.sent} estados de pedidos enviados`);
+      } else if (!estadosResult.success && estadosResult.error) {
+        console.warn("[FullSync] ⚠️ Error enviando estados de pedidos:", estadosResult.error);
+      }
+
       const bitacoraResult = await this.sendPendingPedidoBitacoraToServer(idUsuario);
       if (bitacoraResult.success && bitacoraResult.sent > 0) {
-        console.log(`[FullSync] ✅ ${bitacoraResult.sent} bitácoras de pedidos enviadas`);
+        console.log(`[FullSync] ✅ ${bitacoraResult.sent} cierres de pedidos enviados`);
       } else if (!bitacoraResult.success && bitacoraResult.error) {
-        console.warn("[FullSync] ⚠️ Error enviando bitácoras de pedidos:", bitacoraResult.error);
+        console.warn("[FullSync] ⚠️ Error enviando cierres de pedidos:", bitacoraResult.error);
       }
     }
 
@@ -4506,6 +4513,55 @@ class FullSyncService {
     }
   }
 
+  async sendPendingPedidoEstadosToServer(
+    idUsuario: number,
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (!this.realm || this.realm.isClosed) {
+      return { success: false, sent: 0, error: "Realm no inicializado" };
+    }
+
+    try {
+      const estadosPendientes = this.realm.objects("PedidoEstado").filtered("enviado == false");
+      if (estadosPendientes.length === 0) {
+        return { success: true, sent: 0 };
+      }
+
+      const payload = Array.from(estadosPendientes).map((estado: any) => ({
+        ruta: Number(estado.ruta),
+        pedido: Number(estado.pedido),
+        fecha: this.formatMexicoDateForServer(estado.fecha),
+        estado: Number(estado.estado),
+        idVendedor: Number(estado.idVendedor),
+      }));
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_DetallePedidosEstadosArrastreJSON?idUsuario=${idUsuario}`;
+
+      const response = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Error desconocido");
+        return { success: false, sent: 0, error: `HTTP ${response.status}: ${errorText}` };
+      }
+
+      this.realm.write(() => {
+        Array.from(estadosPendientes).forEach((estado: any) => {
+          estado.enviado = true;
+        });
+      });
+
+      return { success: true, sent: payload.length };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido";
+      return { success: false, sent: 0, error: errorMsg };
+    }
+  }
+
   /**
    * Envía bitácoras de pedidos pendientes al servidor (arrastre).
    * Endpoint: sp_DetallePedidosBitacoraArrastreJSON
@@ -4518,7 +4574,14 @@ class FullSyncService {
     }
 
     try {
-      const bitacorasPendientes = this.realm.objects("PedidoBitacora").filtered("enviado == false");
+      const bitacorasPendientes = this.realm
+        .objects("PedidoBitacora")
+        .filtered(
+          "enviado == false AND (estatus == $0 OR estatus == $1 OR estatus == $2)",
+          2,
+          6,
+          7,
+        );
       console.log(`[FullSync-PedidoBitacora] 📤 Bitácoras pendientes: ${bitacorasPendientes.length}`);
 
       if (bitacorasPendientes.length === 0) {

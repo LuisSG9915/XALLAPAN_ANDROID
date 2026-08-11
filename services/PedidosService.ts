@@ -2,7 +2,7 @@ import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import AuthService from "./AuthService";
 import PedidoNotificacionService from "./PedidoNotificacionService";
-import { PedidoBitacoraUploadSyncTask } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
+import { PedidoEstadoUploadSyncTask } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
 
 // Generación de id_movil corto e irrepetible para pedidos/ventas locales.
 // Estructura: MOVIL_ID_BASE + (segundos desde EPOCH * 1000) + sucursal
@@ -81,6 +81,16 @@ export interface PedidoBitacora {
   fueraAgenda?: boolean;
   no_venta?: number;
   tipoCambio?: string;
+  enviado: boolean;
+}
+
+export interface PedidoEstado {
+  id: string;
+  ruta: number;
+  pedido: number;
+  fecha: Date;
+  estado: number;
+  idVendedor: number;
   enviado: boolean;
 }
 
@@ -536,24 +546,47 @@ class PedidosService {
         }
       });
 
-      // Registrar bitacora con snapshot completo de todos los renglones
-      this.registrarBitacoraEstado({
-        folio,
-        estatusAnterior,
-        estatus: nuevoEstatus,
-        tipoCambio: "estatus",
-        causaNoAtencion,
-        obserNoAtencion,
-      });
-      const bitacorasPendientes = realm
-        .objects("PedidoBitacora")
-        .filtered("folio = $0 AND estatus = $1 AND enviado = false", folio, nuevoEstatus);
-      console.log(
-        `[PedidosService] Bitácoras pendientes folio=${folio}, estatus=${nuevoEstatus}: ${bitacorasPendientes.length}`,
-      );
+      if ([
+        ESTATUS_PEDIDO.ENTREGADO,
+        ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+        ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+      ].includes(nuevoEstatus)) {
+        this.registrarBitacoraEstado({
+          folio,
+          estatusAnterior,
+          estatus: nuevoEstatus,
+          tipoCambio: "estatus",
+          causaNoAtencion,
+          obserNoAtencion,
+        });
+      } else {
+        this.registrarEstadoPedido({
+          folio,
+          estatus: nuevoEstatus,
+        });
+      }
+      if ([
+        ESTATUS_PEDIDO.ENTREGADO,
+        ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+        ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+      ].includes(nuevoEstatus)) {
+        const bitacorasPendientes = realm
+          .objects("PedidoBitacora")
+          .filtered("folio = $0 AND estatus = $1 AND enviado = false", folio, nuevoEstatus);
+        console.log(
+          `[PedidosService] Bitácoras de cierre pendientes folio=${folio}, estatus=${nuevoEstatus}: ${bitacorasPendientes.length}`,
+        );
+      }
 
-      if (nuevoEstatus !== ESTATUS_PEDIDO.EN_ATENCION) {
-        this.enviarBitacoraInmediata();
+      if (
+        nuevoEstatus !== ESTATUS_PEDIDO.EN_ATENCION &&
+        ![
+          ESTATUS_PEDIDO.ENTREGADO,
+          ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+          ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+        ].includes(nuevoEstatus)
+      ) {
+        this.enviarEstadoInmediato();
       }
 
       console.log(`[PedidosService] Estatus cambiado: ${estatusAnterior} -> ${nuevoEstatus}`);
@@ -784,6 +817,35 @@ class PedidosService {
     }
   }
 
+  private registrarEstadoPedido(data: {
+    folio: number;
+    estatus: number;
+  }): void {
+    try {
+      const realm = this.getRealm();
+      const renglon = realm.objects("Pedido").filtered("folio = $0", data.folio)[0] as any;
+      if (!renglon) return;
+
+      realm.write(() => {
+        realm.create(
+          "PedidoEstado",
+          {
+            id: `estado-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            ruta: renglon.ruta,
+            pedido: Number(renglon.folio),
+            fecha: new Date(),
+            estado: data.estatus,
+            idVendedor: renglon.idVendedor,
+            enviado: false,
+          },
+          Realm.UpdateMode.Modified,
+        );
+      });
+    } catch (error) {
+      console.error("[PedidosService] Error al registrar estado del pedido:", error);
+    }
+  }
+
   private registrarBitacoraEstado(data: {
     folio: number;
     estatusAnterior: number;
@@ -853,77 +915,19 @@ class PedidosService {
     }
   }
 
-  private enviarBitacoraInmediata(): void {
+  private enviarEstadoInmediato(): void {
     try {
       const realm = this.getRealm();
       const syncLogId = `realtime-${Date.now()}`;
-      const task = new PedidoBitacoraUploadSyncTask(realm, syncLogId);
+      const task = new PedidoEstadoUploadSyncTask(realm, syncLogId);
       task.execute().catch((error) => {
-        console.warn("[PedidosService] Error enviando bitácora en tiempo real:", error);
+        console.warn("[PedidosService] Error enviando estado en tiempo real:", error);
       });
     } catch (error) {
-      console.warn("[PedidosService] No se pudo iniciar envío de bitácora:", error);
+      console.warn("[PedidosService] No se pudo iniciar envío de estado:", error);
     }
   }
 
-  private registrarBitacoraDetalle(data: {
-    folio: number;
-    idProducto: number;
-    campo: string;
-    valorAnterior: any;
-    valorNuevo: any;
-    observacion?: string;
-  }): void {
-    try {
-      const realm = this.getRealm();
-      const id = this.buildPedidoId(data.folio, data.idProducto);
-      const renglon = realm.objectForPrimaryKey("Pedido", id) as any;
-      if (!renglon) return;
-
-      const idPedido = Number(renglon.folio ?? data.folio);
-      const ahora = new Date();
-      const idLocal = `${Date.now()}-det-${Math.random().toString(36).substr(2, 5)}`;
-
-      realm.write(() => {
-        realm.create(
-          "PedidoBitacora",
-          {
-            id: idLocal,
-            idPedido,
-            id_movil: renglon.id_movil ?? this.getNextIdMovil(),
-            folio: idPedido,
-            fecha: ahora,
-            ruta: renglon.ruta,
-            cliente: renglon.cliente,
-            idCanal: renglon.idCanal ?? null,
-            idVendedor: renglon.idVendedor,
-            idProducto: data.idProducto,
-            cantPedido: renglon.cantPedido ?? null,
-            precio: renglon.precio ?? null,
-            observaciones: data.observacion ?? `${data.campo}: ${data.valorAnterior} -> ${data.valorNuevo}`,
-            listaPrecio: renglon.listaPrecio ?? null,
-            fechaEntrega: renglon.fechaEntrega ?? null,
-            estatus: renglon.estatus,
-            estatusAnterior: renglon.estatus,
-            cantAtencion: renglon.cantAtencion ?? null,
-            precioAtencion: renglon.precioAtencion ?? null,
-            causaDiferencia: renglon.causaDiferencia ?? null,
-            obserDiferencia: renglon.obserDiferencia ?? null,
-            causaNoAtencion: renglon.causaNoAtencion ?? null,
-            obserNoAtencion: renglon.obserNoAtencion ?? null,
-            usrAlta: renglon.idVendedor ?? null,
-            fueraAgenda: renglon.fueraAgenda ?? null,
-            no_venta: renglon.no_venta ?? null,
-            tipoCambio: `detalle:${data.campo}`,
-            enviado: false,
-          },
-          Realm.UpdateMode.Modified
-        );
-      });
-    } catch (error) {
-      console.error("[PedidosService] Error al registrar bitácora de detalle:", error);
-    }
-  }
 
   private getProductoById(idProducto: number): any {
     try {

@@ -707,6 +707,20 @@ export const PedidoBitacoraSchema = {
   primaryKey: "id",
 };
 
+export const PedidoEstadoSchema = {
+  name: "PedidoEstado",
+  properties: {
+    id: "string",
+    ruta: "int",
+    pedido: "int",
+    fecha: "date",
+    estado: "int",
+    idVendedor: "int",
+    enviado: "bool",
+  },
+  primaryKey: "id",
+};
+
 export const CatalogoEstatusPedidoSchema = {
   name: "CatalogoEstatusPedido",
   properties: {
@@ -768,6 +782,7 @@ export const allSchemas = [
   FormaPagoSchema,
   PedidoSchema,
   PedidoBitacoraSchema,
+  PedidoEstadoSchema,
   CatalogoEstatusPedidoSchema,
   CatalogoCausaDiferenciaSchema,
   CatalogoCausaNoAtencionSchema,
