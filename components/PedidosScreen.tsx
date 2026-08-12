@@ -408,7 +408,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
               </View>
             </View>
             <View style={styles.metricDivider} />
-            <View style={styles.metricItem}>
+            {/* <View style={styles.metricItem}>
               <View style={[styles.metricIcon, distanciaDisponible ? styles.metricIconSuccess : styles.metricIconMuted]}>
                 <Icon
                   name="location-on"
@@ -423,7 +423,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
                   {distanciaTexto}
                 </Text>
               </View>
-            </View>
+            </View> */}
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
               <View style={[styles.metricIcon, styles.metricIconSuccess]}>

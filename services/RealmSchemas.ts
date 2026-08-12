@@ -765,6 +765,7 @@ export const ClienteFotoSchema = {
     mimeType: "string?",
     miniaturaMimeType: "string?",
     nombreArchivo: "string?",
+    etiqueta: "string?",
     fechaCaptura: "date?",
     fechaLog: "date?",
     activa: { type: "bool" as const, default: true },

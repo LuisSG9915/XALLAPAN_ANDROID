@@ -360,7 +360,10 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       .filter((producto) => Number.isFinite(producto.cantidad) && producto.cantidad > 0);
 
     if (entregas.length === 0) {
-      throw new Error(`El pedido ${pedidoCerrado.folio} no tiene productos entregados`);
+      console.info(
+        `[PedidoDetalle] El pedido ${pedidoCerrado.folio} no tiene productos entregados; se omite venta e inventario`,
+      );
+      return;
     }
 
     const ventasExistentes = FullSyncService.getVentasByMovilId(idMovil);
@@ -416,6 +419,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     productosEntregados: Pedido[],
     idMovil: number,
   ): Promise<void> => {
+    const tieneEntregas = productosEntregados.some((producto) => Number(producto.cantAtencion ?? 0) > 0);
+    if (!tieneEntregas) {
+      console.info(
+        `[PedidoDetalle] El pedido ${pedidoCerrado.folio} se cerró sin entrega; no se procesa venta ni inventario`,
+      );
+      return;
+    }
+
     const user = await AuthService.restoreSession();
     const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedidoCerrado.idVendedor ?? 1);
     const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoCerrado.ruta || 1);
@@ -513,6 +524,15 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   };
 
   const confirmarEntrega = () => {
+    const hayEntregados = productos.some((p) => Number(p.cantAtencion ?? 0) > 0);
+    if (!hayEntregados) {
+      Alert.alert(
+        "Sin productos entregados",
+        "No se registró ninguna cantidad entregada. Para cerrar el pedido sin venta, registre una causa de no atención.",
+      );
+      return;
+    }
+
     const productosConDiferencia = productos.filter((p) => {
       const cantAtencion = p.cantAtencion ?? 0;
       return cantAtencion !== p.cantPedido && !p.causaDiferencia;
@@ -527,7 +547,6 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     }
 
     const todosEntregados = productos.every((p) => (p.cantAtencion ?? 0) === p.cantPedido);
-    const hayEntregados = productos.some((p) => (p.cantAtencion ?? 0) > 0);
     const hayDiferenciasConCausa = productos.some((p) => {
       const cantAtencion = p.cantAtencion ?? 0;
       return cantAtencion !== p.cantPedido && p.causaDiferencia;

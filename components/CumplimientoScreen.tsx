@@ -276,21 +276,35 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           })),
         });
 
+        const clientesAgendados = new Set(
+          visitasDelDia
+            .filter((visita: any) => Number(visita.tipo) !== 99)
+            .map((visita: any) => Number(visita.idCliente)),
+        );
+        const pedidosSinAgenda = pedidosDelDia.filter(
+          (pedido) => !clientesAgendados.has(Number(pedido.cliente)),
+        );
         const foliosConVisita = new Set(
           visitasDelDia
             .filter((visita: any) => Number(visita.tipo) === 99)
             .map((visita: any) => Number(visita.idOriginal)),
         );
-        const pedidosSinVisita = pedidosDelDia.filter(
+        const pedidosSinVisita = pedidosSinAgenda.filter(
           (pedido) => !foliosConVisita.has(Number(pedido.folio)),
         );
         const gruposPedidosCentral = new Map<
           number,
           { visita?: any; pedidos: Pedido[]; folios: Set<number> }
         >();
+        const pedidoPorFolio = new Map<number, Pedido>(
+          pedidosSinAgenda.map((pedido) => [Number(pedido.folio), pedido]),
+        );
 
         visitasDelDia
-          .filter((visita: any) => Number(visita.tipo) === 99)
+          .filter(
+            (visita: any) =>
+              Number(visita.tipo) === 99 && !clientesAgendados.has(Number(visita.idCliente)),
+          )
           .forEach((visita: any) => {
             const idCliente = Number(visita.idCliente);
             if (!Number.isFinite(idCliente) || idCliente <= 0) return;
@@ -302,7 +316,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             };
             grupo.visita = grupo.visita || visita;
             const folio = Number(visita.idOriginal);
-            if (Number.isFinite(folio) && folio > 0) grupo.folios.add(folio);
+            if (Number.isFinite(folio) && folio > 0) {
+              grupo.folios.add(folio);
+              const pedido = pedidoPorFolio.get(folio);
+              if (pedido && !grupo.pedidos.some((item) => Number(item.folio) === folio)) {
+                grupo.pedidos.push(pedido);
+              }
+            }
             gruposPedidosCentral.set(idCliente, grupo);
           });
 

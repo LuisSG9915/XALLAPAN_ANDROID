@@ -48,8 +48,11 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 61,
+        schemaVersion: 62,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 62) {
+            console.log("[Migration v62] Agregando etiqueta a ClienteFoto");
+          }
           if (oldRealm.schemaVersion < 61) {
             console.log(
               "[Migration v61] Separando rutas locales y del servidor en ClienteFoto"

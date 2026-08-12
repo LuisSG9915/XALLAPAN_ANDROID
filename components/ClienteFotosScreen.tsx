@@ -1,13 +1,16 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -45,6 +48,10 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<ClienteFoto | null>(null);
+  const [etiquetaModalVisible, setEtiquetaModalVisible] = useState(false);
+  const [etiquetaPendiente, setEtiquetaPendiente] = useState("");
+  const [capturando, setCapturando] = useState(false);
+  const etiquetaResolver = useRef<((value: string | null) => void) | null>(null);
 
   const load = useCallback(async () => {
     if (!idCliente) return;
@@ -70,7 +77,27 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
     }, [load])
   );
 
+  const solicitarEtiqueta = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        etiquetaResolver.current = resolve;
+        setEtiquetaPendiente("");
+        setEtiquetaModalVisible(true);
+      }),
+    []
+  );
+
+  const resolverEtiqueta = (value: string | null) => {
+    const resolve = etiquetaResolver.current;
+    etiquetaResolver.current = null;
+    setEtiquetaModalVisible(false);
+    setEtiquetaPendiente("");
+    resolve?.(value?.trim() || null);
+  };
+
   const addPhoto = async (source: "camera" | "library") => {
+    if (capturando) return;
+    setCapturando(true);
     try {
       const user = await AuthService.restoreSession();
       if (!user?.id) throw new Error("No se encontró el usuario de sesión.");
@@ -79,7 +106,8 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
       await ClienteFotosService.selectAndQueue(
         idCliente,
         Number(user.id),
-        source
+        source,
+        solicitarEtiqueta
       );
       setFotos(ClienteFotosService.getFotos(idCliente));
       Alert.alert("Fotografía guardada");
@@ -92,6 +120,8 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
           ? error.message
           : "No se pudo guardar la fotografía."
       );
+    } finally {
+      setCapturando(false);
     }
   };
 
@@ -117,8 +147,11 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
 
       <View style={styles.actions}>
         <Pressable
-          style={[styles.action, disponibles === 0 && styles.disabled]}
-          disabled={disponibles === 0}
+          style={[
+            styles.action,
+            (disponibles === 0 || capturando) && styles.disabled,
+          ]}
+          disabled={disponibles === 0 || capturando}
           onPress={() => void addPhoto("camera")}
         >
           <Text style={styles.actionText}>Tomar foto</Text>
@@ -127,9 +160,9 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
           style={[
             styles.action,
             styles.gallery,
-            disponibles === 0 && styles.disabled,
+            (disponibles === 0 || capturando) && styles.disabled,
           ]}
-          disabled={disponibles === 0}
+          disabled={disponibles === 0 || capturando}
           onPress={() => void addPhoto("library")}
         >
           <Text style={styles.actionText}>Galería</Text>
@@ -164,6 +197,9 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
                     <Text>Sin imagen</Text>
                   </View>
                 )}
+                {item.etiqueta ? (
+                  <Text style={styles.etiqueta}>{item.etiqueta}</Text>
+                ) : null}
                 <Text style={styles.status}>
                   {item.estado === "sincronizada"
                     ? "Sincronizada"
@@ -179,6 +215,48 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
           }
         />
       )}
+
+      <Modal
+        visible={etiquetaModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => resolverEtiqueta(null)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modal}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.etiquetaModalCard}>
+            <Text style={styles.etiquetaModalTitle}>Agregar etiqueta</Text>
+            <Text style={styles.etiquetaModalHint}>La etiqueta es opcional.</Text>
+            <TextInput
+              autoFocus
+              value={etiquetaPendiente}
+              onChangeText={setEtiquetaPendiente}
+              placeholder="Agregue etiqueta"
+              placeholderTextColor="#8E8E93"
+              maxLength={200}
+              style={styles.etiquetaInput}
+              returnKeyType="done"
+              onSubmitEditing={() => resolverEtiqueta(etiquetaPendiente)}
+            />
+            <View style={styles.etiquetaButtons}>
+              <Pressable
+                style={styles.etiquetaSkipButton}
+                onPress={() => resolverEtiqueta(null)}
+              >
+                <Text style={styles.etiquetaSkipText}>Omitir</Text>
+              </Pressable>
+              <Pressable
+                style={styles.etiquetaSaveButton}
+                onPress={() => resolverEtiqueta(etiquetaPendiente)}
+              >
+                <Text style={styles.etiquetaSaveText}>Guardar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal
         visible={Boolean(selected)}
@@ -237,6 +315,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   image: { width: "100%", aspectRatio: 1, backgroundColor: "#E5E5EA" },
+  etiqueta: {
+    color: "#1C1C1E",
+    fontSize: 13,
+    fontWeight: "600",
+    paddingHorizontal: 7,
+    paddingTop: 7,
+  },
   noImage: {
     width: "100%",
     aspectRatio: 1,
@@ -252,5 +337,47 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  etiquetaModalCard: {
+    width: "88%",
+    backgroundColor: "white",
+    borderRadius: 14,
+    padding: 20,
+  },
+  etiquetaModalTitle: {
+    color: "#1C1C1E",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  etiquetaModalHint: { color: "#636366", marginTop: 6 },
+  etiquetaInput: {
+    borderWidth: 1,
+    borderColor: "#C7C7CC",
+    borderRadius: 8,
+    color: "#1C1C1E",
+    marginTop: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  etiquetaButtons: {
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "flex-end",
+    marginTop: 18,
+  },
+  etiquetaSkipButton: {
+    borderColor: "#C7C7CC",
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  etiquetaSkipText: { color: "#636366", fontWeight: "700" },
+  etiquetaSaveButton: {
+    backgroundColor: "#007AFF",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  etiquetaSaveText: { color: "white", fontWeight: "700" },
   fullImage: { width: "100%", height: "80%" },
 });

@@ -26,6 +26,7 @@ export type ClienteFoto = {
   mimeType?: string | null;
   miniaturaMimeType?: string | null;
   nombreArchivo?: string | null;
+  etiqueta?: string | null;
   fechaCaptura?: Date | null;
   fechaLog?: Date | null;
   activa: boolean;
@@ -70,7 +71,8 @@ class ClienteFotosService {
   async selectAndQueue(
     idCliente: number,
     usrAlta: number,
-    source: "camera" | "library"
+    source: "camera" | "library",
+    solicitarEtiqueta?: () => Promise<string | null>
   ): Promise<ClienteFoto> {
     if (!this.realm || this.realm.isClosed)
       throw new Error("Realm no inicializado");
@@ -117,6 +119,9 @@ class ClienteFotosService {
     if (!asset?.uri)
       throw new Error("La selección no contiene una fotografía válida.");
 
+    const etiqueta = solicitarEtiqueta
+      ? await solicitarEtiqueta()
+      : null;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const idMovil = `${idCliente}-${id}`;
     const extension = this.extensionForAsset(asset);
@@ -139,6 +144,7 @@ class ClienteFotosService {
       mimeType: asset.type || "image/jpeg",
       miniaturaMimeType: null,
       nombreArchivo: asset.fileName || `${id}${extension}`,
+      etiqueta: etiqueta?.trim() || null,
       fechaCaptura: new Date(),
       fechaLog: null,
       activa: true,
@@ -265,6 +271,7 @@ class ClienteFotosService {
     const body = new FormData();
     body.append("IdCliente", String(foto.idCliente));
     body.append("UsrAlta", String(usrAlta));
+    body.append("Etiqueta", foto.etiqueta?.trim() || "");
     body.append(
       "FechaCaptura",
       (foto.fechaCaptura || new Date()).toISOString()
@@ -338,6 +345,7 @@ class ClienteFotosService {
           mimeType: row.fotoMimeType || "image/jpeg",
           miniaturaMimeType: row.fotoMiniaturaMimeType || "image/jpeg",
           nombreArchivo: null,
+          etiqueta: row.etiqueta == null ? null : String(row.etiqueta),
           fechaCaptura: row.fechaCaptura ? new Date(row.fechaCaptura) : null,
           fechaLog: row.fechaLog ? new Date(row.fechaLog) : new Date(),
           activa: row.activa !== false,
