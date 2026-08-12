@@ -756,8 +756,10 @@ export const ClienteFotoSchema = {
     idServidor: "int?",
     idMovil: "string",
     idCliente: "int",
-    foto: "string?",
-    fotoMiniatura: "string?",
+    foto: "string?", // URI local del dispositivo
+    fotoMiniatura: "string?", // URI local de miniatura, si existe
+    fotoServidor: "string?", // Ruta física devuelta por el servidor
+    fotoMiniaturaServidor: "string?", // Ruta física de miniatura en servidor
     fotoBase64: "string?",
     fotoMiniaturaBase64: "string?",
     mimeType: "string?",

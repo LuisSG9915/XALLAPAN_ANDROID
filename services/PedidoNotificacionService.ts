@@ -301,6 +301,13 @@ class PedidoNotificacionService {
         }
 
         if (knownFolios.has(folio)) continue;
+        if (Number(pedido.estatus) !== ESTATUS_PEDIDO.CONFIRMADO) {
+          console.log(
+            `[PedidoNotificacionService] Folio ${folio} tiene estatus ${pedido.estatus}, no se notificará`,
+          );
+          knownFolios.add(folio);
+          continue;
+        }
         if (pedidoLocal && estadosFinales.includes(pedidoLocal.estatus)) {
           knownFolios.add(folio);
           continue;
@@ -463,12 +470,29 @@ class PedidoNotificacionService {
   }
 
   async mostrarNotificacionPedido(pedido: Pedido): Promise<boolean> {
+    if (Number(pedido.estatus) !== ESTATUS_PEDIDO.CONFIRMADO) {
+      console.log(
+        `[PedidoNotificacionService] Folio ${pedido.folio} tiene estatus ${pedido.estatus}, no se mostrará notificación`,
+      );
+      return false;
+    }
+
     const notificationId = `pedido-${pedido.folio}`;
     if (this.notificacionesEnCurso.has(notificationId)) return false;
 
     this.notificacionesEnCurso.add(notificationId);
     try {
       await this.asegurarCanalNotificacion();
+      const pedidoActual = this.realm && !this.realm.isClosed
+        ? this.realm.objects("Pedido").filtered("folio = $0", pedido.folio)[0] as any
+        : null;
+      if (pedidoActual && Number(pedidoActual.estatus) !== ESTATUS_PEDIDO.CONFIRMADO) {
+        console.log(
+          `[PedidoNotificacionService] Folio ${pedido.folio} cambió a estatus ${pedidoActual.estatus}, se omite notificación`,
+        );
+        return false;
+      }
+
       const cliente = this.realm?.objectForPrimaryKey("ClienteFull", pedido.cliente) as any;
       const clienteNombre = cliente?.nombre || pedido.clienteNombre || `Cliente #${pedido.cliente}`;
       const clienteDireccion = cliente?.domicilio || pedido.clienteDomicilio || "Sin dirección";

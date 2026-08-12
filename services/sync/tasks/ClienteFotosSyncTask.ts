@@ -1,6 +1,7 @@
 import Realm from "realm";
 import { SyncTask, SyncTaskResult } from "../SyncTask";
 import ClienteFotosService from "../../ClienteFotosService";
+import AuthService from "../../AuthService";
 
 export class ClienteFotosSyncTask extends SyncTask {
   getTableName(): string {
@@ -19,7 +20,10 @@ export class ClienteFotosSyncTask extends SyncTask {
   async execute(): Promise<SyncTaskResult> {
     try {
       ClienteFotosService.setRealm(this.realm);
-      const count = await ClienteFotosService.downloadFull();
+      const user = await AuthService.restoreSession();
+      const ruta = Number(user?.ruta ?? user?.idRuta ?? 0);
+      console.log("[ClienteFoto] Descarga full por ruta:", { ruta });
+      const count = await ClienteFotosService.downloadFull(0, ruta);
       return {
         success: true,
         registrosLeidos: count,

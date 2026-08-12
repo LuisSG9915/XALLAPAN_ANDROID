@@ -48,8 +48,35 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 60,
+        schemaVersion: 61,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 61) {
+            console.log(
+              "[Migration v61] Separando rutas locales y del servidor en ClienteFoto"
+            );
+            const fotos = newRealm.objects("ClienteFoto");
+            for (const foto of fotos) {
+              const registro = foto as any;
+              if (registro.fotoServidor === undefined)
+                registro.fotoServidor = null;
+              if (registro.fotoMiniaturaServidor === undefined)
+                registro.fotoMiniaturaServidor = null;
+              if (
+                typeof registro.foto === "string" &&
+                /^[A-Za-z]:[\\/]/.test(registro.foto)
+              ) {
+                registro.fotoServidor = registro.foto;
+                registro.foto = null;
+              }
+              if (
+                typeof registro.fotoMiniatura === "string" &&
+                /^[A-Za-z]:[\\/]/.test(registro.fotoMiniatura)
+              ) {
+                registro.fotoMiniaturaServidor = registro.fotoMiniatura;
+                registro.fotoMiniatura = null;
+              }
+            }
+          }
           if (oldRealm.schemaVersion < 59) {
             console.log("[Migration v59] Creando tabla ClienteFoto");
           }
@@ -1561,7 +1588,7 @@ class FullSyncService {
               this.apiBaseUrl
             }/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
               since.toISOString()
-            )}`;
+            )}&ruta=${rutaPedido}`;
             const idBitacora = await BitacoraService.registrarInicioSync(
               tableName,
               "incremental",
@@ -1573,7 +1600,11 @@ class FullSyncService {
             try {
               ClienteFotosService.setRealm(this.realm!);
               const registrosLeidos =
-                await ClienteFotosService.downloadIncremental(since);
+                await ClienteFotosService.downloadIncremental(
+                  since,
+                  0,
+                  rutaPedido
+                );
               await BitacoraService.registrarFinSync(idBitacora, {
                 exitoso: true,
                 registrosLeidos,

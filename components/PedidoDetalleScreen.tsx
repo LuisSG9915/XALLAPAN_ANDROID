@@ -880,7 +880,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
         {!soloLectura && !gpsValidado && !pedidoEnProceso && (
           <View style={styles.botonesRow}>
-            <TouchableOpacity style={[styles.gpsBtn, styles.btnMitad]} onPress={validarGPS} disabled={validandoGPS}>
+            {/* <TouchableOpacity style={[styles.gpsBtn, styles.btnMitad]} onPress={validarGPS} disabled={validandoGPS}>
               {validandoGPS ? (
                 <ActivityIndicator color="#fff" />
               ) : (
@@ -889,7 +889,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
               <Text style={styles.gpsBtnText}>
                 {validandoGPS ? "Validando..." : "Validar GPS"}
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
 
             <TouchableOpacity
               style={[styles.gpsBtn, styles.btnMitad, styles.iniciarBtn]}

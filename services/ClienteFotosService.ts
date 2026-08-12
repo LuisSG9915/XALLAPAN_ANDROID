@@ -19,6 +19,8 @@ export type ClienteFoto = {
   idCliente: number;
   foto?: string | null;
   fotoMiniatura?: string | null;
+  fotoServidor?: string | null;
+  fotoMiniaturaServidor?: string | null;
   fotoBase64?: string | null;
   fotoMiniaturaBase64?: string | null;
   mimeType?: string | null;
@@ -130,6 +132,8 @@ class ClienteFotosService {
       idCliente,
       foto: localPath,
       fotoMiniatura: null,
+      fotoServidor: null,
+      fotoMiniaturaServidor: null,
       fotoBase64: null,
       fotoMiniaturaBase64: null,
       mimeType: asset.type || "image/jpeg",
@@ -146,9 +150,9 @@ class ClienteFotosService {
     return foto;
   }
 
-  async downloadFull(idCliente = 0): Promise<number> {
+  async downloadFull(idCliente = 0, ruta = 0): Promise<number> {
     const response = await fetchWithTimeout(
-      `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotosFull?idCliente=${idCliente}`,
+      `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotosFull?idCliente=${idCliente}&ruta=${ruta}`,
       { headers: { accept: "application/json" } }
     );
     if (!response.ok)
@@ -157,11 +161,15 @@ class ClienteFotosService {
     return this.upsertRemoteRows(Array.isArray(rows) ? rows : []);
   }
 
-  async downloadIncremental(since: Date, idCliente = 0): Promise<number> {
+  async downloadIncremental(
+    since: Date,
+    idCliente = 0,
+    ruta = 0
+  ): Promise<number> {
     const response = await fetchWithTimeout(
       `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
         since.toISOString()
-      )}&idCliente=${idCliente}`,
+      )}&idCliente=${idCliente}&ruta=${ruta}`,
       { headers: { accept: "application/json" } }
     );
     if (!response.ok)
@@ -291,8 +299,8 @@ class ClienteFotosService {
       );
       if (local) {
         local.idServidor = result.id || null;
-        local.foto = result.foto || local.foto;
-        local.fotoMiniatura = result.fotoMiniatura || null;
+        local.fotoServidor = result.foto || null;
+        local.fotoMiniaturaServidor = result.fotoMiniatura || null;
         local.estado = "sincronizada";
         local.syncedAt = new Date();
         local.errorMensaje = null;
@@ -320,8 +328,11 @@ class ClienteFotosService {
           idServidor,
           idMovil,
           idCliente: Number(row.idCliente),
-          foto: existing?.foto || row.foto || null,
-          fotoMiniatura: row.fotoMiniatura || null,
+          foto: existing?.foto || null,
+          fotoMiniatura: existing?.fotoMiniatura || null,
+          fotoServidor: row.foto || existing?.fotoServidor || null,
+          fotoMiniaturaServidor:
+            row.fotoMiniatura || existing?.fotoMiniaturaServidor || null,
           fotoBase64: row.fotoBase64 || null,
           fotoMiniaturaBase64: row.fotoMiniaturaBase64 || null,
           mimeType: row.fotoMimeType || "image/jpeg",

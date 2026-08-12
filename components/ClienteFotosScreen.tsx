@@ -46,28 +46,23 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<ClienteFoto | null>(null);
 
-  const load = useCallback(
-    async (remote = true) => {
-      if (!idCliente) return;
-      setLoading(true);
-      try {
-        await FullSyncService.initialize();
-        ClienteFotosService.setRealm((FullSyncService as any).realm);
-        if (remote) await ClienteFotosService.downloadFull(idCliente);
-        setFotos(ClienteFotosService.getFotos(idCliente));
-      } catch (error) {
-        if (remote)
-          Alert.alert(
-            "Fotos",
-            "No se pudieron actualizar las fotos. Se mostrarán las guardadas localmente."
-          );
-        setFotos(ClienteFotosService.getFotos(idCliente));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [idCliente]
-  );
+  const load = useCallback(async () => {
+    if (!idCliente) return;
+    setLoading(true);
+    try {
+      await FullSyncService.initialize();
+      ClienteFotosService.setRealm((FullSyncService as any).realm);
+      setFotos(ClienteFotosService.getFotos(idCliente));
+    } catch (error) {
+      console.error(
+        "[ClienteFotosScreen] Error cargando fotos locales:",
+        error
+      );
+      Alert.alert("Fotos", "No se pudieron cargar las fotografías locales.");
+    } finally {
+      setLoading(false);
+    }
+  }, [idCliente]);
 
   useFocusEffect(
     useCallback(() => {
@@ -87,8 +82,7 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
         source
       );
       setFotos(ClienteFotosService.getFotos(idCliente));
-      Alert.alert(
-        "Fotografía guardada"      );
+      Alert.alert("Fotografía guardada");
     } catch (error) {
       if (error instanceof Error && error.message === "CAPTURE_CANCELLED")
         return;
@@ -103,7 +97,7 @@ export default function ClienteFotosScreen({ route }: { route: any }) {
 
   const refresh = async () => {
     setRefreshing(true);
-    await load(true);
+    await load();
     setRefreshing(false);
   };
 
