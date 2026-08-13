@@ -36,6 +36,7 @@ import ClienteGruposScreen from "./components/ClienteGruposScreen";
 // import SignalRService from './services/SignalRService';
 import DataViewScreen from "./components/DataViewScreen";
 import PrinterSettingsScreen from "./components/PrinterSettingsScreen";
+import FotoUploadSettingsScreen from "./components/FotoUploadSettingsScreen";
 import CumplimientoScreen from "./components/CumplimientoScreen";
 import ClienteFotosScreen from "./components/ClienteFotosScreen";
 import PedidosScreen from "./components/PedidosScreen";
@@ -435,6 +436,11 @@ function App() {
             name="PrinterSettings"
             component={PrinterSettingsScreen}
             options={{ title: "🖨️ Configuración de Impresora" }}
+          />
+          <Stack.Screen
+            name="FotoUploadSettings"
+            component={FotoUploadSettingsScreen}
+            options={{ title: "Configuración de fotos" }}
           />
           <Stack.Screen
             name="Cumplimiento"
@@ -930,7 +936,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const priorityOrder = ["cumplimiento", "pedidos", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
-  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa","pedidos"];
+  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
   const isAdmin = currentUser?.id === 4;
 
   const allMenuItems = [
@@ -1006,6 +1012,15 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       color: COLORS.cards.settings,
       screen: "PrinterSettings",
       description: "Configurar",
+    },
+    {
+      id: "fotosettings",
+      title: "Fotos",
+      icon: "photo-camera",
+      type: "material",
+      color: "#5E35B1",
+      screen: "FotoUploadSettings",
+      description: "Subida de fotos",
     },
     {
       id: "reporte",

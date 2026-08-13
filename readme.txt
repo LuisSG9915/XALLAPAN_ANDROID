@@ -41,6 +41,7 @@ cd android
 ./gradlew assembleRelease
 cd ..
 
+open "/Users/luis/Documents/desarrollo/XALLAPAN_ANDROID/android/app/build/outputs/apk/release"
 
 
 adb shell pm enable com.awesomeproject

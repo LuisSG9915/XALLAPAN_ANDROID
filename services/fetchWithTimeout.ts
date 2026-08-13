@@ -1,8 +1,8 @@
 /**
- * Timeout por defecto para cualquier petición de red (1 minuto).
+ * Timeout por defecto para cualquier petición de red (20 segundos).
  * Si una petición tarda más que esto, se cancela (abort) y se explica el motivo.
  */
-export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 /**
  * Error lanzado cuando una petición se cancela por exceder el tiempo límite.
@@ -44,7 +44,7 @@ export function isTimeoutError(error: unknown): error is TimeoutError {
  *
  * @param input URL del recurso.
  * @param init Opciones de fetch (method, headers, body, etc.).
- * @param timeoutMs Tiempo máximo en ms antes de cancelar. Por defecto 60000 (1 min).
+ * @param timeoutMs Tiempo máximo en ms antes de cancelar. Por defecto 20000 (20 s).
  * @throws {TimeoutError} si la petición supera el tiempo límite.
  */
 export async function fetchWithTimeout(

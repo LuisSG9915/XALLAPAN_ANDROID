@@ -1,16 +1,19 @@
+import NetInfo from "@react-native-community/netinfo";
 import RNFS from "react-native-fs";
-import {
-  launchCamera,
-  launchImageLibrary,
-  Asset,
-} from "react-native-image-picker";
+import { launchCamera, launchImageLibrary } from "react-native-image-picker";
+import type { PhotoQuality } from "react-native-image-picker";
 import { PermissionsAndroid, Platform } from "react-native";
 import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import FotoUploadSettingsService from "./FotoUploadSettingsService";
 
 const API_BASE_URL = "https://api.cbinformatica.net:9031";
 const MAX_FOTOS = 5;
 const ESTADOS_PENDIENTES = ["pendiente", "error"];
+const FOTO_REQUEST_TIMEOUT_MS = 20_000;
+const FOTO_MAX_DIMENSION = 1280;
+const FOTO_JPEG_QUALITY: PhotoQuality = 0.5;
+const FOTO_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
 export type ClienteFoto = {
   id: string;
@@ -102,13 +105,17 @@ class ClienteFotosService {
         ? await launchCamera({
             mediaType: "photo",
             cameraType: "back",
-            quality: 0.8,
+            maxWidth: FOTO_MAX_DIMENSION,
+            maxHeight: FOTO_MAX_DIMENSION,
+            quality: FOTO_JPEG_QUALITY,
             saveToPhotos: false,
           })
         : await launchImageLibrary({
             mediaType: "photo",
             selectionLimit: 1,
-            quality: 0.8,
+            maxWidth: FOTO_MAX_DIMENSION,
+            maxHeight: FOTO_MAX_DIMENSION,
+            quality: FOTO_JPEG_QUALITY,
           });
     if (result.didCancel) throw new Error("CAPTURE_CANCELLED");
     if (result.errorCode)
@@ -118,13 +125,20 @@ class ClienteFotosService {
     const asset = result.assets?.[0];
     if (!asset?.uri)
       throw new Error("La selección no contiene una fotografía válida.");
+    if (
+      typeof asset.fileSize === "number" &&
+      asset.fileSize > FOTO_MAX_SIZE_BYTES
+    ) {
+      throw new Error("La fotografía no puede superar los 5 MB.");
+    }
 
     const etiqueta = solicitarEtiqueta
       ? await solicitarEtiqueta()
       : null;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const idMovil = `${idCliente}-${id}`;
-    const extension = this.extensionForAsset(asset);
+    const isPng = asset.type === "image/png";
+    const extension = isPng ? ".png" : ".jpg";
     const directory = `${RNFS.DocumentDirectoryPath}/cliente-fotos/${idCliente}`;
     const localPath = `${directory}/${id}${extension}`;
     await RNFS.mkdir(directory);
@@ -141,9 +155,9 @@ class ClienteFotosService {
       fotoMiniaturaServidor: null,
       fotoBase64: null,
       fotoMiniaturaBase64: null,
-      mimeType: asset.type || "image/jpeg",
+      mimeType: isPng ? "image/png" : "image/jpeg",
       miniaturaMimeType: null,
-      nombreArchivo: asset.fileName || `${id}${extension}`,
+      nombreArchivo: `${id}${extension}`,
       etiqueta: etiqueta?.trim() || null,
       fechaCaptura: new Date(),
       fechaLog: null,
@@ -159,7 +173,8 @@ class ClienteFotosService {
   async downloadFull(idCliente = 0, ruta = 0): Promise<number> {
     const response = await fetchWithTimeout(
       `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotosFull?idCliente=${idCliente}&ruta=${ruta}`,
-      { headers: { accept: "application/json" } }
+      { headers: { accept: "application/json" } },
+      FOTO_REQUEST_TIMEOUT_MS
     );
     if (!response.ok)
       throw new Error(`HTTP ${response.status} al descargar fotos`);
@@ -176,7 +191,8 @@ class ClienteFotosService {
       `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
         since.toISOString()
       )}&idCliente=${idCliente}&ruta=${ruta}`,
-      { headers: { accept: "application/json" } }
+      { headers: { accept: "application/json" } },
+      FOTO_REQUEST_TIMEOUT_MS
     );
     if (!response.ok)
       throw new Error(`HTTP ${response.status} al descargar cambios de fotos`);
@@ -188,6 +204,13 @@ class ClienteFotosService {
     usrAlta: number
   ): Promise<{ sent: number; failed: number }> {
     if (!this.realm || this.realm.isClosed) return { sent: 0, failed: 0 };
+    if (await FotoUploadSettingsService.getRequireWifi()) {
+      const network = await NetInfo.fetch().catch(() => null);
+      if (network?.type !== "wifi") {
+        console.log("[ClienteFotos] Arrastre omitido: se requiere conexión Wi-Fi.");
+        return { sent: 0, failed: 0 };
+      }
+    }
     const pending = Array.from(
       this.realm
         .objects<ClienteFoto>("ClienteFoto")
@@ -287,7 +310,8 @@ class ClienteFotosService {
         method: "POST",
         headers: { accept: "application/json" },
         body,
-      }
+      },
+      FOTO_REQUEST_TIMEOUT_MS
     );
     const responseText = await response.text();
     console.log("[ClienteFotos] Respuesta de arrastre:", {
@@ -299,6 +323,11 @@ class ClienteFotosService {
     if (!response.ok)
       throw new Error(`HTTP ${response.status}: ${responseText.slice(0, 250)}`);
     const result = responseText ? JSON.parse(responseText) : {};
+    if (result.codigo !== 1 || !result.id) {
+      throw new Error(
+        result.mensaje1 || "El servidor no confirmó el registro de la fotografía."
+      );
+    }
     this.realm.write(() => {
       const local = this.realm!.objectForPrimaryKey<ClienteFoto>(
         "ClienteFoto",
@@ -360,13 +389,6 @@ class ClienteFotosService {
     return count;
   }
 
-  private extensionForAsset(asset: Asset): string {
-    const name = asset.fileName || "";
-    const extension = name.includes(".")
-      ? name.slice(name.lastIndexOf(".")).toLowerCase()
-      : ".jpg";
-    return extension === ".png" ? ".png" : ".jpg";
-  }
 }
 
 export default new ClienteFotosService();
