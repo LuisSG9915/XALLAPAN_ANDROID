@@ -1183,7 +1183,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.3.5</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.3.6</Text>
         </View>
       </ScrollView>
 
