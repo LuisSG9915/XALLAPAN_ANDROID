@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,9 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  Image,
+  Share,
+  TextInput,
 } from "react-native";
 // import Clipboard from "@react-native-clipboard/clipboard"; // TODO: Re-enable when TurboModule issue is fixed
 import { Icon } from "react-native-elements";
@@ -16,6 +19,7 @@ import FullSyncService from "../services/FullSyncService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import PedidosService from "../services/PedidosService";
 import AuthService from "../services/AuthService";
+import ClienteFotosService, { ClienteFoto } from "../services/ClienteFotosService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 
 type EntityType =
@@ -28,6 +32,7 @@ type EntityType =
   | "inventario"
   | "cartera"
   | "clientes"
+  | "fotos"
   | "syncStatus"
   | "syncLog"
   | "bitacora"
@@ -63,6 +68,7 @@ interface EntityTab {
 const ENTITY_TABS: EntityTab[] = [
   { key: "ventas", title: "Ventas", icon: "attach-money" },
   { key: "clientes", title: "Clientes", icon: "people" },
+  { key: "fotos", title: "Fotos por cliente", icon: "photo-library" },
   { key: "productos", title: "Productos", icon: "inventory" },
   { key: "kits", title: "Kits", icon: "category" },
   { key: "precios", title: "Precios", icon: "price-check" },
@@ -106,6 +112,12 @@ export default function DataViewScreen() {
   const [currentSucursal, setCurrentSucursal] = useState<number>(1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [clientesFotos, setClientesFotos] = useState<any[]>([]);
+  const [clienteFotosModalOpen, setClienteFotosModalOpen] = useState(false);
+  const [selectedClienteFotos, setSelectedClienteFotos] = useState<number | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [searchField, setSearchField] = useState<string | null>(null);
+  const [fieldModalOpen, setFieldModalOpen] = useState(false);
   const ITEMS_PER_PAGE = 50;
 
   // Obtener sucursal del usuario logueado
@@ -172,6 +184,14 @@ export default function DataViewScreen() {
         case "clientes":
           setData(FullSyncService.getClientesFullPaginated(offset, ITEMS_PER_PAGE));
           break;
+        case "fotos": {
+          const clientes = FullSyncService.getClientesFullPaginated(0, newStats.clientes || ITEMS_PER_PAGE);
+          const fotos = ClienteFotosService.getAllFotos(selectedClienteFotos ?? undefined);
+          setClientesFotos(clientes);
+          setStats((currentStats: any) => ({ ...currentStats, fotos: fotos.length }));
+          setData(fotos.slice(offset, offset + ITEMS_PER_PAGE));
+          break;
+        }
         case "syncStatus":
           setData(FullSyncService.getSyncStatusPaginated(offset, ITEMS_PER_PAGE));
           break;
@@ -248,7 +268,7 @@ export default function DataViewScreen() {
       console.error("Error al cargar datos:", error);
       Alert.alert("Error", "No se pudieron cargar los datos");
     }
-  }, [selectedTab, currentPage]);
+  }, [selectedTab, currentPage, selectedClienteFotos]);
 
   useEffect(() => {
     loadData();
@@ -264,10 +284,28 @@ export default function DataViewScreen() {
     setSelectedTab(tab);
     setCurrentPage(0);
     setExpandedIndex(null);
+    setSearchText("");
+    setSearchField(null);
     setDropdownOpen(false);
   };
 
   const selectedTabInfo = ENTITY_TABS.find((t) => t.key === selectedTab);
+  const selectedCliente = clientesFotos.find((cliente) => cliente.id === selectedClienteFotos);
+
+  const getFotoUri = (foto: ClienteFoto): string | null => {
+    const base64 = foto.fotoMiniaturaBase64 || foto.fotoBase64;
+    if (base64) {
+      const mimeType = foto.miniaturaMimeType || foto.mimeType || "image/jpeg";
+      return `data:${mimeType};base64,${base64}`;
+    }
+    const localPath = foto.fotoMiniatura || foto.foto;
+    if (localPath) return localPath.startsWith("file:") ? localPath : `file://${localPath}`;
+    if (foto.fotoMiniaturaServidor || foto.fotoServidor) {
+      const remotePath = foto.fotoMiniaturaServidor || foto.fotoServidor;
+      if (remotePath?.startsWith("http")) return remotePath;
+    }
+    return null;
+  };
 
   const serializeItem = (item: any): string => {
     try {
@@ -276,6 +314,8 @@ export default function DataViewScreen() {
         const val = (item as any)[key];
         if (val instanceof Date) {
           plain[key] = val.toISOString();
+        } else if (typeof val === "string" && val.length > 5000) {
+          plain[key] = `${val.slice(0, 5000)}… [${val.length - 5000} caracteres omitidos]`;
         } else {
           plain[key] = val;
         }
@@ -285,6 +325,61 @@ export default function DataViewScreen() {
       return String(item);
     }
   };
+
+  const availableFields = useMemo(
+    () => Array.from(new Set(data.flatMap((item) => Object.keys(item)))).sort(),
+    [data]
+  );
+
+  const filteredData = useMemo(() => {
+    const query = searchText.trim().toLocaleLowerCase();
+    if (!query) return data;
+    return data.filter((item) => {
+      const value = searchField ? item?.[searchField] : serializeItem(item);
+      const searchable = value instanceof Date
+        ? value.toISOString()
+        : typeof value === "object" && value !== null
+          ? JSON.stringify(value)
+          : String(value ?? "");
+      return searchable.toLocaleLowerCase().includes(query);
+    });
+  }, [data, searchField, searchText]);
+
+  const shareText = async (text: string, title: string) => {
+    try {
+      await Share.share({ message: text, title });
+    } catch {
+      Alert.alert("Compartir", "No se pudo compartir la información.");
+    }
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      const clipboardModule = require("@react-native-clipboard/clipboard");
+      const clipboard = clipboardModule.default || clipboardModule;
+      if (typeof clipboard.setString !== "function") throw new Error("Clipboard no disponible");
+      clipboard.setString(text);
+      Alert.alert("Copiado", "La información se copió al portapapeles.");
+    } catch {
+      Alert.alert(
+        "Portapapeles no disponible",
+        "En este dispositivo puedes usar Compartir para enviar o copiar la información."
+      );
+    }
+  };
+
+  const serializeVisibleData = () => JSON.stringify(
+    filteredData.map((item) => {
+      const serialized = serializeItem(item);
+      try {
+        return JSON.parse(serialized);
+      } catch {
+        return serialized;
+      }
+    }),
+    null,
+    2
+  );
 
   const handleNextPage = () => {
     const totalRecords = getCount();
@@ -333,8 +428,7 @@ export default function DataViewScreen() {
                 Alert.alert("Sin endpoint", "No hay endpoint para copiar");
                 return;
               }
-              // Clipboard.setString(String(item.endpoint)); // TODO: Re-enable when TurboModule issue is fixed
-              Alert.alert("Endpoint", String(item.endpoint));
+              void copyText(String(item.endpoint));
             }}
           >
             <Icon name="content-copy" type="material" size={16} color={COLORS.primary} />
@@ -761,12 +855,51 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const renderFoto = ({ item }: { item: ClienteFoto }) => {
+    const uri = getFotoUri(item);
+    const cliente = clientesFotos.find((row) => row.id === item.idCliente);
+    return (
+      <View style={styles.photoCard}>
+        {uri ? <Image source={{ uri }} style={styles.photoPreview} /> : <View style={styles.photoPlaceholder}>
+          <Icon name="photo" type="material" size={36} color={COLORS.muted} />
+          <Text style={styles.photoPlaceholderText}>Sin imagen local</Text>
+        </View>}
+        <View style={styles.photoDetails}>
+          <Text style={styles.cardTitle}>{cliente?.nombre || `Cliente #${item.idCliente}`}</Text>
+          <Text style={styles.cardText}>ID Cliente: {item.idCliente}</Text>
+          <Text style={styles.cardText}>Etiqueta: {item.etiqueta || "Sin etiqueta"}</Text>
+          <Text style={[styles.cardText, { color: item.activa ? COLORS.success : COLORS.error }]}>Activo: {item.activa ? "Sí" : "No"}</Text>
+          <Text style={styles.cardText}>Estado: {item.estado}</Text>
+          <Text style={styles.cardText}>
+            Captura: {item.fechaCaptura ? new Date(item.fechaCaptura).toLocaleString() : "N/A"}
+          </Text>
+          {item.errorMensaje ? <Text style={styles.photoError}>Error: {item.errorMensaje}</Text> : null}
+        </View>
+        <View style={styles.recordActions}>
+          <TouchableOpacity style={styles.recordActionButton} onPress={() => void copyText(serializeItem(item))}>
+            <Icon name="content-copy" type="material" size={16} color={COLORS.primary} />
+            <Text style={styles.recordActionText}>Copiar datos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.recordActionButton}
+            onPress={() => void shareText(serializeItem(item), `Foto cliente ${item.idCliente}`)}
+          >
+            <Icon name="share" type="material" size={16} color={COLORS.primary} />
+            <Text style={styles.recordActionText}>Compartir</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderItem = ({ item }: { item: any }) => {
     switch (selectedTab) {
       case "ventas":
         return renderVenta({ item });
       case "clientes":
         return renderCliente({ item });
+      case "fotos":
+        return renderFoto({ item });
       case "productos":
         return renderProducto({ item });
       case "kits":
@@ -840,6 +973,8 @@ export default function DataViewScreen() {
         return stats.cartera || 0;
       case "clientes":
         return stats.clientes || 0;
+      case "fotos":
+        return stats.fotos || 0;
       case "syncStatus":
         return stats.syncStatus || 0;
       case "syncLog":
@@ -930,10 +1065,148 @@ export default function DataViewScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {selectedTab === "fotos" && (
+        <>
+          <TouchableOpacity
+            style={styles.clientSelector}
+            onPress={() => setClienteFotosModalOpen(true)}
+          >
+            <View>
+              <Text style={styles.clientSelectorLabel}>Filtrar fotografías por cliente</Text>
+              <Text style={styles.clientSelectorValue}>
+                {selectedCliente?.nombre || (selectedClienteFotos === null ? "Todos los clientes" : `Cliente #${selectedClienteFotos}`)}
+              </Text>
+            </View>
+            <Icon name="arrow-drop-down" type="material" size={24} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <Modal
+            visible={clienteFotosModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setClienteFotosModalOpen(false)}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setClienteFotosModalOpen(false)}
+            >
+              <View style={styles.modalList}>
+                <Text style={styles.modalTitle}>Seleccionar cliente</Text>
+                <ScrollView showsVerticalScrollIndicator>
+                  <TouchableOpacity
+                    style={[styles.modalItem, selectedClienteFotos === null && styles.modalItemActive]}
+                    onPress={() => {
+                      setSelectedClienteFotos(null);
+                      setClienteFotosModalOpen(false);
+                    }}
+                  >
+                    <Icon name="people" type="material" size={18} color={selectedClienteFotos === null ? "#fff" : COLORS.textSecondary} />
+                    <Text style={[styles.modalItemText, selectedClienteFotos === null && styles.modalItemTextActive]}>Todos los clientes</Text>
+                  </TouchableOpacity>
+                  {clientesFotos.map((cliente) => (
+                    <TouchableOpacity
+                      key={String(cliente.id)}
+                      style={[styles.modalItem, selectedClienteFotos === cliente.id && styles.modalItemActive]}
+                      onPress={() => {
+                        setSelectedClienteFotos(cliente.id);
+                        setClienteFotosModalOpen(false);
+                      }}
+                    >
+                      <Icon name="person" type="material" size={18} color={selectedClienteFotos === cliente.id ? "#fff" : COLORS.textSecondary} />
+                      <Text style={[styles.modalItemText, selectedClienteFotos === cliente.id && styles.modalItemTextActive]}>
+                        {cliente.nombre || `Cliente #${cliente.id}`}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        </>
+      )}
+
+      <View style={styles.filterContainer}>
+        <View style={styles.searchRow}>
+          <Icon name="search" type="material" size={21} color={COLORS.primary} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder="Buscar en la página actual..."
+            placeholderTextColor={COLORS.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchText.length > 0 ? (
+            <TouchableOpacity onPress={() => setSearchText("")} style={styles.iconButton}>
+              <Icon name="close" type="material" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <View style={styles.filterActions}>
+          <TouchableOpacity style={styles.fieldButton} onPress={() => setFieldModalOpen(true)}>
+            <Icon name="filter-list" type="material" size={18} color={COLORS.primary} />
+            <Text style={styles.fieldButtonText} numberOfLines={1}>
+              {searchField || "Todos los campos"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dataActionButton}
+            onPress={() => void copyText(serializeVisibleData())}
+            disabled={filteredData.length === 0}
+          >
+            <Icon name="content-copy" type="material" size={17} color={COLORS.primary} />
+            <Text style={styles.dataActionText}>Copiar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dataActionButton}
+            onPress={() => void shareText(serializeVisibleData(), selectedTabInfo?.title || "Datos")}
+            disabled={filteredData.length === 0}
+          >
+            <Icon name="share" type="material" size={17} color={COLORS.primary} />
+            <Text style={styles.dataActionText}>Compartir</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Modal visible={fieldModalOpen} transparent animationType="fade" onRequestClose={() => setFieldModalOpen(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFieldModalOpen(false)}>
+          <View style={styles.modalList}>
+            <Text style={styles.modalTitle}>Campo de búsqueda</Text>
+            <ScrollView showsVerticalScrollIndicator>
+              {[null, ...availableFields].map((field) => (
+                <TouchableOpacity
+                  key={field || "all"}
+                  style={[styles.modalItem, searchField === field && styles.modalItemActive]}
+                  onPress={() => {
+                    setSearchField(field);
+                    setFieldModalOpen(false);
+                  }}
+                >
+                  <Icon
+                    name={field ? "data-object" : "select-all"}
+                    type="material"
+                    size={18}
+                    color={searchField === field ? "#fff" : COLORS.textSecondary}
+                  />
+                  <Text style={[styles.modalItemText, searchField === field && styles.modalItemTextActive]}>
+                    {field || "Todos los campos"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Stats Summary */}
       <View style={styles.statsContainer}>
         <Text style={styles.statsText}>
-          Mostrando {data.length} de {getCount()} registros
+          {searchText.trim()
+            ? `${filteredData.length} coincidencias en ${data.length} registros de esta página`
+            : `Mostrando ${data.length} de ${getCount()} registros`}
         </Text>
       </View>
 
@@ -986,7 +1259,7 @@ export default function DataViewScreen() {
 
       {/* JSON Data List */}
       <FlatList
-        data={data}
+        data={filteredData}
         keyExtractor={(item, index) => `${selectedTab}-${item.id ?? item.idBitacoraMovil ?? index}`}
         contentContainerStyle={styles.listContent}
         refreshControl={
@@ -1000,15 +1273,19 @@ export default function DataViewScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="inbox" type="material" size={64} color={COLORS.muted} style={{ marginBottom: 16 }} />
-            <Text style={styles.emptyText}>No hay datos sincronizados</Text>
-            <Text style={styles.emptySubtext}>Inicia sesión nuevamente para sincronizar</Text>
+            <Text style={styles.emptyText}>{searchText.trim() ? "Sin coincidencias" : "No hay datos sincronizados"}</Text>
+            <Text style={styles.emptySubtext}>
+              {searchText.trim() ? "Prueba con otro texto o campo" : "Inicia sesión nuevamente para sincronizar"}
+            </Text>
           </View>
         }
         renderItem={({ item, index }) => {
+          if (selectedTab === "fotos") return renderFoto({ item });
           const isExpanded = expandedIndex === index;
+          const serializedItem = serializeItem(item);
           return (
-            <TouchableOpacity onPress={() => setExpandedIndex(isExpanded ? null : index)} activeOpacity={0.8}>
-              <View style={styles.jsonCard}>
+            <View style={styles.jsonCard}>
+              <TouchableOpacity onPress={() => setExpandedIndex(isExpanded ? null : index)} activeOpacity={0.8}>
                 <View style={styles.jsonCardHeader}>
                   <Text style={styles.jsonCardIndex}>#{currentPage * ITEMS_PER_PAGE + index + 1}</Text>
                   <Text style={styles.jsonCardId} numberOfLines={1}>
@@ -1021,13 +1298,26 @@ export default function DataViewScreen() {
                     color={COLORS.textSecondary}
                   />
                 </View>
-                {isExpanded && (
-                  <ScrollView horizontal showsHorizontalScrollIndicator>
-                    <Text style={styles.jsonText}>{serializeItem(item)}</Text>
-                  </ScrollView>
-                )}
+              </TouchableOpacity>
+              <View style={styles.recordActions}>
+                <TouchableOpacity style={styles.recordActionButton} onPress={() => void copyText(serializedItem)}>
+                  <Icon name="content-copy" type="material" size={16} color={COLORS.primary} />
+                  <Text style={styles.recordActionText}>Copiar JSON</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.recordActionButton}
+                  onPress={() => void shareText(serializedItem, `${selectedTabInfo?.title || "Registro"}`)}
+                >
+                  <Icon name="share" type="material" size={16} color={COLORS.primary} />
+                  <Text style={styles.recordActionText}>Compartir</Text>
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+              {isExpanded && (
+                <ScrollView horizontal showsHorizontalScrollIndicator>
+                  <Text selectable style={styles.jsonText}>{serializedItem}</Text>
+                </ScrollView>
+              )}
+            </View>
           );
         }}
       />
@@ -1116,6 +1406,142 @@ const styles = StyleSheet.create({
   modalItemTextActive: {
     color: "#fff",
     fontWeight: "700",
+  },
+  filterContainer: {
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: 8,
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: 10,
+    backgroundColor: COLORS.background,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 9,
+  },
+  iconButton: {
+    padding: 4,
+  },
+  filterActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  fieldButton: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.s,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+  },
+  fieldButtonText: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  dataActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.s,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  dataActionText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  clientSelector: {
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  clientSelectorLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  clientSelectorValue: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.textPrimary,
+    marginTop: 2,
+  },
+  photoCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.s,
+    overflow: "hidden",
+    ...SHADOWS.small,
+  },
+  photoPreview: {
+    width: "100%",
+    height: 220,
+    backgroundColor: COLORS.background,
+  },
+  photoPlaceholder: {
+    height: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.background,
+  },
+  photoPlaceholderText: {
+    color: COLORS.muted,
+    marginTop: 6,
+  },
+  photoDetails: {
+    padding: SPACING.m,
+    gap: 4,
+  },
+  photoError: {
+    color: COLORS.error,
+    fontSize: 13,
+  },
+  recordActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  recordActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 3,
+    paddingRight: 8,
+  },
+  recordActionText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "600",
   },
   jsonCard: {
     backgroundColor: COLORS.surface,

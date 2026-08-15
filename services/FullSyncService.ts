@@ -8,7 +8,9 @@ import GpsBitacoraService from "./GpsBitacoraService";
 import ReubicacionService from "./ReubicacionService";
 import AuthService from "./AuthService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
-import ClienteFotosService from "./ClienteFotosService";
+import ClienteFotosService, {
+  formatClienteFotosFechaInicial,
+} from "./ClienteFotosService";
 
 export type { SyncProgress };
 export type SyncProgressCallback = (progress: SyncProgress) => void;
@@ -1590,7 +1592,7 @@ class FullSyncService {
             const url = `${
               this.apiBaseUrl
             }/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
-              since.toISOString()
+              formatClienteFotosFechaInicial(since)
             )}&ruta=${rutaPedido}`;
             const idBitacora = await BitacoraService.registrarInicioSync(
               tableName,

@@ -15,6 +15,25 @@ const FOTO_MAX_DIMENSION = 1280;
 const FOTO_JPEG_QUALITY: PhotoQuality = 0.5;
 const FOTO_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
+export const parseActiva = (value: unknown): boolean => {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") return ["1", "true", "si", "sí"].includes(value.trim().toLowerCase());
+  return false;
+};
+
+export const formatClienteFotosFechaInicial = (date: Date): string => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}.${ms}`;
+};
+
 export type ClienteFoto = {
   id: string;
   idServidor?: number | null;
@@ -52,6 +71,13 @@ class ClienteFotosService {
         .objects<ClienteFoto>("ClienteFoto")
         .filtered("idCliente == $0 AND activa == true", idCliente)
     );
+  }
+
+  getAllFotos(idCliente?: number): ClienteFoto[] {
+    if (!this.realm || this.realm.isClosed) return [];
+    const fotos = this.realm.objects<ClienteFoto>("ClienteFoto");
+    const filtradas = idCliente == null ? fotos : fotos.filtered("idCliente == $0", idCliente);
+    return Array.from(filtradas.sorted("fechaCaptura", true));
   }
 
   getActiveCount(idCliente: number): number {
@@ -189,7 +215,7 @@ class ClienteFotosService {
   ): Promise<number> {
     const response = await fetchWithTimeout(
       `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
-        since.toISOString()
+        formatClienteFotosFechaInicial(since)
       )}&idCliente=${idCliente}&ruta=${ruta}`,
       { headers: { accept: "application/json" } },
       FOTO_REQUEST_TIMEOUT_MS
@@ -355,10 +381,22 @@ class ClienteFotosService {
           !/^0{8}-0{4}-0{4}-0{4}-0{12}$/i.test(String(row.idMovil))
             ? String(row.idMovil)
             : `server-${idServidor}`;
-        const existing = this.realm!.objects<ClienteFoto>(
-          "ClienteFoto"
-        ).filtered("idMovil == $0 OR idServidor == $1", idMovil, idServidor)[0];
+        const matches = Array.from(
+          this.realm!
+            .objects<ClienteFoto>("ClienteFoto")
+            .filtered("idMovil == $0 OR idServidor == $1", idMovil, idServidor)
+        );
+        const existing = matches.find(
+          (foto) => !ESTADOS_PENDIENTES.includes(foto.estado)
+        ) || matches[0];
         if (existing && ESTADOS_PENDIENTES.includes(existing.estado)) continue;
+        const activa = parseActiva(row.activa ?? row.Activa);
+        console.log("[ClienteFotos] Aplicando estado remoto:", {
+          idServidor,
+          idLocal: existing?.id,
+          valorRecibido: row.activa ?? row.Activa,
+          activa,
+        });
         const data = {
           id: existing?.id || `remote-${idMovil}`,
           idServidor,
@@ -377,12 +415,18 @@ class ClienteFotosService {
           etiqueta: row.etiqueta == null ? null : String(row.etiqueta),
           fechaCaptura: row.fechaCaptura ? new Date(row.fechaCaptura) : null,
           fechaLog: row.fechaLog ? new Date(row.fechaLog) : new Date(),
-          activa: row.activa !== false,
+          activa,
           estado: "sincronizada",
           errorMensaje: null,
           syncedAt: new Date(),
         };
         this.realm!.create("ClienteFoto", data, Realm.UpdateMode.Modified);
+        for (const match of matches) {
+          if (!ESTADOS_PENDIENTES.includes(match.estado)) {
+            match.activa = activa;
+            match.idServidor = idServidor;
+          }
+        }
         count++;
       }
     });

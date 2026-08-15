@@ -40,7 +40,10 @@ import {
   launchCamera,
   launchImageLibrary,
 } from "react-native-image-picker";
-import ClienteFotosService from "../services/ClienteFotosService";
+import ClienteFotosService, {
+  formatClienteFotosFechaInicial,
+  parseActiva,
+} from "../services/ClienteFotosService";
 
 const MAX_FOTO_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -51,6 +54,74 @@ const crearRealmMock = () => ({
   }),
   write: jest.fn((callback: () => void) => callback()),
   create: jest.fn(),
+});
+
+describe("formatClienteFotosFechaInicial", () => {
+  it("envía la fecha en hora local sin sufijo UTC", () => {
+    const date = new Date("2026-08-15T18:39:33.740Z");
+    const expected = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-") + ` ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}.${String(date.getMilliseconds()).padStart(3, "0")}`;
+
+    expect(formatClienteFotosFechaInicial(date)).toBe(expected);
+    expect(formatClienteFotosFechaInicial(date)).not.toContain("T");
+    expect(formatClienteFotosFechaInicial(date)).not.toContain("Z");
+  });
+});
+
+describe("parseActiva", () => {
+  it.each([
+    [true, true],
+    [false, false],
+    [1, true],
+    [0, false],
+    ["1", true],
+    ["0", false],
+    ["true", true],
+    ["false", false],
+  ])("convierte %p en %p", (value, expected) => {
+    expect(parseActiva(value)).toBe(expected);
+  });
+});
+
+describe("ClienteFotosService sincronización remota", () => {
+  it("actualiza a inactiva una foto existente cuando el servidor devuelve 0", () => {
+    const existing = {
+      id: "local-26",
+      idMovil: "10127-local-26",
+      idServidor: 26,
+      estado: "sincronizada",
+      activa: true,
+    };
+    const realm = {
+      isClosed: false,
+      objects: jest.fn().mockReturnValue({
+        filtered: jest.fn().mockReturnValue([existing]),
+      }),
+      write: jest.fn((callback: () => void) => callback()),
+      create: jest.fn(),
+    };
+
+    ClienteFotosService.setRealm(realm as any);
+    const count = (ClienteFotosService as any).upsertRemoteRows([
+      {
+        id: 26,
+        idCliente: 10127,
+        idMovil: "00000000-0000-0000-0000-000000000000",
+        activa: 0,
+      },
+    ]);
+
+    expect(count).toBe(1);
+    expect(realm.create).toHaveBeenCalledWith(
+      "ClienteFoto",
+      expect.objectContaining({ id: "local-26", activa: false }),
+      expect.anything()
+    );
+    expect(existing.activa).toBe(false);
+  });
 });
 
 describe("ClienteFotosService.selectAndQueue", () => {
