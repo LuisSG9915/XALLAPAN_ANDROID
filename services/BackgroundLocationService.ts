@@ -3,7 +3,10 @@ import BackgroundActions from "react-native-background-actions";
 import Geolocation, { GeoPosition, GeoError } from "react-native-geolocation-service";
 import NetInfo from "@react-native-community/netinfo";
 import FullSyncService from "./FullSyncService";
-import GpsBitacoraService from "./GpsBitacoraService";
+import AuthService from "./AuthService";
+import GpsBitacoraService, {
+  TRACKING_UPLOAD_INTERVAL_MS,
+} from "./GpsBitacoraService";
 import LocationService from "./LocationService";
 
 const TAG = "[BackgroundLocationService]";
@@ -36,6 +39,8 @@ class BackgroundLocationService {
   // Último fix efectivamente persistido (distinto de lastFixAt, que solo marca
   // actividad del proveedor para el watchdog).
   private lastCaptureAt = 0;
+  private lastTrackingUploadAttemptAt = 0;
+  private trackingUploadInFlight: Promise<void> | null = null;
   // Token de generación: invalida callbacks/watchdogs de loops anteriores.
   private generation = 0;
   // Evita carreras en start() (varios health-checks/disparadores simultáneos).
@@ -150,6 +155,8 @@ class BackgroundLocationService {
         this.intervalMs,
       );
 
+      void this.uploadTrackingPendientes(generation, "gps-fix");
+
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const acc = Math.round(accuracy ?? 0);
       const estadoGps = this.gpsEnganchado
@@ -201,11 +208,120 @@ class BackgroundLocationService {
     }
   }
 
+  private async uploadTrackingPendientes(
+    generation: number,
+    source: "gps-fix" | "foreground-start" | "watchdog" | "manual" = "manual",
+    force = false,
+  ): Promise<void> {
+    const now = Date.now();
+
+    if (!this.isTaskRunning || generation !== this.generation) {
+      console.warn(TAG, "[TrackingUpload] Ciclo omitido: ruta detenida o generación inválida", { source });
+      return;
+    }
+
+    if (
+      !force &&
+      this.lastTrackingUploadAttemptAt > 0 &&
+      now - this.lastTrackingUploadAttemptAt < TRACKING_UPLOAD_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    if (this.trackingUploadInFlight) {
+      console.log(TAG, "[TrackingUpload] Ya hay un envío en curso; se omite este disparo", { source });
+      return;
+    }
+
+    this.lastTrackingUploadAttemptAt = now;
+    const uploadPromise = this.performTrackingUpload(generation, source, force);
+    this.trackingUploadInFlight = uploadPromise;
+
+    try {
+      await uploadPromise;
+    } finally {
+      if (this.trackingUploadInFlight === uploadPromise) {
+        this.trackingUploadInFlight = null;
+      }
+    }
+  }
+
+  private async performTrackingUpload(
+    generation: number,
+    source: "gps-fix" | "foreground-start" | "watchdog" | "manual",
+    force = false,
+  ): Promise<void> {
+    console.log(TAG, "[TrackingUpload] Ciclo iniciado", {
+      source,
+      generation,
+      currentGeneration: this.generation,
+      isTaskRunning: this.isTaskRunning,
+    });
+
+    if (!this.isTaskRunning || generation !== this.generation) {
+      console.warn(TAG, "[TrackingUpload] Ciclo omitido: ruta detenida o generación inválida", { source });
+      return;
+    }
+
+    try {
+      const netInfo = await NetInfo.fetch().catch(() => null);
+      const conRed =
+        netInfo?.isConnected === true && netInfo.isInternetReachable !== false;
+      console.log(TAG, "[TrackingUpload] Estado de red", {
+        source,
+        isConnected: netInfo?.isConnected ?? null,
+        isInternetReachable: netInfo?.isInternetReachable ?? null,
+        conRed,
+      });
+      if (!conRed) {
+        console.warn(TAG, "[TrackingUpload] Sin red utilizable; los puntos permanecen pendientes", { source });
+        return;
+      }
+
+      const user = await AuthService.restoreSession();
+      if (!user) {
+        console.warn(TAG, "[TrackingUpload] Sin sesión; se omite el envío", { source });
+        return;
+      }
+      if (!this.isTaskRunning || generation !== this.generation) {
+        console.warn(TAG, "[TrackingUpload] La ruta se detuvo antes de iniciar el envío", { source });
+        return;
+      }
+
+      const sucursal = Number(user.sucursal_origen || user.sucursal || 1);
+      const idUsuario = Number(user.id ?? user.idUsuario ?? 0);
+      if (!idUsuario) {
+        console.warn(TAG, "[TrackingUpload] Usuario inválido; se omite el envío", { source, idUsuario });
+        return;
+      }
+
+      const startedAt = Date.now();
+      console.log(TAG, "[TrackingUpload] Consultando y enviando pendientes", {
+        source,
+        sucursal,
+        idUsuario,
+      });
+      if (force) {
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario, true);
+      } else {
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
+      }
+      console.log(TAG, "[TrackingUpload] Ciclo terminado", {
+        source,
+        sucursal,
+        idUsuario,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      console.warn(TAG, "[TrackingUpload] Error subiendo tracking GPS pendiente:", { source, error });
+    }
+  }
+
   /**
    * Bucle del foreground service. Ya NO usa setTimeout como reloj de captura;
    * el reloj real es FusedLocationProviderClient vía watchPosition.
-   * Este bucle solo actúa como watchdog: cada ~2 minutos verifica que haya
-   * llegado al menos un fix reciente y, si no, re-suscribe.
+   * Cada ~2 minutos verifica que haya llegado un fix reciente y, si no,
+   * re-suscribe; también intenta subir el tracking GPS pendiente.
    */
   private async backgroundTask(): Promise<void> {
     await this.ensureReady();
@@ -220,6 +336,8 @@ class BackgroundLocationService {
 
     await this.startWatch(gen);
     this.lastFixAt = Date.now();
+    console.log(TAG, "[TrackingUpload] Disparo inicial del foreground service", { gen });
+    void this.uploadTrackingPendientes(gen, "foreground-start", true);
 
     while (this.isTaskRunning && this.generation === gen) {
       await sleep(WATCHDOG_INTERVAL_MS);
@@ -231,6 +349,12 @@ class BackgroundLocationService {
         await this.startWatch(gen);
         this.updateNotificationText(`Sin señal GPS ${Math.round(sinceLastFix / 1000)}s - reconectando...`);
       }
+
+      console.log(TAG, "[TrackingUpload] Disparo periódico del watchdog", {
+        gen,
+        sinceLastFixMs: sinceLastFix,
+      });
+      void this.uploadTrackingPendientes(gen, "watchdog");
     }
 
     this.stopWatch();
@@ -294,6 +418,7 @@ class BackgroundLocationService {
     }
 
     this.isTaskRunning = true;
+    this.lastTrackingUploadAttemptAt = 0;
     const currentGen = ++this.generation;
 
     try {

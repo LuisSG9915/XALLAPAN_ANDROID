@@ -10,6 +10,7 @@ import CierreRutaService from "../services/CierreRutaService";
 type PedidoMock = {
   folio: number;
   ruta: number;
+  idVendedor?: number;
   fechaEntrega: Date;
   estatus: number;
 };
@@ -22,8 +23,12 @@ const fechaRelativa = (dias: number): Date => {
 };
 
 const crearRealmMock = (pedidos: PedidoMock[]) => {
-  const filtered = jest.fn((_query: string, ruta: number) =>
-    pedidos.filter((pedido) => pedido.ruta === ruta)
+  const filtered = jest.fn((query: string, ruta: number, vendedor?: number) =>
+    pedidos.filter(
+      (pedido) =>
+        pedido.ruta === ruta &&
+        (!query.includes("idVendedor") || pedido.idVendedor === vendedor),
+    )
   );
 
   return {
@@ -65,6 +70,20 @@ describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
       100, 101, 102, 103, 104,
     ]);
     expect(filtered).toHaveBeenCalledWith("ruta == $0", 7);
+  });
+
+  it("filtra el cierre por vendedor cuando se recibe el vendedor actual", () => {
+    const pedidos: PedidoMock[] = [
+      { folio: 500, ruta: 7, idVendedor: 4, fechaEntrega: fechaRelativa(0), estatus: 3 },
+      { folio: 501, ruta: 7, idVendedor: 2142, fechaEntrega: fechaRelativa(0), estatus: 3 },
+    ];
+    const { realm, filtered } = crearRealmMock(pedidos);
+    CierreRutaService.setRealm(realm as any);
+
+    const resultado = CierreRutaService.validarPedidosPendientesSinCausa(7, 4);
+
+    expect(resultado.pedidosBloqueantes.map((pedido) => pedido.folio)).toEqual([500]);
+    expect(filtered).toHaveBeenCalledWith("ruta == $0 AND idVendedor == $1", 7, 4);
   });
 
   it("permite cerrar cuando los pedidos de hoy solo están entregados o entregados parcialmente", () => {

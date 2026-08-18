@@ -5877,6 +5877,7 @@ class FullSyncService {
         estatus_anterior: b.estatusAnterior ?? null,
         cantAtencion: b.cantAtencion ?? null,
         precioAtencion: b.precioAtencion ?? null,
+        observaciones: b.observaciones ?? null,
         causaDiferencia: b.causaDiferencia ?? null,
         obserDiferencia: b.obserDiferencia ?? null,
         causaNoAtencion: b.causaNoAtencion ?? null,

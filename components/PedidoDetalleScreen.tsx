@@ -12,18 +12,37 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Icon } from "react-native-elements";
-import PedidosService, { Pedido, ESTATUS_PEDIDO } from "../services/PedidosService";
+import TicketPrinter from "../services/TicketPrinter";
+import PedidosService, {
+  Pedido,
+  ESTATUS_PEDIDO,
+  PRODUCTO_AGREGADO_OBSERVACION,
+  esProductoAgregado,
+} from "../services/PedidosService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService from "../services/AuthService";
 import LocationService from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
-import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
+import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
+import { APP_NAME, COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
 interface Props {
   navigation: any;
   route: any;
 }
+
+type ProductoDisponiblePedido = {
+  id: number;
+  claveProd: string;
+  descripcion: string;
+  precio: number;
+  existencia: number;
+  esKit?: boolean;
+  inventariable?: boolean;
+  esPromocion?: boolean;
+  usandoPrecioDefault?: boolean;
+};
 
 export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const { folio, soloLectura } = route.params;
@@ -33,8 +52,21 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const [preciosPromo, setPreciosPromo] = useState<any[]>([]);
   const [preciosLista, setPreciosLista] = useState<any[]>([]);
   const [preciosDefault, setPreciosDefault] = useState<any[]>([]);
+  const [formasPago, setFormasPago] = useState<any[]>([]);
+  const [metodoPago, setMetodoPago] = useState<number | null>(null);
+  const [productosDisponibles, setProductosDisponibles] = useState<ProductoDisponiblePedido[]>([]);
+  const [filteredProductosDisponibles, setFilteredProductosDisponibles] = useState<ProductoDisponiblePedido[]>([]);
+  const [productoModalVisible, setProductoModalVisible] = useState(false);
+  const [searchProductoQuery, setSearchProductoQuery] = useState("");
+  const [showOnlyPromotions, setShowOnlyPromotions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [validandoGPS, setValidandoGPS] = useState(false);
+  const [progresoValidacion, setProgresoValidacion] = useState<{
+    intento: number;
+    total: number;
+    accuracy: number;
+  } | null>(null);
+  const [diagnosticoGps, setDiagnosticoGps] = useState<DiagnosticoGpsData | null>(null);
   const [gpsValidado, setGpsValidado] = useState(false);
   const [clienteNombre, setClienteNombre] = useState<string>("");
   const [clienteDireccion, setClienteDireccion] = useState<string>("");
@@ -52,6 +84,154 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
   const salidaControlada = useRef(false);
   const cierreEnCursoRef = useRef(false);
+
+  const construirProductosDisponibles = (pedidoData: Pedido, sucursal: number): ProductoDisponiblePedido[] => {
+    const productosData = FullSyncService.getProductos(100000);
+    const inventarioData = FullSyncService.getInventario();
+    const kitsData = FullSyncService.getKits(50000);
+    const cliente = FullSyncService.getClienteFullById(Number(pedidoData.cliente)) as any;
+    const listaPrecio = Number(cliente?.listaPrecio ?? pedidoData.listaPrecio ?? 0);
+    const promociones = FullSyncService.getPreciosPromoByCliente(pedidoData.cliente);
+    const preciosCliente = FullSyncService.getPreciosByListaPrecio(listaPrecio);
+    const preciosDomicilio = FullSyncService.getPreciosByListaPrecio(13);
+
+    const crearMapaPrecios = (precios: any[]): Map<number, number> => {
+      const mapa = new Map<number, number>();
+      precios.forEach((precio) => {
+        const clave = Number(precio?.claveProd);
+        if (Number.isFinite(clave)) mapa.set(clave, Number(precio.precio) || 0);
+      });
+      return mapa;
+    };
+
+    const promocionesMap = crearMapaPrecios(promociones);
+    const preciosClienteMap = crearMapaPrecios(preciosCliente);
+    const preciosDomicilioMap = crearMapaPrecios(preciosDomicilio);
+    const todasLasClaves = new Set<number>([
+      ...promocionesMap.keys(),
+      ...preciosClienteMap.keys(),
+      ...preciosDomicilioMap.keys(),
+    ]);
+    const productosPorId = new Map<number, any>();
+    const productosPorClave = new Map<number, any>();
+    productosData.forEach((producto: any) => {
+      const id = Number(producto.id);
+      const clave = Number(producto.claveProd);
+      if (Number.isFinite(id)) productosPorId.set(id, producto);
+      if (Number.isFinite(clave)) productosPorClave.set(clave, producto);
+    });
+
+    const inventarioPorClave = new Map<number, number>();
+    inventarioData
+      .filter((item: any) => Number(item.sucursal) === sucursal && Number(item.id) < 10000)
+      .forEach((item: any) => {
+        const clave = Number(item.claveProd);
+        if (!Number.isFinite(clave)) return;
+        inventarioPorClave.set(clave, (inventarioPorClave.get(clave) || 0) + (Number(item.saldo) || 0));
+      });
+
+    const kitsPorProducto = new Map<number, any[]>();
+    kitsData.forEach((kit: any) => {
+      const idProducto = Number(kit.idProducto);
+      if (!Number.isFinite(idProducto)) return;
+      kitsPorProducto.set(idProducto, [...(kitsPorProducto.get(idProducto) || []), kit]);
+    });
+
+    const calcularExistencia = (producto: any, claveProd: number): number => {
+      const idProducto = Number(producto.id);
+      const claveProducto = Number(producto.claveProd);
+      const componentes = kitsPorProducto.get(idProducto) || [];
+      if (producto.esKit && !producto.inventariable) {
+        if (componentes.length === 0) return 0;
+        let minimo = Infinity;
+        componentes.forEach((componente) => {
+          if (componente.noRecuperaEnvase) return;
+          const cantidadInsumo = Number(componente.cantidad);
+          const claveInsumo = Number(componente.idInsumo);
+          if (cantidadInsumo <= 0 || !Number.isFinite(claveInsumo)) {
+            minimo = 0;
+            return;
+          }
+          minimo = Math.min(minimo, Math.floor((inventarioPorClave.get(claveInsumo) || 0) / cantidadInsumo));
+        });
+        return minimo === Infinity ? 0 : minimo;
+      }
+      return (
+        inventarioPorClave.get(claveProd) ??
+        (Number.isFinite(claveProducto) ? inventarioPorClave.get(claveProducto) : undefined) ??
+        inventarioPorClave.get(idProducto) ??
+        0
+      );
+    };
+
+    const calcularPrecioKit = (producto: any): number | undefined => {
+      const componentes = kitsPorProducto.get(Number(producto.id)) || [];
+      if (!componentes.length) return undefined;
+      let precioKit = 0;
+      componentes.forEach((componente) => {
+        const insumo = productosPorId.get(Number(componente.idInsumo)) || productosPorClave.get(Number(componente.idInsumo));
+        const precioFijo = Number(componente.precio) || 0;
+        const clavesInsumo = [
+          Number(componente.idInsumo),
+          Number(insumo?.id),
+          Number(insumo?.claveProd),
+        ].filter(Number.isFinite);
+        const buscarPrecioInsumo = (mapa: Map<number, number>): number | undefined => {
+          const claveEncontrada = clavesInsumo.find((clave) => mapa.has(clave));
+          return claveEncontrada === undefined ? undefined : mapa.get(claveEncontrada);
+        };
+        const precioInsumo = insumo?.precioCatalogo === true
+          ? (buscarPrecioInsumo(promocionesMap) ??
+            buscarPrecioInsumo(preciosClienteMap) ??
+            buscarPrecioInsumo(preciosDomicilioMap) ??
+            precioFijo)
+          : precioFijo;
+        precioKit += precioInsumo * (Number(componente.cantidad) || 1);
+      });
+      return precioKit > 0 ? precioKit : undefined;
+    };
+
+    const productosMap = new Map<number, ProductoDisponiblePedido>();
+    todasLasClaves.forEach((clave) => {
+      const producto = productosPorClave.get(clave) || productosPorId.get(clave);
+      const id = Number(producto?.id);
+      if (!producto || !Number.isFinite(id)) return;
+
+      const esKit = Boolean(producto.esKit);
+      const esPromocion = promocionesMap.has(clave);
+      const precioPromo = promocionesMap.get(clave);
+      const precioCliente = preciosClienteMap.get(clave);
+      const precioDefault = preciosDomicilioMap.get(clave);
+      let precio = precioPromo ?? precioCliente ?? precioDefault ?? 0;
+      if (esKit && !producto.inventariable && !esPromocion) {
+        precio = calcularPrecioKit(producto) ?? precio;
+      }
+
+      const productoDisponible: ProductoDisponiblePedido = {
+        id,
+        claveProd: String(producto.claveProd ?? clave),
+        descripcion: producto.descripcion || `Producto #${id}`,
+        precio,
+        existencia: calcularExistencia(producto, clave),
+        esKit,
+        inventariable: Boolean(producto.inventariable),
+        esPromocion,
+        usandoPrecioDefault: precioPromo === undefined && precioCliente === undefined && precioDefault !== undefined,
+      };
+      if (productoDisponible.existencia <= 0) return;
+
+      const existente = productosMap.get(id);
+      if (
+        !existente ||
+        (esPromocion && !existente.esPromocion) ||
+        precio > existente.precio
+      ) {
+        productosMap.set(id, productoDisponible);
+      }
+    });
+
+    return Array.from(productosMap.values());
+  };
 
   useEffect(() => {
     cargarDatos();
@@ -80,6 +260,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       if (!FullSyncService.isServiceInitialized()) {
         await FullSyncService.initialize();
       }
+      const user = await AuthService.restoreSession();
+      setFormasPago(FullSyncService.getFormasPago());
 
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
@@ -114,9 +296,25 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           ? { ...producto, productoNombre: productoCatalogo.descripcion }
           : producto;
       });
+      const inicializarCantidades =
+        pedidoData &&
+        !soloLectura &&
+        [ESTATUS_PEDIDO.CONFIRMADO, ESTATUS_PEDIDO.NOTIFICADO].includes(Number(pedidoData.estatus));
+      const productosInicializados = productosConNombre.map((producto) => {
+        const cantPedido = Number(producto.cantPedido ?? 0);
+        const cantAtencion = Number(producto.cantAtencion ?? 0);
+        if (!inicializarCantidades || !Number.isFinite(cantPedido) || cantPedido <= 0 || cantAtencion > 0) {
+          return producto;
+        }
+
+        const actualizado = pedidosService.actualizarCantAtencion(folio, producto.idProducto, cantPedido);
+        return actualizado
+          ? { ...producto, cantAtencion: cantPedido, tieneDiferencia: false, atendido: true }
+          : producto;
+      });
 
       setPedido(pedidoData);
-      setProductos(productosConNombre);
+      setProductos(productosInicializados);
       if (pedidoData) {
         const realm = (FullSyncService as any).realm;
         let clienteObj: any = realm
@@ -127,10 +325,31 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           if (clientes.length > 0) clienteObj = clientes[0];
         }
 
-        const nombreCliente = pedidoData.clienteNombre || `Cliente #${pedidoData.cliente}`;
-        const domicilioCliente =
-          clienteObj?.domicilio || pedidoData.clienteDomicilio || "Sin dirección";
+        const nombresPedido = [
+          pedidoData.clienteNombre,
+          ...productosData.map((producto) => producto.clienteNombre),
+        ]
+          .map((nombre) => String(nombre ?? "").trim())
+          .filter(Boolean);
+        const nombreClientePedido =
+          nombresPedido.find((nombre) => !/^Cliente #\d+$/i.test(nombre)) || nombresPedido[0];
+        const domiciliosPedido = [
+          pedidoData.clienteDomicilio,
+          ...productosData.map((producto) => producto.clienteDomicilio),
+        ]
+          .map((domicilio) => String(domicilio ?? "").trim())
+          .filter(Boolean);
+        const domicilioPedido = domiciliosPedido[0];
+        const nombreCliente =
+          nombreClientePedido || clienteObj?.nombre || clienteObj?.nombreCliente || `Cliente #${pedidoData.cliente}`;
+        const domicilioCliente = domicilioPedido || clienteObj?.domicilio || "Sin dirección";
+        const pedidoConDatosCliente = {
+          ...pedidoData,
+          clienteNombre: nombreCliente,
+          clienteDomicilio: domicilioCliente,
+        } as Pedido;
 
+        setPedido(pedidoConDatosCliente);
         setClienteNombre(nombreCliente);
         setClienteDireccion(domicilioCliente);
         setObservaciones(
@@ -139,13 +358,20 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
             "",
         );
         setPreciosPromo(FullSyncService.getPreciosPromoByCliente(pedidoData.cliente));
-        setPreciosLista(FullSyncService.getPreciosByListaPrecio(pedidoData.listaPrecio ?? 0));
+        const listaPrecioCliente = Number(clienteObj?.listaPrecio ?? pedidoData.listaPrecio ?? 0);
+        setPreciosLista(FullSyncService.getPreciosByListaPrecio(listaPrecioCliente));
+        const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoData.ruta || 1);
+        const productosDisponiblesData = construirProductosDisponibles(pedidoData, sucursal);
+        setProductosDisponibles(productosDisponiblesData);
+        setFilteredProductosDisponibles(productosDisponiblesData);
       } else {
         setClienteNombre("");
         setClienteDireccion("");
         setObservaciones("");
         setPreciosPromo([]);
         setPreciosLista([]);
+        setProductosDisponibles([]);
+        setFilteredProductosDisponibles([]);
       }
       setPreciosDefault(FullSyncService.getPreciosByListaPrecio(13));
       setCausasDiferencia(causasDif);
@@ -162,12 +388,71 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     }
   };
 
-  const iniciarAtencion = async () => {
+  const filtrarProductosDisponibles = (query: string, soloPromociones = showOnlyPromotions) => {
+    const productosConRecuperaEnvase = FullSyncService.getProductosConRecuperaEnvase();
+    const base = soloPromociones
+      ? productosDisponibles.filter((producto) => producto.esKit || producto.esPromocion)
+      : productosDisponibles.filter(
+          (producto) =>
+            (!producto.esKit && !producto.esPromocion) || productosConRecuperaEnvase.has(producto.id),
+        );
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtrados = normalizedQuery
+      ? base.filter(
+          (producto) =>
+            producto.descripcion.toLowerCase().includes(normalizedQuery) ||
+            producto.claveProd.toLowerCase().includes(normalizedQuery) ||
+            String(producto.id).includes(normalizedQuery),
+        )
+      : base;
+    setFilteredProductosDisponibles(filtrados);
+  };
+
+  const abrirModalProductos = () => {
+    if (soloLectura) return;
+    setSearchProductoQuery("");
+    setShowOnlyPromotions(false);
+    filtrarProductosDisponibles("", false);
+    setProductoModalVisible(true);
+  };
+
+  const agregarProductoAlPedido = (producto: ProductoDisponiblePedido) => {
+    const existente = productos.find((item) => item.idProducto === producto.id);
+    const cantidadActual = Number(existente?.cantAtencion ?? 0);
+    if (cantidadActual + 1 > producto.existencia) {
+      Alert.alert(
+        "Inventario insuficiente",
+        `No hay suficiente existencia de "${producto.descripcion}" (disponible: ${producto.existencia})`,
+      );
+      return;
+    }
+
+    const pedidosService = PedidosService.getInstance();
+    pedidosService.setRealm((FullSyncService as any).realm);
+    const success = pedidosService.agregarProductoPedido(folio, {
+      idProducto: producto.id,
+      productoNombre: producto.descripcion,
+      precio: producto.precio,
+      cantidad: 1,
+    });
+    if (!success) {
+      Alert.alert("Error", "No se pudo agregar el producto al pedido");
+      return;
+    }
+
+    setProductos(pedidosService.getProductosByFolio(folio));
+    const pedidoActualizado = pedidosService.getPedidoByFolio(folio);
+    if (pedidoActualizado) setPedido(pedidoActualizado);
+    setProductoModalVisible(false);
+    setSearchProductoQuery("");
+  };
+
+  const iniciarAtencion = async (): Promise<boolean> => {
     const pedidosService = PedidosService.getInstance();
     pedidosService.setRealm((FullSyncService as any).realm);
     const success = pedidosService.iniciarAtencionPedido(folio);
     console.log(`[PedidoDetalle] Iniciar atención folio=${folio}, resultado=${success}`);
-    if (!success) return;
+    if (!success) return false;
 
     const pedidoActualizado = pedidosService.getPedidoByFolio(folio);
     if (pedidoActualizado) setPedido(pedidoActualizado);
@@ -180,39 +465,85 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     } catch (error) {
       console.warn(`[PedidoDetalle] No se pudo enviar arrastre EN_ATENCION folio=${folio}:`, error);
     }
+
+    return true;
   };
 
   const validarGPS = async () => {
-    if (!pedido) return;
+    if (!pedido || validandoGPS) return;
+
+    const cliente = FullSyncService.getClienteFullById(Number(pedido.cliente)) as any;
+    const clienteLat = Number(cliente?.latitud);
+    const clienteLng = Number(cliente?.longitud);
+    if (
+      !Number.isFinite(clienteLat) ||
+      !Number.isFinite(clienteLng) ||
+      (clienteLat === 0 && clienteLng === 0)
+    ) {
+      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
+      return;
+    }
 
     setValidandoGPS(true);
+    setProgresoValidacion(null);
     try {
-      const ubicacion = await LocationService.getBestLocation();
-      if (ubicacion) {
-        setGpsValidado(true);
-        iniciarAtencion();
-      } else {
-        Alert.alert(
-          "GPS no disponible",
-          "No se pudo obtener tu ubicación. Puedes continuar la atención sin validar GPS.",
-          [
-            { text: "Cancelar", style: "cancel" },
-            { text: "Continuar", onPress: () => iniciarAtencion() },
-          ]
-        );
-      }
-    } catch (error) {
-      console.error("[PedidoDetalle] Error GPS:", error);
-      Alert.alert(
-        "GPS no disponible",
-        "Ocurrió un error al validar la ubicación. Puedes continuar la atención sin validar GPS.",
-        [
-          { text: "Cancelar", style: "cancel" },
-          { text: "Continuar", onPress: () => iniciarAtencion() },
-        ]
+      const user = await AuthService.restoreSession();
+      const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedido.idVendedor ?? 0);
+      const usuario = idUsuario > 0 ? (FullSyncService.getUsuarioById(idUsuario) as any) : null;
+      const metrosConfigurados = Number(usuario?.metros ?? user?.metros);
+      const metrosPermitidos = Number.isFinite(metrosConfigurados) && metrosConfigurados > 0 ? metrosConfigurados : 100;
+      const clienteInfo = {
+        id: Number(pedido.cliente),
+        nombre: cliente?.nombre || clienteNombre || pedido.clienteNombre,
+        lat: clienteLat,
+        lng: clienteLng,
+      };
+
+      const resultado = await LocationService.validarUbicacionConDiagnostico(
+        clienteLat,
+        clienteLng,
+        metrosPermitidos,
+        (intento, total, accuracy) => {
+          setProgresoValidacion({ intento, total, accuracy });
+        },
+        clienteInfo,
       );
+
+      if (resultado.valido) {
+        const iniciado = await iniciarAtencion();
+        if (iniciado) setGpsValidado(true);
+        return;
+      }
+
+      if (resultado.motivo === "sin_permiso") {
+        Alert.alert(
+          "Permiso de ubicación",
+          "Necesitas conceder el permiso de ubicación para poder iniciar la atención.",
+        );
+        return;
+      }
+
+      setDiagnosticoGps({
+        motivo: resultado.motivo,
+        valido: false,
+        distancia: resultado.distancia ?? null,
+        accuracy: resultado.accuracy ?? null,
+        metrosPermitidos,
+        numFixes: resultado.numFixes ?? null,
+        peorAccuracy: resultado.peorAccuracy ?? null,
+        tiempoMs: resultado.tiempoMs ?? null,
+        vendedorLat: resultado.ubicacion?.latitude ?? null,
+        vendedorLng: resultado.ubicacion?.longitude ?? null,
+        clienteLat,
+        clienteLng,
+        clienteNombre: clienteInfo.nombre,
+      });
+    } catch (error) {
+      console.error("[PedidoDetalle] Error al validar ubicación:", error);
+      Alert.alert("Error de ubicación", "No se pudo validar tu ubicación. Intenta nuevamente.");
     } finally {
       setValidandoGPS(false);
+      setProgresoValidacion(null);
     }
   };
 
@@ -338,8 +669,10 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     const productosCatalogo = FullSyncService.getProductos(100000);
     const listaCliente = pedidoCerrado.listaPrecio ?? null;
     const obtenerListaProducto = (idProducto: number): number | null => {
-      const tienePrecioListaCliente = preciosLista.some(
-        (p: any) => parseInt(p.claveProd || "0", 10) === idProducto,
+      const productoCatalogo = productosCatalogo.find((producto: any) => Number(producto.id) === idProducto);
+      const clavesProducto = [idProducto, Number(productoCatalogo?.claveProd)].filter(Number.isFinite);
+      const tienePrecioListaCliente = preciosLista.some((precio: any) =>
+        clavesProducto.includes(Number(precio.claveProd)),
       );
       return tienePrecioListaCliente ? listaCliente : 13;
     };
@@ -374,6 +707,13 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
     const nombreCliente = pedidoCerrado.clienteNombre || clienteNombre || `Cliente #${pedidoCerrado.cliente}`;
     const vendedor = user?.claveEmpleado || user?.nombre || String(idUsuario);
+    const observacionVenta = Array.from(
+      new Set(
+        [pedidoCerrado.observaciones, ...productosEntregados.map((producto) => producto.observaciones)]
+          .map((observacion) => String(observacion ?? "").trim())
+          .filter(Boolean),
+      ),
+    ).join(" | ");
     const fechaVenta = FullSyncService.getMexicoNow();
 
     await FullSyncService.createLocalVentas(
@@ -390,14 +730,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         cveCliente: pedidoCerrado.cliente,
         nombreCliente,
         fecha: fechaVenta,
-        tipoPago: 1,
-        descripcionMedioPago: "Efectivo",
+        tipoPago: metodoPago ?? 1,
+        descripcionMedioPago: formasPago.find((forma: any) => forma.tipo === metodoPago)?.descripcion ?? "Efectivo",
         vendedor,
         folioFactura: false,
         facturacionMovil: false,
         latitud: null,
         longitud: null,
-        observacion: pedidoCerrado.observaciones ?? "",
+        observacion: observacionVenta,
         idPedido: pedidoCerrado.idPedido ?? pedidoCerrado.folio,
         idLista: entrega.idLista,
       })),
@@ -412,6 +752,60 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         idProducto: entrega.idProducto,
       })),
     );
+  };
+
+  const imprimirTicketPedido = async (
+    pedidoCerrado: Pedido,
+    productosEntregados: Pedido[],
+    idMovil: number,
+    sucursal: number,
+    user: any,
+  ): Promise<void> => {
+    const formaPago = formasPago.find((forma: any) => forma.tipo === metodoPago);
+    const pago0 = Boolean(formaPago?.pago0);
+    const idUsuario = Number(user?.id ?? user?.idUsuario ?? pedidoCerrado.idVendedor ?? 1);
+    const usuarioTicket = FullSyncService.getUsuarioById(idUsuario) as any;
+    const clienteTicket = FullSyncService.getClienteFullById(Number(pedidoCerrado.cliente)) as any;
+    const ciaTicket = clienteTicket?.idEmpresa ? (FullSyncService.getCiaById(Number(clienteTicket.idEmpresa)) as any) : null;
+    const permisoDomicilio = [true, 1, "1"].includes(usuarioTicket?.permisoDomicilioTicket);
+    const items = productosEntregados
+      .filter((producto) => Number(producto.cantAtencion ?? 0) > 0)
+      .map((producto) => {
+        const quantity = Number(producto.cantAtencion ?? 0);
+        const price = Number(producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto));
+        return {
+          description: producto.productoNombre || `Producto #${producto.idProducto}`,
+          quantity,
+          price: Number.isFinite(price) ? price : 0,
+          total: (Number.isFinite(price) ? price : 0) * quantity,
+        };
+      });
+    const total = items.reduce((sum, item) => sum + item.total, 0);
+    const ticketData = {
+      clientName: pedidoCerrado.clienteNombre || clienteNombre || `Cliente #${pedidoCerrado.cliente}`,
+      clientDomicilio: permisoDomicilio ? clienteTicket?.domicilio || pedidoCerrado.clienteDomicilio : undefined,
+      paymentMethod: formaPago?.descripcion || "Efectivo",
+      items,
+      total: pago0 ? 0 : total,
+      businessName: ciaTicket?.nombreCia || APP_NAME,
+      businessAddress: ciaTicket?.domicilio,
+      taxId: ciaTicket?.rfc,
+      domicilio: ciaTicket?.domicilio,
+      regimenFiscal: ciaTicket?.regimenFiscal,
+      phone: ciaTicket?.telefono,
+      ticketFinal: usuarioTicket?.ticketFinal,
+      sellerName: user?.claveEmpleado || user?.nombre || String(idUsuario),
+      branch: user?.dSucursal || sucursal,
+      ticketNumber: String(idMovil),
+      pago0,
+    };
+    const dobleTicket = [true, 1, "1"].includes(usuarioTicket?.dobleTicket);
+    if (dobleTicket) {
+      await TicketPrinter.printSaleTicket(ticketData);
+      await TicketPrinter.printSaleTicket(ticketData);
+    } else {
+      await TicketPrinter.printSaleTicket(ticketData);
+    }
   };
 
   const procesarCierreComoVenta = async (
@@ -433,6 +827,11 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
     await registrarVisitaPorEntrega(pedidoCerrado, sucursal, idUsuario);
     await registrarVentaEInventarioPedido(pedidoCerrado, productosEntregados, idMovil, sucursal, user, idUsuario);
+    try {
+      await imprimirTicketPedido(pedidoCerrado, productosEntregados, idMovil, sucursal, user);
+    } catch (error) {
+      console.warn(`[PedidoDetalle] No se pudo imprimir ticket del pedido ${pedidoCerrado.folio}:`, error);
+    }
 
     const ventaArrastre = await FullSyncService.syncPostVenta(sucursal, idUsuario);
     if (!ventaArrastre.success) {
@@ -500,7 +899,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         return minimo === Infinity ? 0 : minimo;
       }
 
-      return inventarioPorClave.get(idProducto) || 0;
+      const claveProducto = Number(productoCatalogo?.claveProd);
+      return inventarioPorClave.get(idProducto) || (Number.isFinite(claveProducto) ? inventarioPorClave.get(claveProducto) : 0) || 0;
     };
 
     const faltantes = productosEntregados.reduce<
@@ -533,9 +933,21 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       return;
     }
 
+    const formaPago = formasPago.find((forma: any) => forma.tipo === metodoPago);
+    if (metodoPago === null || !formaPago) {
+      Alert.alert("Medio de pago requerido", "Selecciona un método de pago antes de confirmar la entrega.");
+      return;
+    }
+    const clientePedido = FullSyncService.getClienteFullById(Number(pedido?.cliente)) as any;
+    if (formaPago.credito && !clientePedido?.credito) {
+      Alert.alert("Crédito no disponible", "El cliente seleccionado no tiene crédito habilitado.");
+      return;
+    }
+
     const productosConDiferencia = productos.filter((p) => {
-      const cantAtencion = p.cantAtencion ?? 0;
-      return cantAtencion !== p.cantPedido && !p.causaDiferencia;
+      const cantAtencion = Number(p.cantAtencion ?? 0);
+      const cantPedido = Number(p.cantPedido ?? 0);
+      return cantAtencion < cantPedido && !p.causaDiferencia && !esProductoAgregado(p);
     });
 
     if (productosConDiferencia.length > 0) {
@@ -546,10 +958,13 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       return;
     }
 
-    const todosEntregados = productos.every((p) => (p.cantAtencion ?? 0) === p.cantPedido);
+    const todosEntregados = productos.every(
+      (p) => Number(p.cantAtencion ?? 0) >= Number(p.cantPedido ?? 0),
+    );
     const hayDiferenciasConCausa = productos.some((p) => {
-      const cantAtencion = p.cantAtencion ?? 0;
-      return cantAtencion !== p.cantPedido && p.causaDiferencia;
+      const cantAtencion = Number(p.cantAtencion ?? 0);
+      const cantPedido = Number(p.cantPedido ?? 0);
+      return cantAtencion < cantPedido && p.causaDiferencia;
     });
 
     let nuevoEstatus: number;
@@ -665,8 +1080,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     const totalSolicitado = productos.reduce((sum, p) => sum + p.cantPedido, 0);
     const totalEntregado = productos.reduce((sum, p) => sum + (p.cantAtencion || 0), 0);
     const conDiferencia = productos.filter((p) => (p.cantAtencion ?? 0) !== p.cantPedido).length;
-    const importeSolicitado = productos.reduce((sum, p) => sum + obtenerPrecioProducto(p.idProducto) * p.cantPedido, 0);
-    const importeEntregado = productos.reduce((sum, p) => sum + obtenerPrecioProducto(p.idProducto) * (p.cantAtencion || 0), 0);
+    const importeSolicitado = productos.reduce(
+      (sum, p) => sum + Number(p.precioAtencion ?? p.precio ?? obtenerPrecioProducto(p.idProducto)) * Number(p.cantPedido ?? 0),
+      0,
+    );
+    const importeEntregado = productos.reduce(
+      (sum, p) => sum + Number(p.precioAtencion ?? p.precio ?? obtenerPrecioProducto(p.idProducto)) * Number(p.cantAtencion ?? 0),
+      0,
+    );
 
     return { totalSolicitado, totalEntregado, conDiferencia, importeSolicitado, importeEntregado };
   };
@@ -725,19 +1146,25 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   };
 
   const renderProducto = ({ item }: { item: Pedido }) => {
-    const cantAtencion = item.cantAtencion ?? 0;
-    const tieneDiferencia = cantAtencion !== item.cantPedido;
-    const atendidoCompleto = cantAtencion === item.cantPedido;
-    const precioUnitario = obtenerPrecioProducto(item.idProducto);
+    const cantAtencion = Number(item.cantAtencion ?? 0);
+    const cantPedido = Number(item.cantPedido ?? 0);
+    const tieneDiferencia = cantAtencion < cantPedido;
+    const puedeRegistrarCausa = cantAtencion < cantPedido;
+    const precioUnitario = Number(item.precioAtencion ?? item.precio ?? obtenerPrecioProducto(item.idProducto));
     const subtotal = precioUnitario * cantAtencion;
 
     return (
       <View style={[styles.productoCard, tieneDiferencia && styles.productoCardDiferencia]}>
         <View style={styles.productoHeader}>
         
-          <Text style={styles.productoNombre} numberOfLines={2}>
-            {item.productoNombre || `Producto #${item.idProducto}`}
-          </Text>
+          <View style={styles.productoHeaderInfo}>
+            <Text style={styles.productoNombre} numberOfLines={2}>
+              {item.productoNombre || `Producto #${item.idProducto}`}
+            </Text>
+            {esProductoAgregado(item) && (
+              <Text style={styles.productoAgregadoText}>{PRODUCTO_AGREGADO_OBSERVACION}</Text>
+            )}
+          </View>
         </View>
 
         <View style={styles.cantidadesRow}>
@@ -801,7 +1228,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
                 <Text style={styles.entregarTodoBtnText}>Entregar todo</Text>
               </TouchableOpacity>
             )} */}
-            {tieneDiferencia && (
+            {puedeRegistrarCausa && (
               <TouchableOpacity
                 style={[styles.causaBtn, item.causaDiferencia ? styles.causaBtnRegistrada : undefined]}
                 onPress={() => abrirModalCausa(item)}
@@ -815,7 +1242,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        {item.causaDiferencia && item.obserDiferencia && (
+        {tieneDiferencia && item.causaDiferencia && item.obserDiferencia && (
           <View style={styles.observacionCausa}>
             <Text style={styles.observacionCausaText}>{item.obserDiferencia}</Text>
           </View>
@@ -846,6 +1273,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const pedidoEnProceso = pedido.estatus === ESTATUS_PEDIDO.EN_ATENCION || pedido.estatus === ESTATUS_PEDIDO.EN_CAPTURA;
   const puedeEditar = !soloLectura && (gpsValidado || pedidoEnProceso);
   const puedeConfirmar = !soloLectura && (gpsValidado || pedidoEnProceso);
+  const clientePedido = FullSyncService.getClienteFullById(Number(pedido.cliente)) as any;
+  const clienteTieneCredito = Boolean(clientePedido?.credito);
 
   return (
     <View style={styles.container}>
@@ -912,10 +1341,22 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
             <TouchableOpacity
               style={[styles.gpsBtn, styles.btnMitad, styles.iniciarBtn]}
-              onPress={iniciarAtencion}
+              onPress={validarGPS}
+              disabled={validandoGPS}
             >
-              <Icon name="play-arrow" type="material" size={20} color="#fff" />
-              <Text style={styles.gpsBtnText}>Iniciar atención</Text>
+              {validandoGPS ? (
+                <>
+                  <ActivityIndicator color="#fff" />
+                  <Text style={styles.gpsBtnText}>
+                    {progresoValidacion ? `GPS ±${Math.round(progresoValidacion.accuracy)}m` : "Validando..."}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Icon name="play-arrow" type="material" size={20} color="#fff" />
+                  <Text style={styles.gpsBtnText}>Iniciar atención</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -928,7 +1369,15 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         )}
 
 
-        <Text style={styles.productosTitle}>Productos del Pedido</Text>
+        <View style={styles.productosTitleRow}>
+          <Text style={styles.productosTitle}>Productos del Pedido</Text>
+          {puedeEditar && (
+            <TouchableOpacity style={styles.agregarProductoBtn} onPress={abrirModalProductos}>
+              <Icon name="add" type="material" size={18} color="#fff" />
+              <Text style={styles.agregarProductoBtnText}>Agregar</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <FlatList
           data={productos}
@@ -937,6 +1386,34 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           scrollEnabled={false}
           contentContainerStyle={styles.productosList}
         />
+
+        {puedeConfirmar && (
+          <View style={styles.paymentCard}>
+            <Text style={styles.paymentTitle}>Medio de pago</Text>
+            <View style={styles.paymentOptionsRow}>
+              {formasPago.map((forma: any) => {
+                const disabled = Boolean(forma.credito) && !clienteTieneCredito;
+                return (
+                  <PayChipPedido
+                    key={forma.tipo}
+                    label={forma.descripcion || `Tipo ${forma.tipo}`}
+                    selected={metodoPago === forma.tipo}
+                    disabled={disabled}
+                    onPress={() => setMetodoPago(forma.tipo)}
+                  />
+                );
+              })}
+            </View>
+            <View style={styles.paymentTotalRow}>
+              <Text style={styles.paymentTotalLabel}>Total</Text>
+              <Text style={styles.paymentTotalValue}>
+                {formasPago.find((forma: any) => forma.tipo === metodoPago)?.pago0
+                  ? "$0.00"
+                  : `$${resumen.importeEntregado.toFixed(2)}`}
+              </Text>
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {puedeConfirmar && (
@@ -1075,7 +1552,118 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={productoModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Icon name="add-shopping-cart" type="material" size={24} color={COLORS.primary} />
+              <Text style={styles.modalTitle}>Agregar producto</Text>
+            </View>
+
+            <View style={styles.productSearchContainer}>
+              <Icon name="search" type="material" size={20} color={COLORS.muted} />
+              <TextInput
+                style={styles.productSearchInput}
+                placeholder="Buscar por descripción o clave..."
+                placeholderTextColor={COLORS.muted}
+                value={searchProductoQuery}
+                onChangeText={(query) => {
+                  setSearchProductoQuery(query);
+                  filtrarProductosDisponibles(query);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchProductoQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchProductoQuery("");
+                    filtrarProductosDisponibles("");
+                  }}
+                >
+                  <Icon name="close" type="material" size={20} color={COLORS.muted} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.productResultsHeader}>
+              <Text style={styles.productResultsText}>
+                {filteredProductosDisponibles.length} producto{filteredProductosDisponibles.length === 1 ? "" : "s"}
+              </Text>
+              <TouchableOpacity
+                style={[styles.promotionsFilterBtn, showOnlyPromotions && styles.promotionsFilterBtnActive]}
+                onPress={() => {
+                  const nextValue = !showOnlyPromotions;
+                  setShowOnlyPromotions(nextValue);
+                  filtrarProductosDisponibles(searchProductoQuery, nextValue);
+                }}
+              >
+                <Text style={[styles.promotionsFilterText, showOnlyPromotions && styles.promotionsFilterTextActive]}>
+                  {showOnlyPromotions ? "Todos" : "Promociones o combos"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={filteredProductosDisponibles}
+              keyExtractor={(item) => String(item.id)}
+              style={styles.productResultsList}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.productResultItem} onPress={() => agregarProductoAlPedido(item)}>
+                  <View style={styles.productResultInfo}>
+                    <Text style={styles.productResultName} numberOfLines={2}>{item.descripcion}</Text>
+                    <Text style={styles.productResultSubtitle}>Clave: {item.claveProd} · Existencia: {item.existencia}</Text>
+                    {item.esPromocion && <Text style={styles.productResultPromo}>Precio especial</Text>}
+                  </View>
+                  <Text style={styles.productResultPrice}>${item.precio.toFixed(2)}</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={<Text style={styles.emptyProductResults}>No se encontraron productos</Text>}
+            />
+
+            <TouchableOpacity
+              style={styles.secondaryModalBtn}
+              onPress={() => {
+                setProductoModalVisible(false);
+                setSearchProductoQuery("");
+                setShowOnlyPromotions(false);
+              }}
+            >
+              <Text style={styles.secondaryModalBtnText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ModalDiagnosticoGps
+        visible={diagnosticoGps !== null}
+        data={diagnosticoGps}
+        onClose={() => setDiagnosticoGps(null)}
+      />
     </View>
+  );
+}
+
+function PayChipPedido({
+  label,
+  selected,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.paymentChip, selected && styles.paymentChipSelected, disabled && styles.paymentChipDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Text style={[styles.paymentChipText, selected && styles.paymentChipTextSelected]}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1276,12 +1864,41 @@ const styles = StyleSheet.create({
     color: COLORS.warning,
     fontWeight: "600",
   },
+  productosTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: SPACING.m,
+    marginRight: SPACING.m,
+  },
   productosTitle: {
     ...TYPOGRAPHY.h3,
     fontSize: 16,
-    marginHorizontal: SPACING.m,
-    marginTop: SPACING.m,
+    marginLeft: SPACING.m,
     marginBottom: SPACING.s,
+  },
+  agregarProductoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.m,
+  },
+  agregarProductoBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  productoHeaderInfo: {
+    flex: 1,
+  },
+  productoAgregadoText: {
+    color: COLORS.info,
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: SPACING.xs,
   },
   productosList: {
     paddingHorizontal: SPACING.m,
@@ -1426,6 +2043,62 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: "italic",
   },
+  paymentCard: {
+    backgroundColor: "#fff",
+    marginHorizontal: SPACING.m,
+    marginBottom: SPACING.m,
+    padding: SPACING.m,
+    borderRadius: BORDER_RADIUS.l,
+    ...SHADOWS.small,
+  },
+  paymentTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    marginBottom: SPACING.s,
+  },
+  paymentOptionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.s,
+  },
+  paymentChip: {
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.l,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+  },
+  paymentChipSelected: {
+    backgroundColor: COLORS.primary,
+  },
+  paymentChipDisabled: {
+    opacity: 0.4,
+  },
+  paymentChipText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  paymentChipTextSelected: {
+    color: "#fff",
+  },
+  paymentTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: SPACING.m,
+    paddingTop: SPACING.s,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  paymentTotalLabel: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+  },
+  paymentTotalValue: {
+    ...TYPOGRAPHY.h3,
+    color: COLORS.primary,
+  },
   footer: {
     flexDirection: "row",
     padding: SPACING.m,
@@ -1473,6 +2146,100 @@ const styles = StyleSheet.create({
     borderTopRightRadius: BORDER_RADIUS.xl,
     padding: SPACING.l,
     maxHeight: "80%",
+  },
+  productSearchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.s,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.s,
+    marginBottom: SPACING.s,
+  },
+  productSearchInput: {
+    flex: 1,
+    minHeight: 42,
+    color: COLORS.textPrimary,
+  },
+  productResultsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: SPACING.s,
+  },
+  productResultsText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.muted,
+  },
+  promotionsFilterBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.xs,
+  },
+  promotionsFilterBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  promotionsFilterText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  promotionsFilterTextActive: {
+    color: "#fff",
+  },
+  productResultsList: {
+    minHeight: 180,
+  },
+  productResultItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+    gap: SPACING.s,
+  },
+  productResultInfo: {
+    flex: 1,
+  },
+  productResultName: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+  },
+  productResultSubtitle: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.muted,
+    marginTop: SPACING.xs,
+  },
+  productResultPromo: {
+    color: COLORS.success,
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: SPACING.xs,
+  },
+  productResultPrice: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.primary,
+    fontWeight: "700",
+  },
+  emptyProductResults: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.muted,
+    textAlign: "center",
+    paddingVertical: SPACING.xl,
+  },
+  secondaryModalBtn: {
+    alignItems: "center",
+    backgroundColor: "#F1F3F5",
+    padding: SPACING.m,
+    borderRadius: BORDER_RADIUS.m,
+    marginTop: SPACING.s,
+  },
+  secondaryModalBtnText: {
+    color: COLORS.textPrimary,
+    fontWeight: "600",
   },
   modalHeader: {
     flexDirection: "row",

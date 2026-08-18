@@ -26,4 +26,19 @@ describe("TicketPrinter", () => {
       ticketNumber,
     );
   });
+
+  it("imprime el medio de pago y aplica pago0 al total", () => {
+    const lines = TicketPrinter.generateSaleTicket({
+      clientName: "Cliente prueba",
+      paymentMethod: "CREDITO",
+      items: [
+        { description: "Producto agregado", quantity: 1, price: 25, total: 25 },
+      ],
+      total: 0,
+      pago0: true,
+    });
+
+    expect(lines.some((line) => line.includes("CREDITO") && line.includes("$0.00"))).toBe(true);
+    expect(lines.some((line) => line.includes("Producto agregado"))).toBe(true);
+  });
 });

@@ -12,7 +12,7 @@ import {
   TextInput,
 } from "react-native";
 import { Icon } from "react-native-elements";
-import PedidosService, { Pedido, ESTATUS_PEDIDO } from "../services/PedidosService";
+import PedidosService, { Pedido, ESTATUS_PEDIDO, esEstatusFinalPedido } from "../services/PedidosService";
 
 interface PedidoAgrupado extends Pedido {
   folioKey: number;
@@ -55,8 +55,8 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filtroEstatus, setFiltroEstatus] = useState<"pendientes" | "completados" | "todos">("pendientes");
   const [currentRuta, setCurrentRuta] = useState<number>(0);
-  const [currentVendedor, setCurrentVendedor] = useState<number>(0);
   const [ubicacion, setUbicacion] = useState<LocationCoordinates | null>(null);
 
   const buscarClienteEnRealm = (idCliente: number): any => {
@@ -118,7 +118,6 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       }
 
       setCurrentRuta(ruta);
-      setCurrentVendedor(Number(user.id ?? user.idUsuario ?? 0));
 
       if (!FullSyncService.isServiceInitialized()) {
         await FullSyncService.initialize();
@@ -130,7 +129,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const folios = pedidosService.getFoliosByRuta(ruta, Number(user.id ?? user.idUsuario ?? 0)).filter((folio) =>
+      const folios = pedidosService.getFoliosByRuta(ruta, undefined, true).filter((folio) =>
         pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
       );
       const pedidosAgrupados: PedidoAgrupado[] = [];
@@ -138,8 +137,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (
           pedido &&
-          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO &&
-          pedido.estatus !== ESTATUS_PEDIDO.CANCELADO
+          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO
         ) {
           const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
           pedidosAgrupados.push({
@@ -180,7 +178,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const folios = pedidosService.getFoliosByRuta(currentRuta, currentVendedor).filter((folio) =>
+        const folios = pedidosService.getFoliosByRuta(currentRuta, undefined, true).filter((folio) =>
           pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
         );
         const pedidosAgrupados: PedidoAgrupado[] = [];
@@ -188,8 +186,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
           const pedido = pedidosService.getPedidoByFolio(folio);
           if (
           pedido &&
-          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO &&
-          pedido.estatus !== ESTATUS_PEDIDO.CANCELADO
+          pedido.estatus !== ESTATUS_PEDIDO.PROGRAMADO
         ) {
             const total = calcularTotalPedido(folio, pedido.cliente, pedido.listaPrecio);
             pedidosAgrupados.push({
@@ -291,39 +288,33 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
   };
 
   const handleAbrirPedido = (pedido: PedidoAgrupado) => {
-    if (
-      pedido.estatus === ESTATUS_PEDIDO.ENTREGADO ||
-      pedido.estatus === ESTATUS_PEDIDO.CANCELADO ||
-      pedido.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
-      pedido.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA
-    ) {
-      navigation.navigate("PedidoDetalle", { folio: pedido.folioKey, soloLectura: true });
-    } else {
-      navigation.navigate("PedidoDetalle", { folio: pedido.folioKey, soloLectura: false });
-    }
+    navigation.navigate("PedidoDetalle", {
+      folio: pedido.folioKey,
+      soloLectura: esEstatusFinalPedido(pedido.estatus),
+    });
   };
 
   const query = searchQuery.trim().toLowerCase();
   const pedidosFiltrados = pedidos.filter((p) => {
+    const coincideEstatus =
+      filtroEstatus === "todos" ||
+      (filtroEstatus === "completados" && esEstatusFinalPedido(p.estatus)) ||
+      (filtroEstatus === "pendientes" && !esEstatusFinalPedido(p.estatus));
     const coincideBusqueda =
       !query ||
       (p.clienteNombre || "").toLowerCase().includes(query) ||
       String(p.folio).includes(query) ||
       String(p.cliente).includes(query);
 
-    return coincideBusqueda;
+    return coincideEstatus && coincideBusqueda;
   });
 
-  const totalPendientes = pedidos.filter(
-    (p) =>
-      p.estatus !== ESTATUS_PEDIDO.ENTREGADO &&
-      p.estatus !== ESTATUS_PEDIDO.CANCELADO &&
-      p.estatus !== ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
-  ).length;
-  const filtrosActivos = Boolean(query);
+  const totalPendientes = pedidos.filter((p) => !esEstatusFinalPedido(p.estatus)).length;
+  const filtrosActivos = Boolean(query) || filtroEstatus !== "pendientes";
 
   const limpiarFiltros = () => {
     setSearchQuery("");
+    setFiltroEstatus("pendientes");
   };
 
   const renderPedido = ({ item }: { item: PedidoAgrupado }) => {
@@ -331,11 +322,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     const clienteDomicilio = item.clienteDomicilio || "";
     const estatusColor = getEstatusColor(item.estatus);
     const estatusDescripcion = item.estatusDescripcion || "Estatus desconocido";
-    const soloLectura =
-      item.estatus === ESTATUS_PEDIDO.ENTREGADO ||
-      item.estatus === ESTATUS_PEDIDO.CANCELADO ||
-      item.estatus === ESTATUS_PEDIDO.ENTREGADO_PARCIAL ||
-      item.estatus === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA;
+    const soloLectura = esEstatusFinalPedido(item.estatus);
     const accionPedido = soloLectura ? "Ver detalles" : "Atender pedido";
     const inicialCliente = clienteNombre.trim().charAt(0).toUpperCase() || "C";
 
@@ -554,6 +541,27 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
         )}
       </View>
 
+      <View style={styles.statusFilterRow}>
+        {([
+          ["pendientes", "No completados"],
+          ["completados", "Completados"],
+          ["todos", "Todos"],
+        ] as const).map(([value, label]) => (
+          <TouchableOpacity
+            key={value}
+            style={[styles.statusFilterBtn, filtroEstatus === value && styles.statusFilterBtnActive]}
+            onPress={() => setFiltroEstatus(value)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Filtrar ${label.toLowerCase()}`}
+          >
+            <Text style={[styles.statusFilterText, filtroEstatus === value && styles.statusFilterTextActive]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={styles.resultsRow}>
         <View>
           <Text style={styles.sectionTitle}>Pedidos de hoy</Text>
@@ -736,6 +744,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.s,
     fontSize: 16,
     color: COLORS.textPrimary,
+  },
+  statusFilterRow: {
+    flexDirection: "row",
+    marginHorizontal: SPACING.m,
+    marginTop: SPACING.s,
+    gap: SPACING.s,
+  },
+  statusFilterBtn: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+  },
+  statusFilterBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  statusFilterText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusFilterTextActive: {
+    color: "#fff",
   },
   resultsRow: {
     flexDirection: "row",

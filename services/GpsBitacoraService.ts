@@ -55,6 +55,9 @@ function coerceString(value: any): string | null {
   return String(value);
 }
 
+export const TRACKING_UPLOAD_INTERVAL_MS = 7 * 60 * 1000;
+const TRACKING_REQUEST_TIMEOUT_MS = 20_000;
+
 class GpsBitacoraService {
   private realm: Realm | null = null;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
@@ -64,6 +67,8 @@ class GpsBitacoraService {
   // servidor recibía cada registro duplicado.
   private enviandoGps = false;
   private enviandoTracking = false;
+  private lastTrackingUploadAttemptAt = 0;
+  private lastTrackingUploadIdentity: string | null = null;
   private enviandoValidaciones = false;
   private enviandoTiempos = false;
 
@@ -437,14 +442,41 @@ class GpsBitacoraService {
    * Llamado desde syncIncremental() y syncAll() en FullSyncService,
    * y al final de cada ciclo en BackgroundSyncService.
    */
-  async enviarTrackingPendientes(sucursal: number, idUsuario: number): Promise<void> {
+  async enviarTrackingPendientes(
+    sucursal: number,
+    idUsuario: number,
+    force = false,
+  ): Promise<void> {
     if (this.enviandoTracking) {
       console.log("[GpsBitacoraService] Envío de tracking GPS ya en curso; se omite esta llamada (evita duplicados).");
       return;
     }
-    if (!this.realm || this.realm.isClosed) return;
+
+    const trackingIdentity = `${sucursal}:${idUsuario}`;
+    const now = Date.now();
+    const elapsed = now - this.lastTrackingUploadAttemptAt;
+    if (
+      !force &&
+      this.lastTrackingUploadIdentity === trackingIdentity &&
+      this.lastTrackingUploadAttemptAt > 0 &&
+      elapsed < TRACKING_UPLOAD_INTERVAL_MS
+    ) {
+      console.log("[GpsBitacoraService][TrackingUpload] Envío omitido por intervalo", {
+        sucursal,
+        idUsuario,
+        remainingMs: TRACKING_UPLOAD_INTERVAL_MS - elapsed,
+      });
+      return;
+    }
+
+    if (!this.realm || this.realm.isClosed) {
+      console.warn("[GpsBitacoraService][TrackingUpload] Realm no disponible; no se pueden consultar pendientes");
+      return;
+    }
 
     this.enviandoTracking = true;
+    this.lastTrackingUploadAttemptAt = Date.now();
+    this.lastTrackingUploadIdentity = trackingIdentity;
     try {
       const realm = this.getRealm();
 
@@ -452,10 +484,19 @@ class GpsBitacoraService {
       // Por eso se toman siempre los PRIMEROS BATCH_SIZE hasta vaciarla; usar
       // offsets crecientes sobre la colección viva saltaba registros.
       const todosPendientes = realm.objects("BitacoraTrackingGps").filtered("enviado == false");
-      if (todosPendientes.length === 0) return;
+      const totalInicial = todosPendientes.length;
+      console.log("[GpsBitacoraService][TrackingUpload] Consulta de pendientes", {
+        sucursal,
+        idUsuario,
+        totalInicial,
+      });
+      if (totalInicial === 0) {
+        console.log("[GpsBitacoraService][TrackingUpload] No hay puntos pendientes");
+        return;
+      }
 
       const BATCH_SIZE = 100;
-      console.log(`[GpsBitacoraService] Enviando ${todosPendientes.length} registros de tracking GPS al servidor en lotes de ${BATCH_SIZE}...`);
+      console.log(`[GpsBitacoraService] Enviando ${totalInicial} registros de tracking GPS al servidor en lotes de ${BATCH_SIZE}...`);
 
       const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraTrackingGpsArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
 
@@ -472,9 +513,25 @@ class GpsBitacoraService {
           fecha: this.formatDate(p.fecha),
         }));
 
-        const enviado = await this.enviarLote(url, batch, payload);
+        console.log("[GpsBitacoraService][TrackingUpload] Enviando lote", {
+          cantidad: payload.length,
+          primerId: payload[0]?.id ?? null,
+          ultimoId: payload[payload.length - 1]?.id ?? null,
+          pendientesAntes: todosPendientes.length,
+        });
+        const enviado = await this.enviarLoteTrackingNativo(url, batch, payload);
+        console.log("[GpsBitacoraService][TrackingUpload] Resultado del lote", {
+          enviado,
+          pendientesRestantes: todosPendientes.length,
+        });
         if (!enviado) break; // se reintenta en el próximo ciclo de sync
       }
+
+      console.log("[GpsBitacoraService][TrackingUpload] Ciclo finalizado", {
+        totalInicial,
+        enviados: totalInicial - todosPendientes.length,
+        pendientesRestantes: todosPendientes.length,
+      });
     } finally {
       this.enviandoTracking = false;
     }
@@ -538,6 +595,79 @@ class GpsBitacoraService {
     } finally {
       this.enviandoValidaciones = false;
     }
+  }
+
+  private async enviarLoteTrackingNativo(
+    url: string,
+    batch: any[],
+    payload: any[],
+  ): Promise<boolean> {
+    const realm = this.getRealm();
+    console.log(
+      `[GpsBitacoraService][TrackingUpload] Transporte XHR nativo iniciado (timeout=${TRACKING_REQUEST_TIMEOUT_MS}ms)`,
+    );
+
+    return new Promise<boolean>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      let settled = false;
+
+      const finish = (success: boolean, reason?: string): void => {
+        if (settled) return;
+        settled = true;
+
+        if (!success) {
+          console.error("[GpsBitacoraService][TrackingUpload] Transporte XHR falló", {
+            status: xhr.status,
+            reason: reason ?? "desconocido",
+          });
+          resolve(false);
+          return;
+        }
+
+        try {
+          realm.write(() => {
+            for (const item of batch) {
+              item.enviado = true;
+            }
+          });
+          console.log(
+            `[GpsBitacoraService][TrackingUpload] Lote confirmado por servidor: ${batch.length} registros`,
+          );
+          resolve(true);
+        } catch (error) {
+          console.error(
+            "[GpsBitacoraService][TrackingUpload] Error marcando lote en Realm:",
+            error,
+          );
+          resolve(false);
+        }
+      };
+
+      try {
+        xhr.open("POST", url);
+        xhr.timeout = TRACKING_REQUEST_TIMEOUT_MS;
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.setRequestHeader("Accept", "application/json");
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            finish(true);
+          } else {
+            finish(false, `HTTP ${xhr.status}`);
+          }
+        };
+        xhr.onerror = () => finish(false, "error de red");
+        xhr.onabort = () => finish(false, "petición abortada");
+        xhr.ontimeout = () => {
+          console.error(
+            `[GpsBitacoraService][TrackingUpload] Timeout XHR nativo después de ${TRACKING_REQUEST_TIMEOUT_MS}ms`,
+          );
+          finish(false, "timeout nativo");
+        };
+        xhr.send(JSON.stringify(payload));
+      } catch (error) {
+        finish(false, error instanceof Error ? error.message : String(error));
+      }
+    });
   }
 
   private async enviarLote(url: string, batch: any, payload: any[]): Promise<boolean> {

@@ -109,12 +109,20 @@ export const ESTATUS_PEDIDO = {
 };
 
 // Estados en los que el pedido ya fue atendido/cerrado y no admite modificacion
-const ESTADOS_FINALES = [
+export const ESTADOS_FINALES = [
   ESTATUS_PEDIDO.ENTREGADO,
   ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
   ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
   ESTATUS_PEDIDO.CANCELADO,
 ];
+
+export const PRODUCTO_AGREGADO_OBSERVACION = "-producto agregado";
+
+export const esEstatusFinalPedido = (estatus: number): boolean =>
+  ESTADOS_FINALES.includes(Number(estatus));
+
+export const esProductoAgregado = (pedido: Pick<Pedido, "observaciones">): boolean =>
+  String(pedido.observaciones ?? "").toLowerCase().includes(PRODUCTO_AGREGADO_OBSERVACION);
 
 class PedidosService {
   private static instance: PedidosService;
@@ -361,7 +369,7 @@ class PedidosService {
   /**
    * Devuelve los folios unicos de una ruta (para listado de pedidos).
    */
-  getFoliosByRuta(ruta: number, idVendedor?: number): number[] {
+  getFoliosByRuta(ruta: number, idVendedor?: number, incluirCancelados = false): number[] {
     const realm = this.getRealm();
     const pedidos = idVendedor
       ? realm.objects("Pedido").filtered("ruta = $0 AND idVendedor = $1", ruta, idVendedor)
@@ -370,14 +378,16 @@ class PedidosService {
     const folios = new Set<number>();
 
     Array.from(pedidos).forEach((p: any) => {
-      if (Number(p.estatus) === ESTATUS_PEDIDO.CANCELADO) {
+      if (Number(p.estatus) === ESTATUS_PEDIDO.CANCELADO && !incluirCancelados) {
         foliosCancelados.add(Number(p.folio));
       } else {
         folios.add(Number(p.folio));
       }
     });
 
-    foliosCancelados.forEach((folio) => folios.delete(folio));
+    if (!incluirCancelados) {
+      foliosCancelados.forEach((folio) => folios.delete(folio));
+    }
     return Array.from(folios);
   }
 
@@ -388,7 +398,30 @@ class PedidosService {
     const realm = this.getRealm();
     const pedidos = realm.objects("Pedido").filtered("folio = $0", folio);
     if (pedidos.length === 0) return null;
-    return pedidos[0] as unknown as Pedido;
+
+    const pedidoBase = pedidos[0] as any;
+    const renglones = Array.from(pedidos) as any[];
+    const esNombreGenerico = (nombre: string): boolean => /^Cliente #\d+$/i.test(nombre);
+    const obtenerDatoCliente = (campo: "clienteNombre" | "clienteDomicilio"): string | undefined => {
+      const datoEspecifico = renglones
+        .map((renglon) => String(renglon?.[campo] ?? "").trim())
+        .find((valor) => valor && (campo !== "clienteNombre" || !esNombreGenerico(valor)));
+      return datoEspecifico || undefined;
+    };
+
+    const clienteNombre = obtenerDatoCliente("clienteNombre") || String(pedidoBase.clienteNombre ?? "").trim() || undefined;
+    const clienteDomicilio =
+      obtenerDatoCliente("clienteDomicilio") || String(pedidoBase.clienteDomicilio ?? "").trim() || undefined;
+
+    if (clienteNombre === pedidoBase.clienteNombre && clienteDomicilio === pedidoBase.clienteDomicilio) {
+      return pedidoBase as Pedido;
+    }
+
+    return {
+      ...pedidoBase,
+      clienteNombre,
+      clienteDomicilio,
+    } as Pedido;
   }
 
   /**
@@ -424,6 +457,124 @@ class PedidosService {
       })),
     );
     return productosConNombre;
+  }
+
+  agregarProductoPedido(
+    folio: number,
+    producto: {
+      idProducto: number;
+      productoNombre?: string;
+      precio: number;
+      cantidad?: number;
+    },
+  ): boolean {
+    try {
+      const cantidad = Number(producto.cantidad ?? 1);
+      const precio = Number(producto.precio);
+      const idProducto = Number(producto.idProducto);
+      if (!Number.isFinite(idProducto) || !Number.isFinite(cantidad) || cantidad <= 0) {
+        console.error("[PedidosService] Producto adicional inválido:", producto);
+        return false;
+      }
+      if (!Number.isFinite(precio) || precio < 0) {
+        console.error("[PedidosService] Precio de producto adicional inválido:", producto);
+        return false;
+      }
+
+      const realm = this.getRealm();
+      const renglones = realm.objects("Pedido").filtered("folio = $0", folio);
+      if (renglones.length === 0) {
+        console.error("[PedidosService] Pedido no encontrado para agregar producto:", folio);
+        return false;
+      }
+
+      const primerRenglon = renglones[0] as any;
+      if (!this.puedeModificar(primerRenglon.estatus)) {
+        console.error("[PedidosService] No se puede agregar producto a pedido cerrado:", primerRenglon.estatus);
+        return false;
+      }
+
+      const id = this.buildPedidoId(folio, idProducto);
+      const renglonExistente = realm.objectForPrimaryKey("Pedido", id) as any;
+      const ahora = new Date();
+      const productoNombre = producto.productoNombre || this.getProductoById(idProducto)?.descripcion || `Producto #${idProducto}`;
+      const observacionesBase = String(primerRenglon.observaciones ?? "").trim();
+      const observaciones = observacionesBase.includes(PRODUCTO_AGREGADO_OBSERVACION)
+        ? observacionesBase
+        : [observacionesBase, PRODUCTO_AGREGADO_OBSERVACION].filter(Boolean).join(" ");
+
+      realm.write(() => {
+        if (renglonExistente) {
+          if (!this.puedeModificar(renglonExistente.estatus)) {
+            throw new Error("El renglón del producto está cerrado");
+          }
+          renglonExistente.cantAtencion = Number(renglonExistente.cantAtencion ?? 0) + cantidad;
+          renglonExistente.precioAtencion = precio;
+          renglonExistente.tieneDiferencia = renglonExistente.cantAtencion < renglonExistente.cantPedido;
+          renglonExistente.atendido = renglonExistente.cantAtencion > 0;
+          renglonExistente.observaciones = observaciones;
+          renglonExistente.modificadoLocal = true;
+          renglonExistente.syncedAt = ahora;
+          return;
+        }
+
+        const cantidadProductos = Number(primerRenglon.numeroProductos ?? 0) + 1;
+        Array.from(renglones).forEach((renglon: any) => {
+          renglon.numeroProductos = cantidadProductos;
+          renglon.modificadoLocal = true;
+          renglon.syncedAt = ahora;
+        });
+
+        realm.create(
+          "Pedido",
+          {
+            id,
+            idPedido: primerRenglon.idPedido ?? folio,
+            id_movil: primerRenglon.id_movil ?? null,
+            folio,
+            fecha: primerRenglon.fecha ?? null,
+            ruta: primerRenglon.ruta,
+            cliente: primerRenglon.cliente,
+            clienteNombre: primerRenglon.clienteNombre ?? null,
+            clienteDomicilio: primerRenglon.clienteDomicilio ?? null,
+            idCanal: primerRenglon.idCanal ?? null,
+            fechaAtencion: primerRenglon.fechaAtencion ?? ahora,
+            idVendedor: primerRenglon.idVendedor,
+            numeroProductos: cantidadProductos,
+            cantPedido: 0,
+            listaPrecio: primerRenglon.listaPrecio ?? null,
+            fechaEntrega: primerRenglon.fechaEntrega ?? null,
+            estatus: primerRenglon.estatus,
+            estatusDescripcion: primerRenglon.estatusDescripcion ?? this.getEstatusDescripcion(primerRenglon.estatus),
+            fueraAgenda: primerRenglon.fueraAgenda ?? null,
+            observaciones,
+            no_venta: primerRenglon.no_venta ?? null,
+            tieneDiferencia: false,
+            causaNoAtencion: primerRenglon.causaNoAtencion ?? null,
+            obserNoAtencion: primerRenglon.obserNoAtencion ?? null,
+            syncedAt: ahora,
+            syncedAr: null,
+            modificadoLocal: true,
+            idProducto,
+            productoNombre,
+            cantAtencion: cantidad,
+            precio,
+            precioAtencion: precio,
+            causaDiferencia: null,
+            causaDiferenciaDesc: null,
+            obserDiferencia: null,
+            atendido: true,
+          },
+          Realm.UpdateMode.Modified,
+        );
+      });
+
+      console.log(`[PedidosService] Producto adicional agregado: folio=${folio}, idProducto=${idProducto}`);
+      return true;
+    } catch (error) {
+      console.error("[PedidosService] Error al agregar producto al pedido:", error);
+      return false;
+    }
   }
 
   actualizarPedidosDesdeRespuesta(rows: any[]): number {

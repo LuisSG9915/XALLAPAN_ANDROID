@@ -610,7 +610,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     if (!currentUser) return;
 
     checkNewPedidos();
-    pedidosPollingIntervalRef.current = setInterval(checkNewPedidos, 5000);
+    pedidosPollingIntervalRef.current = setInterval(checkNewPedidos, 15000);
 
     const subscription = AppState.addEventListener("change", (nextAppState) => {
       if (nextAppState === "active") checkNewPedidos();
@@ -823,7 +823,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       return;
     }
 
-    const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
+    const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta, vendedor);
 
     if (validacionPedidos.error) {
       Alert.alert(
@@ -866,7 +866,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           text: "Sí, cerrar",
           style: "destructive",
           onPress: async () => {
-            const validacionFinal = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
+            const validacionFinal = CierreRutaService.validarPedidosPendientesSinCausa(ruta, vendedor);
 
             if (validacionFinal.error) {
               Alert.alert(
@@ -1198,7 +1198,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.3.6</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.3.7</Text>
         </View>
       </ScrollView>
 

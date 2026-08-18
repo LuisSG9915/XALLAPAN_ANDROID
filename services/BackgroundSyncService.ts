@@ -47,7 +47,7 @@ class BackgroundSyncService {
 
   // Configuración
   private readonly SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutos
-  private readonly SYNC_INTERVAL_MINUTES = 3; // Para BackgroundFetch
+  private readonly SYNC_INTERVAL_MINUTES = 15; // Para BackgroundFetch
   private readonly BACKGROUND_FETCH_TASK_ID = "com.awesomeproject.sync";
 
   // Estado interno
@@ -560,6 +560,12 @@ class BackgroundSyncService {
 
       const sucursal = user.sucursal_origen || user.sucursal || 1;
       const idUsuario: number = Number(user.id ?? user.idUsuario ?? 1);
+
+      try {
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario);
+      } catch (trackingError) {
+        console.warn(TAG, "Error enviando tracking GPS headless:", trackingError);
+      }
 
       const result = await FullSyncService.syncIncremental(
         sucursal,
