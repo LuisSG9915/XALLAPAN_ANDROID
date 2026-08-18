@@ -96,6 +96,11 @@ export class VentasArrastreSyncTask extends SyncTask {
         return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
       };
 
+      const formatDateOnly = (date: Date): string =>
+        `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+          date.getUTCDate(),
+        ).padStart(2, "0")}`;
+
       const nowMexico = getMexicoNow();
 
       // Preparar payload
@@ -113,6 +118,7 @@ export class VentasArrastreSyncTask extends SyncTask {
         id_movil: venta.idMovil,
         fechaTransfer: formatLocalDate(nowMexico),
         observacion: venta.observacion ?? "",
+        fecha_devolucion: venta.fechaDevolucion ? formatDateOnly(new Date(venta.fechaDevolucion)) : null,
       }));
 
       // Enviar al servidor

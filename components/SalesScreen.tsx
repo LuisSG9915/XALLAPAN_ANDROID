@@ -38,6 +38,7 @@ type Cliente = {
   longitud?: number;
   metros?: number; // Distancia máxima permitida en metros
   domicilio?: string;
+  referencia?: string;
 };
 
 type ClienteCercano = Cliente & { distanciaMetros: number };
@@ -262,7 +263,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     claveProdPrestado: number;
     descProdPrestado: string;
     observacion: string;
-    fechaDevolucion: string;
+    fechaDevolucion: Date | null;
   } | null>(null);
   const [pendingPrestamoCantidad, setPendingPrestamoCantidad] = useState(0);
   const [pendingPrestamoProducto, setPendingPrestamoProducto] = useState<Producto | null>(null);
@@ -829,6 +830,7 @@ export default function SalesScreen({ route }: { route?: any }) {
           longitud: c.longitud,
           metros: c.metros,
           domicilio: c.domicilio ? String(c.domicilio) : undefined,
+          referencia: c.referencia ? String(c.referencia) : undefined,
         }));
         setClientes(clientesFormateados);
 
@@ -916,6 +918,7 @@ export default function SalesScreen({ route }: { route?: any }) {
         latitud: c.latitud,
         longitud: c.longitud,
         domicilio: c.domicilio ? String(c.domicilio) : undefined,
+        referencia: c.referencia ? String(c.referencia) : undefined,
         metros: c.metros,
       }));
       setClientes(clientesFormateados);
@@ -2667,6 +2670,7 @@ export default function SalesScreen({ route }: { route?: any }) {
             observacion: observacionVenta,
             idPedido: null,
             idLista: item.usandoPrecioDefault ? 13 : client.listaPrecio ?? null,
+            fechaDevolucion: esProductoPrestamo(item.id) ? prestamoData?.fechaDevolucion ?? null : null,
           };
         }),
       );
@@ -3052,6 +3056,11 @@ export default function SalesScreen({ route }: { route?: any }) {
           {selectedClient?.domicilio ? (
             <Text style={styles.domicilioTexto} numberOfLines={2}>
               {selectedClient.domicilio}
+            </Text>
+          ) : null}
+          {selectedClient?.referencia ? (
+            <Text style={styles.referenciaTexto} numberOfLines={2}>
+              {selectedClient.referencia}
             </Text>
           ) : null}
         </View>
@@ -4133,6 +4142,12 @@ const styles = StyleSheet.create({
   },
   domicilioTexto: {
     marginTop: SPACING.s,
+    ...TYPOGRAPHY.body,
+    fontSize: 13,
+    color: COLORS.muted,
+  },
+  referenciaTexto: {
+    marginTop: SPACING.xs,
     ...TYPOGRAPHY.body,
     fontSize: 13,
     color: COLORS.muted,

@@ -50,8 +50,14 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 62,
+        schemaVersion: 64,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 64) {
+            console.log("[Migration v64] Agregando referencia a ClienteFull");
+          }
+          if (oldRealm.schemaVersion < 63) {
+            console.log("[Migration v63] Agregando fechaDevolucion a Venta");
+          }
           if (oldRealm.schemaVersion < 62) {
             console.log("[Migration v62] Agregando etiqueta a ClienteFoto");
           }
@@ -917,6 +923,13 @@ class FullSyncService {
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
   }
 
+  formatDateOnlyForServer(date: Date): string {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   /**
    * Envía ventas locales pendientes al servidor (arrastre).
    * Se ejecuta automáticamente antes de sincronizaciones para subir ventas offline.
@@ -1703,6 +1716,7 @@ class FullSyncService {
                     facturacionMovil: cliente.facturacionMovil,
                     listaPrecio: cliente.listaPrecio,
                     domicilio: cliente.domicilio || null,
+                    referencia: cliente.referencia ?? existing?.referencia ?? null,
                     fechaAct: cliente.fecha_act
                       ? new Date(cliente.fecha_act)
                       : null,
@@ -3621,6 +3635,7 @@ class FullSyncService {
       observacion?: string | null;
       idPedido?: number | null;
       idLista?: number | null;
+      fechaDevolucion?: Date | null;
     }[]
   ): Promise<void> {
     if (!this.isInitialized) {
@@ -3653,6 +3668,7 @@ class FullSyncService {
           observacion: v.observacion ?? null,
           idPedido: v.idPedido ?? null,
           idLista: v.idLista ?? null,
+          fechaDevolucion: v.fechaDevolucion ?? null,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -5539,6 +5555,9 @@ class FullSyncService {
         const fechaTransferFormateada = this.formatMexicoDateForServer(
           this.getMexicoNow()
         );
+        const fechaDevolucion = venta.fechaDevolucion
+          ? new Date(venta.fechaDevolucion)
+          : null;
 
         console.log("📤 [FullSync] FECHA ENVIADA AL SERVIDOR:", {
           ventaId: venta.id,
@@ -5564,6 +5583,9 @@ class FullSyncService {
           observacion: venta.observacion ?? "",
           id_pedido: venta.idPedido ?? null,
           idLista: venta.idLista ?? null,
+          fecha_devolucion: fechaDevolucion
+            ? this.formatDateOnlyForServer(fechaDevolucion)
+            : null,
           folio_movto: 1,
         };
       });

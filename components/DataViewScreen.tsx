@@ -468,6 +468,8 @@ export default function DataViewScreen() {
         </View>
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Grupo: {item.idGrupo || "N/A"}</Text>
+          <Text style={styles.cardText}>Domicilio: {item.domicilio || "N/A"}</Text>
+          <Text style={styles.cardText}>Referencia: {item.referencia || "N/A"}</Text>
           <Text style={styles.cardText}>Crédito: {item.credito ? "Sí" : "No"}</Text>
           <Text style={styles.cardText}>Facturación móvil: {item.facturacionMovil ? "Sí" : "No"}</Text>
           {item.latitud && item.longitud ? (

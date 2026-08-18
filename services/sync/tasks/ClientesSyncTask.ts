@@ -56,6 +56,7 @@ export class ClientesSyncTask extends SyncTask {
             fechaAct: cliente.fecha_act ? new Date(cliente.fecha_act) : null,
             correoFactura: cliente.correo_factura || null,
             domicilio: cliente.domicilio || null,
+            referencia: cliente.referencia ?? existing?.referencia ?? null,
             idEmpresa: cliente.idEmpresa ?? null,
             syncedAt: new Date(),
             syncedAr: cliente.fechaLog ? new Date(cliente.fechaLog) : null,

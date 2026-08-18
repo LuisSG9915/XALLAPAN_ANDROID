@@ -25,6 +25,8 @@ import LocationService from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
+import IntercambioEnvaseModal from "./IntercambioEnvaseModal";
+import PrestamoEnvaseModal from "./PrestamoEnvaseModal";
 import { APP_NAME, COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from "../theme/theme";
 
 interface Props {
@@ -42,6 +44,29 @@ type ProductoDisponiblePedido = {
   inventariable?: boolean;
   esPromocion?: boolean;
   usandoPrecioDefault?: boolean;
+  omitirMovil?: number;
+  envaseRecibe?: boolean;
+};
+
+type IntercambioData = {
+  envaseEntregadoClave: number;
+  envaseEntregadoDesc: string;
+  envaseRecibidoClave: number;
+  envaseRecibidoDesc: string;
+  envaseRecibidoId: number;
+  kitIntercambioProductoId: number | null;
+  precioEnvase: number | null;
+  observacion: string;
+  costo: number;
+  cantRecEnvOtro: number;
+};
+
+type PrestamoData = {
+  idProdPrestado: number;
+  claveProdPrestado: number;
+  descProdPrestado: string;
+  observacion: string;
+  fechaDevolucion: Date | null;
 };
 
 export default function PedidoDetalleScreen({ navigation, route }: Props) {
@@ -59,6 +84,18 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const [productoModalVisible, setProductoModalVisible] = useState(false);
   const [searchProductoQuery, setSearchProductoQuery] = useState("");
   const [showOnlyPromotions, setShowOnlyPromotions] = useState(false);
+  const [intercambioModalOpen, setIntercambioModalOpen] = useState(false);
+  const [intercambioData, setIntercambioData] = useState<IntercambioData | null>(null);
+  const intercambioDataRef = useRef<IntercambioData | null>(null);
+  const [pendingIntercambioProducto, setPendingIntercambioProducto] = useState<ProductoDisponiblePedido | null>(null);
+  const [pendingIntercambioCantidad, setPendingIntercambioCantidad] = useState(0);
+  const [costoIntercambioCalculado, setCostoIntercambioCalculado] = useState(0);
+  const [prestamoModalOpen, setPrestamoModalOpen] = useState(false);
+  const [prestamoData, setPrestamoData] = useState<PrestamoData | null>(null);
+  const [pendingPrestamoCantidad, setPendingPrestamoCantidad] = useState(0);
+  const [pendingPrestamoProducto, setPendingPrestamoProducto] = useState<ProductoDisponiblePedido | null>(null);
+  const envaseIntercambioClaveRef = useRef<number | undefined>(undefined);
+  const envaseIntercambioDescRef = useRef<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [validandoGPS, setValidandoGPS] = useState(false);
   const [progresoValidacion, setProgresoValidacion] = useState<{
@@ -85,7 +122,11 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const salidaControlada = useRef(false);
   const cierreEnCursoRef = useRef(false);
 
-  const construirProductosDisponibles = (pedidoData: Pedido, sucursal: number): ProductoDisponiblePedido[] => {
+  const construirProductosDisponibles = (
+    pedidoData: Pedido,
+    sucursal: number,
+    userEnvaseRuta: boolean,
+  ): ProductoDisponiblePedido[] => {
     const productosData = FullSyncService.getProductos(100000);
     const inventarioData = FullSyncService.getInventario();
     const kitsData = FullSyncService.getKits(50000);
@@ -217,8 +258,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         inventariable: Boolean(producto.inventariable),
         esPromocion,
         usandoPrecioDefault: precioPromo === undefined && precioCliente === undefined && precioDefault !== undefined,
+        omitirMovil: Number(producto.omitirMovil) || 0,
+        envaseRecibe: producto.envaseRecibe === true,
       };
-      if (productoDisponible.existencia <= 0) return;
+      const omitirProductoEnMovil = Number(productoDisponible.omitirMovil) === 1;
+      const productoVisible = omitirProductoEnMovil
+        ? userEnvaseRuta && productoDisponible.envaseRecibe === true
+        : productoDisponible.existencia > 0;
+      if (!productoVisible) return;
 
       const existente = productosMap.get(id);
       if (
@@ -361,7 +408,11 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         const listaPrecioCliente = Number(clienteObj?.listaPrecio ?? pedidoData.listaPrecio ?? 0);
         setPreciosLista(FullSyncService.getPreciosByListaPrecio(listaPrecioCliente));
         const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoData.ruta || 1);
-        const productosDisponiblesData = construirProductosDisponibles(pedidoData, sucursal);
+        const productosDisponiblesData = construirProductosDisponibles(
+          pedidoData,
+          sucursal,
+          user?.envaseRuta === true,
+        );
         setProductosDisponibles(productosDisponiblesData);
         setFilteredProductosDisponibles(productosDisponiblesData);
       } else {
@@ -416,28 +467,40 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     setProductoModalVisible(true);
   };
 
-  const agregarProductoAlPedido = (producto: ProductoDisponiblePedido) => {
-    const existente = productos.find((item) => item.idProducto === producto.id);
+  const esProductoIntercambio = (productoId: number): boolean =>
+    FullSyncService.getKitsByProducto(productoId).some((kit: any) => kit.recuperaEnvaseOtro);
+
+  const esProductoPrestamo = (productoId: number): boolean =>
+    FullSyncService.getKitsByProducto(productoId).some((kit: any) => kit.controlPresamo);
+
+  const guardarProductoEnPedido = (
+    producto: ProductoDisponiblePedido,
+    precio = producto.precio,
+    cantidad = 1,
+    validarExistencia = true,
+  ): boolean => {
+    const pedidosService = PedidosService.getInstance();
+    pedidosService.setRealm((FullSyncService as any).realm);
+    const productosActuales = pedidosService.getProductosByFolio(folio);
+    const existente = productosActuales.find((item) => item.idProducto === producto.id);
     const cantidadActual = Number(existente?.cantAtencion ?? 0);
-    if (cantidadActual + 1 > producto.existencia) {
+    if (validarExistencia && cantidadActual + cantidad > producto.existencia) {
       Alert.alert(
         "Inventario insuficiente",
         `No hay suficiente existencia de "${producto.descripcion}" (disponible: ${producto.existencia})`,
       );
-      return;
+      return false;
     }
 
-    const pedidosService = PedidosService.getInstance();
-    pedidosService.setRealm((FullSyncService as any).realm);
     const success = pedidosService.agregarProductoPedido(folio, {
       idProducto: producto.id,
       productoNombre: producto.descripcion,
-      precio: producto.precio,
-      cantidad: 1,
+      precio,
+      cantidad,
     });
     if (!success) {
       Alert.alert("Error", "No se pudo agregar el producto al pedido");
-      return;
+      return false;
     }
 
     setProductos(pedidosService.getProductosByFolio(folio));
@@ -445,6 +508,41 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     if (pedidoActualizado) setPedido(pedidoActualizado);
     setProductoModalVisible(false);
     setSearchProductoQuery("");
+    return true;
+  };
+
+  const agregarProductoAlPedido = (producto: ProductoDisponiblePedido) => {
+    const kitsDelProducto = FullSyncService.getKitsByProducto(producto.id);
+    const tienePrestamo = kitsDelProducto.some((kit: any) => kit.controlPresamo);
+    const tieneIntercambio = kitsDelProducto.some((kit: any) => kit.recuperaEnvaseOtro);
+
+    if (tienePrestamo) {
+      setPendingPrestamoProducto(producto);
+      setPendingPrestamoCantidad(1);
+      setProductoModalVisible(false);
+      setPrestamoModalOpen(true);
+      return;
+    }
+
+    if (tieneIntercambio) {
+      const kitIntercambio = kitsDelProducto.find((kit: any) => kit.recuperaEnvaseOtro);
+      const idInsumo = Number(kitIntercambio?.idInsumo);
+      const productoInsumo = FullSyncService.getProductos(100000).find(
+        (item: any) => Number(item.id) === idInsumo,
+      );
+      envaseIntercambioClaveRef.current = productoInsumo
+        ? Number.parseInt(String(productoInsumo.claveProd || "0"), 10)
+        : idInsumo;
+      envaseIntercambioDescRef.current = productoInsumo?.descripcion || `Producto ${idInsumo}`;
+      setCostoIntercambioCalculado(producto.precio);
+      setPendingIntercambioProducto(producto);
+      setPendingIntercambioCantidad(1);
+      setProductoModalVisible(false);
+      setIntercambioModalOpen(true);
+      return;
+    }
+
+    guardarProductoEnPedido(producto);
   };
 
   const iniciarAtencion = async (): Promise<boolean> => {
@@ -668,6 +766,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   ): Promise<void> => {
     const productosCatalogo = FullSyncService.getProductos(100000);
     const listaCliente = pedidoCerrado.listaPrecio ?? null;
+    const currentIntercambioData = intercambioDataRef.current || intercambioData;
     const obtenerListaProducto = (idProducto: number): number | null => {
       const productoCatalogo = productosCatalogo.find((producto: any) => Number(producto.id) === idProducto);
       const clavesProducto = [idProducto, Number(productoCatalogo?.claveProd)].filter(Number.isFinite);
@@ -679,7 +778,10 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     const entregas = productosEntregados
       .map((producto) => {
         const cantidad = Number(producto.cantAtencion ?? 0);
-        const precio = Number(producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto));
+        const precioNormal = Number(producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto));
+        const precio = esProductoIntercambio(Number(producto.idProducto))
+          ? Number(currentIntercambioData?.costo ?? precioNormal)
+          : precioNormal;
         const productoCatalogo = productosCatalogo.find((p: any) => Number(p.id) === Number(producto.idProducto));
         return {
           idProducto: producto.idProducto,
@@ -707,9 +809,14 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
     const nombreCliente = pedidoCerrado.clienteNombre || clienteNombre || `Cliente #${pedidoCerrado.cliente}`;
     const vendedor = user?.claveEmpleado || user?.nombre || String(idUsuario);
+    const observacionesEnvase = [intercambioData?.observacion, prestamoData?.observacion];
     const observacionVenta = Array.from(
       new Set(
-        [pedidoCerrado.observaciones, ...productosEntregados.map((producto) => producto.observaciones)]
+        [
+          pedidoCerrado.observaciones,
+          ...productosEntregados.map((producto) => producto.observaciones),
+          ...observacionesEnvase,
+        ]
           .map((observacion) => String(observacion ?? "").trim())
           .filter(Boolean),
       ),
@@ -740,11 +847,48 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         observacion: observacionVenta,
         idPedido: pedidoCerrado.idPedido ?? pedidoCerrado.folio,
         idLista: entrega.idLista,
+        fechaDevolucion: esProductoPrestamo(entrega.idProducto) ? prestamoData?.fechaDevolucion ?? null : null,
       })),
     );
 
+    try {
+      const productoIntercambio = productosEntregados.find((producto) =>
+        esProductoIntercambio(Number(producto.idProducto)),
+      );
+      const cantidadProductoIntercambio = Number(productoIntercambio?.cantAtencion ?? 0);
+      if (currentIntercambioData && cantidadProductoIntercambio > 0) {
+        const cantRecEnvOtro = Number(currentIntercambioData.cantRecEnvOtro) > 0
+          ? Number(currentIntercambioData.cantRecEnvOtro)
+          : 1;
+        const productoRecibido = productosCatalogo.find(
+          (producto: any) => Number(producto.claveProd) === Number(currentIntercambioData.envaseRecibidoClave),
+        );
+        const cantidadEntrada = cantidadProductoIntercambio * cantRecEnvOtro;
+        await FullSyncService.createLocalInventarioEnvase([
+          {
+            sucursal,
+            claveProd: Number(
+              productoRecibido?.id || currentIntercambioData.envaseRecibidoId || currentIntercambioData.envaseRecibidoClave,
+            ),
+            folioMovto: 1,
+            cantidadEntrada,
+            cantidadSalida: 0,
+            costo: Number(currentIntercambioData.costo) || 0,
+            tipoMovto: 1000,
+            idMovil,
+            observacion: currentIntercambioData.observacion || "",
+          },
+        ]);
+      }
+    } catch (error) {
+      console.warn(`[PedidoDetalle] No se pudo registrar el movimiento de intercambio del folio ${pedidoCerrado.folio}:`, error);
+    }
+
+    const entregasInventario = entregas.filter(
+      (entrega) => !esProductoIntercambio(entrega.idProducto) && !esProductoPrestamo(entrega.idProducto),
+    );
     await FullSyncService.updateInventarioAfterSaleScreen(
-      entregas.map((entrega) => ({
+      entregasInventario.map((entrega) => ({
         sucursal,
         claveProd: entrega.idProducto,
         cantidad: entrega.cantidad,
@@ -908,6 +1052,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     >((resultado, producto) => {
       const solicitado = Number(producto.cantAtencion ?? 0);
       if (!Number.isFinite(solicitado) || solicitado <= 0) return resultado;
+      if (esProductoIntercambio(Number(producto.idProducto)) || esProductoPrestamo(Number(producto.idProducto))) {
+        return resultado;
+      }
 
       const disponible = calcularExistencia(Number(producto.idProducto));
       if (disponible < solicitado) {
@@ -1615,8 +1762,19 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
                     <Text style={styles.productResultName} numberOfLines={2}>{item.descripcion}</Text>
                     <Text style={styles.productResultSubtitle}>Clave: {item.claveProd} · Existencia: {item.existencia}</Text>
                     {item.esPromocion && <Text style={styles.productResultPromo}>Precio especial</Text>}
+                    {item.usandoPrecioDefault && !item.esPromocion && (
+                      <Text style={styles.productResultDefault}>(DOMIC.)</Text>
+                    )}
                   </View>
-                  <Text style={styles.productResultPrice}>${item.precio.toFixed(2)}</Text>
+                  <Text
+                    style={[
+                      styles.productResultPrice,
+                      item.esPromocion && styles.productResultPricePromo,
+                      item.usandoPrecioDefault && !item.esPromocion && styles.productResultPriceDefault,
+                    ]}
+                  >
+                    ${item.precio.toFixed(2)}
+                  </Text>
                 </TouchableOpacity>
               )}
               ListEmptyComponent={<Text style={styles.emptyProductResults}>No se encontraron productos</Text>}
@@ -1635,6 +1793,84 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           </View>
         </View>
       </Modal>
+
+      <IntercambioEnvaseModal
+        visible={intercambioModalOpen}
+        cantidad={pendingIntercambioCantidad}
+        costoAutomatico={costoIntercambioCalculado}
+        envaseEntregadoClave={envaseIntercambioClaveRef.current}
+        envaseEntregadoDesc={envaseIntercambioDescRef.current}
+        productoId={pendingIntercambioProducto?.id}
+        onAccept={(data) => {
+          const dataObj: IntercambioData = {
+            envaseEntregadoClave: data.envaseEntregadoClave,
+            envaseEntregadoDesc: data.envaseEntregadoDesc,
+            envaseRecibidoClave: data.envaseRecibidoClave,
+            envaseRecibidoDesc: data.envaseRecibidoDesc,
+            envaseRecibidoId: data.envaseRecibidoId,
+            kitIntercambioProductoId: data.kitIntercambioProductoId,
+            precioEnvase: data.precioEnvase,
+            observacion: data.observacion,
+            costo: data.costo,
+            cantRecEnvOtro: data.cantRecEnvOtro,
+          };
+          intercambioDataRef.current = dataObj;
+          setIntercambioData(dataObj);
+
+          const productoIntercambio = pendingIntercambioProducto;
+          if (productoIntercambio) {
+            const intercambioGuardado = guardarProductoEnPedido(productoIntercambio, data.costo, 1, false);
+
+            const precioEnvase = Number(data.precioEnvase);
+            const cantidadEnvases = Number(data.cantRecEnvOtro) > 0 ? Number(data.cantRecEnvOtro) : 1;
+            if (intercambioGuardado && Number.isFinite(precioEnvase) && precioEnvase > 0) {
+              const productoEnvase = FullSyncService.getProductos(100000).find((producto: any) => Number(producto.id) === 76);
+              guardarProductoEnPedido(
+                {
+                  id: 76,
+                  claveProd: String(productoEnvase?.claveProd || "76"),
+                  descripcion: productoEnvase?.descripcion || "ENVASE",
+                  precio: precioEnvase,
+                  existencia: 9999,
+                },
+                precioEnvase,
+                cantidadEnvases,
+                false,
+              );
+            }
+          }
+
+          setPendingIntercambioProducto(null);
+          setPendingIntercambioCantidad(0);
+          setIntercambioModalOpen(false);
+        }}
+        onCancel={() => {
+          setPendingIntercambioProducto(null);
+          setPendingIntercambioCantidad(0);
+          setIntercambioModalOpen(false);
+        }}
+      />
+
+      <PrestamoEnvaseModal
+        visible={prestamoModalOpen}
+        clienteNombre={clienteNombre || `Cliente #${pedido.cliente}`}
+        cantidad={pendingPrestamoCantidad}
+        productoSeleccionado={pendingPrestamoProducto}
+        onAccept={(data) => {
+          setPrestamoData(data);
+          if (pendingPrestamoProducto) {
+            guardarProductoEnPedido(pendingPrestamoProducto, pendingPrestamoProducto.precio, 1, false);
+          }
+          setPendingPrestamoProducto(null);
+          setPendingPrestamoCantidad(0);
+          setPrestamoModalOpen(false);
+        }}
+        onCancel={() => {
+          setPendingPrestamoProducto(null);
+          setPendingPrestamoCantidad(0);
+          setPrestamoModalOpen(false);
+        }}
+      />
 
       <ModalDiagnosticoGps
         visible={diagnosticoGps !== null}
@@ -2219,10 +2455,24 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: SPACING.xs,
   },
+  productResultDefault: {
+    color: "#FF6F00",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: SPACING.xs,
+    fontStyle: "italic",
+  },
   productResultPrice: {
     ...TYPOGRAPHY.body,
     color: COLORS.primary,
     fontWeight: "700",
+  },
+  productResultPricePromo: {
+    color: "#E91E63",
+    fontWeight: "900",
+  },
+  productResultPriceDefault: {
+    color: "#FF6F00",
   },
   emptyProductResults: {
     ...TYPOGRAPHY.body,

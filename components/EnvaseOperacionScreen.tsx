@@ -100,7 +100,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     claveProdPrestado: number;
     descProdPrestado: string;
     observacion: string;
-    fechaDevolucion: string;
+    fechaDevolucion: Date | null;
   } | null>(null);
 
   // Debug: monitorear cambios en intercambioModalOpen
@@ -344,7 +344,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
     claveProdPrestado: number;
     descProdPrestado: string;
     observacion: string;
-    fechaDevolucion: string;
+    fechaDevolucion: Date | null;
   }) => {
     setPrestamoModalOpen(false);
     setPrestamoData(data);
@@ -366,7 +366,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       claveProdPrestado: number;
       descProdPrestado: string;
       observacion: string;
-      fechaDevolucion: string;
+      fechaDevolucion: Date | null;
     } | null,
   ) => {
     if (!selectedClient || !currentUser) return;
@@ -502,6 +502,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
           observacion: observacionVenta,
           idPedido: null,
           idLista: selectedClient.listaPrecio ?? null,
+          fechaDevolucion: type === "prestamo" ? prestamo?.fechaDevolucion ?? null : null,
         },
       ]);
       console.log("[EnvaseOp] Venta creada exitosamente");
@@ -554,7 +555,7 @@ export default function EnvaseOperacionScreen({ navigation }: { navigation: any 
       if (type === "prestamo" && prestamo) {
         const obsCompleta = [
           prestamo.observacion,
-          prestamo.fechaDevolucion ? `Fecha devolucion: ${prestamo.fechaDevolucion}` : "",
+          prestamo.fechaDevolucion ? `Fecha devolucion: ${prestamo.fechaDevolucion.toISOString().slice(0, 10)}` : "",
         ]
           .filter(Boolean)
           .join(" | ");

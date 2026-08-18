@@ -14,9 +14,15 @@ import {
 import { Icon } from "react-native-elements";
 import PedidosService, { Pedido, ESTATUS_PEDIDO, esEstatusFinalPedido } from "../services/PedidosService";
 
+type ProductoResumen = {
+  nombre: string;
+  cantidad: number;
+};
+
 interface PedidoAgrupado extends Pedido {
   folioKey: number;
   total?: number;
+  productosResumen?: ProductoResumen[];
 }
 
 import AuthService from "../services/AuthService";
@@ -48,6 +54,25 @@ const formatearDistancia = (distancia?: number | null): string => {
   if (distancia == null) return "No disponible";
   if (distancia >= 1000) return `${(distancia / 1000).toFixed(1)} km`;
   return `${Math.round(distancia)} m`;
+};
+
+const obtenerProductosResumen = (productos: Pedido[]): ProductoResumen[] => {
+  const resumenPorProducto = new Map<string, ProductoResumen>();
+
+  productos.forEach((producto) => {
+    const clave = String(producto.idProducto);
+    const nombre = String(producto.productoNombre ?? "").trim() || `Producto #${producto.idProducto}`;
+    const cantidadPedido = Number(producto.cantPedido ?? 0);
+    const cantidad = Number.isFinite(cantidadPedido) ? cantidadPedido : 0;
+    const existente = resumenPorProducto.get(clave);
+
+    resumenPorProducto.set(clave, {
+      nombre: existente?.nombre || nombre,
+      cantidad: (existente?.cantidad ?? 0) + cantidad,
+    });
+  });
+
+  return Array.from(resumenPorProducto.values());
 };
 
 export default function PedidosScreen({ navigation }: { navigation: any }) {
@@ -147,6 +172,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
             clienteDomicilio: pedido.clienteDomicilio || "",
             observaciones: pedido.observaciones || "",
             total,
+            productosResumen: obtenerProductosResumen(pedidosService.getProductosByFolio(folio)),
           });
         }
       });
@@ -196,6 +222,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
               clienteDomicilio: pedido.clienteDomicilio || "",
               observaciones: pedido.observaciones || "",
               total,
+              productosResumen: obtenerProductosResumen(pedidosService.getProductosByFolio(folio)),
             });
           }
         });
@@ -424,6 +451,22 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
               </View>
             </View>
           </View>
+
+          {item.productosResumen && item.productosResumen.length > 0 ? (
+            <View style={styles.productNamesContainer}>
+              <Icon name="list" type="material" size={16} color={COLORS.primary} />
+              <View style={styles.productNamesCopy}>
+                <Text style={styles.productNamesLabel}>Productos del pedido</Text>
+                {item.productosResumen.map((producto, index) => (
+                  <View key={`${producto.nombre}-${index}`} style={styles.productNameRow}>
+                    <Text style={styles.productNameBullet}>•</Text>
+                    <Text style={styles.productNamesText}>{producto.nombre}</Text>
+                    <Text style={styles.productQuantityText}>x{producto.cantidad}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
 
           {item.observaciones ? (
             <View style={styles.observacionesContainer}>
@@ -1013,6 +1056,46 @@ const styles = StyleSheet.create({
     width: 1,
     marginVertical: SPACING.xs,
     backgroundColor: "#EFF0F4",
+  },
+  productNamesContainer: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.s,
+    backgroundColor: "#F7F8FC",
+    padding: SPACING.s,
+    borderRadius: BORDER_RADIUS.s,
+    marginBottom: SPACING.m,
+  },
+  productNamesCopy: {
+    flex: 1,
+  },
+  productNamesLabel: {
+    fontSize: 10,
+    color: COLORS.muted,
+    marginBottom: 2,
+  },
+  productNameRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.xs,
+    marginTop: 2,
+  },
+  productNameBullet: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.primary,
+    lineHeight: 17,
+  },
+  productNamesText: {
+    ...TYPOGRAPHY.caption,
+    flex: 1,
+    color: COLORS.textPrimary,
+    lineHeight: 17,
+  },
+  productQuantityText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textPrimary,
+    fontWeight: "700",
+    lineHeight: 17,
   },
   infoRow: {
     flexDirection: "row",
