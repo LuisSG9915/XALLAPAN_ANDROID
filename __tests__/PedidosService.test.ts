@@ -84,12 +84,22 @@ const crearRealmMock = (pedido: any | any[] = crearPedido()) => {
 };
 
 describe("reglas de pedidos", () => {
-  it("considera todos los estados finales como completados", () => {
+  it("considera cerrados solo los pedidos entregados o cancelados", () => {
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.ENTREGADO)).toBe(true);
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.ENTREGADO_PARCIAL)).toBe(true);
-    expect(esEstatusFinalPedido(ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA)).toBe(true);
+    expect(esEstatusFinalPedido(ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA)).toBe(false);
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.CANCELADO)).toBe(true);
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.EN_ATENCION)).toBe(false);
+  });
+
+  it("permite retomar la atención de un pedido pendiente con causa", () => {
+    const pedido = crearPedido({ estatus: ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA });
+    const { realm } = crearRealmMock(pedido);
+    const service = PedidosService.getInstance();
+    service.setRealm(realm as any);
+
+    expect(service.iniciarAtencionPedido(pedido.folio)).toBe(true);
+    expect(pedido.estatus).toBe(ESTATUS_PEDIDO.EN_ATENCION);
   });
 
   it("identifica la observación de un producto agregado", () => {

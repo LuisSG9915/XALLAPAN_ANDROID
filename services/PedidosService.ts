@@ -108,7 +108,8 @@ export const ESTATUS_PEDIDO = {
   EN_CAPTURA: 10,
 };
 
-// Estados en los que el pedido ya fue atendido/cerrado y no admite modificacion
+// Estados que central considera cerrados para sincronización.
+// PENDIENTE_CON_CAUSA se conserva localmente mientras puede retomarse la atención.
 export const ESTADOS_FINALES = [
   ESTATUS_PEDIDO.ENTREGADO,
   ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
@@ -116,10 +117,17 @@ export const ESTADOS_FINALES = [
   ESTATUS_PEDIDO.CANCELADO,
 ];
 
+// Un pedido pendiente con causa sigue siendo atendible desde la app.
+const ESTADOS_NO_MODIFICABLES = [
+  ESTATUS_PEDIDO.ENTREGADO,
+  ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+  ESTATUS_PEDIDO.CANCELADO,
+];
+
 export const PRODUCTO_AGREGADO_OBSERVACION = "-producto agregado";
 
 export const esEstatusFinalPedido = (estatus: number): boolean =>
-  ESTADOS_FINALES.includes(Number(estatus));
+  ESTADOS_NO_MODIFICABLES.includes(Number(estatus));
 
 export const esProductoAgregado = (pedido: Pick<Pedido, "observaciones">): boolean =>
   String(pedido.observaciones ?? "").toLowerCase().includes(PRODUCTO_AGREGADO_OBSERVACION);
@@ -162,7 +170,7 @@ class PedidosService {
   }
 
   private puedeModificar(estatus: number): boolean {
-    return !ESTADOS_FINALES.includes(estatus);
+    return !ESTADOS_NO_MODIFICABLES.includes(Number(estatus));
   }
 
   private buildPedidoId(folio: number, idProducto: number): string {

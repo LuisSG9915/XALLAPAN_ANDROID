@@ -44,6 +44,9 @@ const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
   );
 };
 
+const debeMostrarEnRuta = (pedido: Pedido): boolean =>
+  Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA || esFechaDeHoy(pedido.fechaEntrega);
+
 const formatearMoneda = (valor?: number): string =>
   `$${Number(valor ?? 0).toLocaleString("es-MX", {
     minimumFractionDigits: 2,
@@ -154,9 +157,10 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const folios = pedidosService.getFoliosByRuta(ruta, undefined, true).filter((folio) =>
-        pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
-      );
+      const folios = pedidosService.getFoliosByRuta(ruta, undefined, true).filter((folio) => {
+        const pedido = pedidosService.getPedidoByFolio(folio);
+        return pedido ? debeMostrarEnRuta(pedido) : false;
+      });
       const pedidosAgrupados: PedidoAgrupado[] = [];
       folios.forEach((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
@@ -330,6 +334,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
     const coincideBusqueda =
       !query ||
       (p.clienteNombre || "").toLowerCase().includes(query) ||
+      (p.clienteDomicilio || "").toLowerCase().includes(query) ||
       String(p.folio).includes(query) ||
       String(p.cliente).includes(query);
 
