@@ -29,6 +29,7 @@ jest.mock("../services/sync/tasks/PedidoBitacoraUploadSyncTask", () => ({
 
 import PedidosService, {
   ESTATUS_PEDIDO,
+  getEstatusDescripcionPedido,
   esEstatusFinalPedido,
   esProductoAgregado,
   PRODUCTO_AGREGADO_OBSERVACION,
@@ -84,6 +85,11 @@ const crearRealmMock = (pedido: any | any[] = crearPedido()) => {
 };
 
 describe("reglas de pedidos", () => {
+  it("resuelve la descripción por código y no por una descripción desactualizada", () => {
+    expect(getEstatusDescripcionPedido(ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA)).toBe("PENDIENTE CON CAUSA");
+    expect(getEstatusDescripcionPedido(ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA)).toBe("PENDIENTE SIN CAUSA");
+  });
+
   it("considera cerrados solo los pedidos entregados o cancelados", () => {
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.ENTREGADO)).toBe(true);
     expect(esEstatusFinalPedido(ESTATUS_PEDIDO.ENTREGADO_PARCIAL)).toBe(true);
@@ -109,6 +115,18 @@ describe("reglas de pedidos", () => {
 });
 
 describe("PedidosService.getPedidoByFolio", () => {
+  it("corrige la descripción cuando no coincide con el estatus almacenado", () => {
+    const pedido = crearPedido({
+      estatus: ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+      estatusDescripcion: "EN ATENCION",
+    });
+    const { realm } = crearRealmMock(pedido);
+    const service = PedidosService.getInstance();
+    service.setRealm(realm as any);
+
+    expect(service.getPedidoByFolio(pedido.folio)?.estatusDescripcion).toBe("PENDIENTE CON CAUSA");
+  });
+
   it("recupera el nombre específico de otro renglón del pedido fuera de agenda", () => {
     const primerRenglon = crearPedido({ clienteNombre: "Cliente #10", clienteDomicilio: "" });
     const segundoRenglon = crearPedido({

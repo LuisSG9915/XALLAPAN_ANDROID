@@ -108,6 +108,33 @@ export const ESTATUS_PEDIDO = {
   EN_CAPTURA: 10,
 };
 
+export const getEstatusDescripcionPedido = (estatus: number): string | undefined => {
+  switch (Number(estatus)) {
+    case ESTATUS_PEDIDO.PROGRAMADO:
+      return "PROGRAMADO";
+    case ESTATUS_PEDIDO.ENTREGADO:
+      return "ENTREGADO";
+    case ESTATUS_PEDIDO.CONFIRMADO:
+      return "CONFIRMADO";
+    case ESTATUS_PEDIDO.NOTIFICADO:
+      return "NOTIFICADO";
+    case ESTATUS_PEDIDO.EN_ATENCION:
+      return "EN ATENCION";
+    case ESTATUS_PEDIDO.ENTREGADO_PARCIAL:
+      return "ENTREGADO PARCIAL";
+    case ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA:
+      return "PENDIENTE CON CAUSA";
+    case ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA:
+      return "PENDIENTE SIN CAUSA";
+    case ESTATUS_PEDIDO.CANCELADO:
+      return "CANCELADO";
+    case ESTATUS_PEDIDO.EN_CAPTURA:
+      return "EN CAPTURA";
+    default:
+      return undefined;
+  }
+};
+
 // Estados que central considera cerrados para sincronización.
 // PENDIENTE_CON_CAUSA se conserva localmente mientras puede retomarse la atención.
 export const ESTADOS_FINALES = [
@@ -420,8 +447,14 @@ class PedidosService {
     const clienteNombre = obtenerDatoCliente("clienteNombre") || String(pedidoBase.clienteNombre ?? "").trim() || undefined;
     const clienteDomicilio =
       obtenerDatoCliente("clienteDomicilio") || String(pedidoBase.clienteDomicilio ?? "").trim() || undefined;
+    const estatusDescripcion =
+      getEstatusDescripcionPedido(pedidoBase.estatus) ?? pedidoBase.estatusDescripcion;
 
-    if (clienteNombre === pedidoBase.clienteNombre && clienteDomicilio === pedidoBase.clienteDomicilio) {
+    if (
+      clienteNombre === pedidoBase.clienteNombre &&
+      clienteDomicilio === pedidoBase.clienteDomicilio &&
+      estatusDescripcion === pedidoBase.estatusDescripcion
+    ) {
       return pedidoBase as Pedido;
     }
 
@@ -429,6 +462,7 @@ class PedidosService {
       ...pedidoBase,
       clienteNombre,
       clienteDomicilio,
+      estatusDescripcion,
     } as Pedido;
   }
 
