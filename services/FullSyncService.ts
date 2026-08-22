@@ -25,6 +25,11 @@ class FullSyncService {
   private realm: Realm | null = null;
   private isInitialized = false;
   private apiBaseUrl = "https://api.cbinformatica.net:9031";
+  private ventasSendInFlight: Promise<{
+    success: boolean;
+    sent: number;
+    error?: string;
+  }> | null = null;
   private cierreRutaSendInFlight: Promise<{
     success: boolean;
     sent: number;
@@ -50,8 +55,20 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 64,
+        schemaVersion: 65,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 65) {
+            const ventasAnteriores = oldRealm.objects("Venta");
+            const ventasNuevas = newRealm.objects("Venta");
+            for (let index = 0; index < ventasNuevas.length; index++) {
+              const ventaAnterior = ventasAnteriores[index] as any;
+              const ventaNueva = ventasNuevas[index] as any;
+              ventaNueva.arrastreEnviado =
+                ventaAnterior?.noVenta === 0 &&
+                ventaAnterior?.syncedAt instanceof Date &&
+                ventaAnterior.syncedAt.getTime() > 0;
+            }
+          }
           if (oldRealm.schemaVersion < 64) {
             console.log("[Migration v64] Agregando referencia a ClienteFull");
           }
@@ -3669,6 +3686,7 @@ class FullSyncService {
           idPedido: v.idPedido ?? null,
           idLista: v.idLista ?? null,
           fechaDevolucion: v.fechaDevolucion ?? null,
+          arrastreEnviado: false,
           // Fecha centinela para indicar que aún no se sincroniza
           syncedAt: new Date(0),
         });
@@ -5512,6 +5530,29 @@ class FullSyncService {
     idUsuario: number,
     timeoutMs: number = ARRASTRE_REQUEST_TIMEOUT_MS
   ): Promise<{ success: boolean; sent: number; error?: string }> {
+    if (this.ventasSendInFlight) return this.ventasSendInFlight;
+
+    const sendPromise = this.sendPendingVentasToServerInternal(
+      sucursal,
+      idUsuario,
+      timeoutMs
+    );
+    this.ventasSendInFlight = sendPromise;
+
+    try {
+      return await sendPromise;
+    } finally {
+      if (this.ventasSendInFlight === sendPromise) {
+        this.ventasSendInFlight = null;
+      }
+    }
+  }
+
+  private async sendPendingVentasToServerInternal(
+    sucursal: number,
+    idUsuario: number,
+    timeoutMs: number
+  ): Promise<{ success: boolean; sent: number; error?: string }> {
     const LOCAL_SALE_ID_THRESHOLD = 1700000000;
 
     try {
@@ -5531,7 +5572,9 @@ class FullSyncService {
       // Solo enviar ventas locales (id >= threshold) y sin número de venta asignado
       const ventasLocales = ventasRealm.filter(
         (venta: any) =>
-          venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD
+          venta.noVenta === 0 &&
+          venta.id >= LOCAL_SALE_ID_THRESHOLD &&
+          venta.arrastreEnviado !== true
       );
 
       console.log("[FullSyncService] Filtering local sales", {
@@ -5619,6 +5662,18 @@ class FullSyncService {
           error: `HTTP ${response.status}: ${errorText}`,
         };
       }
+
+      const fechaSincronizacion = this.getMexicoNow();
+      const idsSincronizados = ventasLocales.map((venta: any) => venta.id);
+      this.realm.write(() => {
+        for (const id of idsSincronizados) {
+          const venta = this.realm!.objectForPrimaryKey("Venta", id);
+          if (venta) {
+            (venta as any).arrastreEnviado = true;
+            (venta as any).syncedAt = fechaSincronizacion;
+          }
+        }
+      });
 
       console.log(
         `[FullSyncService] ✅ Arrastre ventas exitoso: ${payload.length} registros`

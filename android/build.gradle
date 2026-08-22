@@ -35,4 +35,9 @@ subprojects { subproject ->
     tasks.withType(com.facebook.react.tasks.GenerateCodegenArtifactsTask).configureEach {
         doNotTrackState("React Native codegen output is not trackable on Windows Server")
     }
+    tasks.matching { task ->
+        task.name.startsWith("buildCMake") || task.name.startsWith("configureCMake")
+    }.configureEach {
+        doNotTrackState("CMake output tracking is not reliable on Windows")
+    }
 }

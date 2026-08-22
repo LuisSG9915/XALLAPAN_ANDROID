@@ -26,6 +26,7 @@ export const VentaSchema = {
     idPedido: "int?",
     idLista: "int?",
     fechaDevolucion: "date?",
+    arrastreEnviado: { type: "bool" as const, default: false },
     syncedAt: "date",
     syncedAr: "date?",
   },

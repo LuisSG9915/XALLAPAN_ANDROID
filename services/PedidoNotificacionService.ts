@@ -84,7 +84,10 @@ class PedidoNotificacionService {
 
       try {
         const initialNotification = await notifee.getInitialNotification();
-        if (initialNotification?.notification?.data) {
+        if (
+          initialNotification?.notification?.data &&
+          !initialNotification.notification.data.updateUrl
+        ) {
           await AsyncStorage.setItem(
             PENDING_NAVIGATION_KEY,
             JSON.stringify(initialNotification.notification.data),
@@ -414,6 +417,7 @@ class PedidoNotificacionService {
         notification?.data
       ) {
         const data = notification.data as any;
+        if (data.updateUrl) return;
         // Guardar intención de navegación para cuando la app se inicie
         try {
           await AsyncStorage.setItem(PENDING_NAVIGATION_KEY, JSON.stringify(data));

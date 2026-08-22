@@ -39,7 +39,10 @@ export class VentasArrastreSyncTask extends SyncTask {
       // Obtener ventas locales pendientes
       const ventasRealm = this.realm.objects("Venta");
       const ventasLocales = Array.from(ventasRealm).filter(
-        (venta: any) => venta.noVenta === 0 && venta.id >= LOCAL_SALE_ID_THRESHOLD,
+        (venta: any) =>
+          venta.noVenta === 0 &&
+          venta.id >= LOCAL_SALE_ID_THRESHOLD &&
+          venta.arrastreEnviado !== true,
       );
 
       console.log(`[VentasArrastre] Ventas pendientes encontradas: ${ventasLocales.length}`);
@@ -135,6 +138,18 @@ export class VentasArrastreSyncTask extends SyncTask {
         const errorText = await response.text().catch(() => "");
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
+
+      const fechaSincronizacion = getMexicoNow();
+      const idsSincronizados = ventasLocales.map((venta: any) => venta.id);
+      this.realm.write(() => {
+        for (const id of idsSincronizados) {
+          const venta = this.realm.objectForPrimaryKey("Venta", id);
+          if (venta) {
+            (venta as any).arrastreEnviado = true;
+            (venta as any).syncedAt = fechaSincronizacion;
+          }
+        }
+      });
 
       console.log(`[VentasArrastre] ✅ ${payload.length} ventas enviadas correctamente`);
 

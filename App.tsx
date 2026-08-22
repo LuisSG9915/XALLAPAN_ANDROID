@@ -55,6 +55,7 @@ import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
 import PedidoNotificacionService from "./services/PedidoNotificacionService";
+import AppUpdateService from "./services/AppUpdateService";
 import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
@@ -225,6 +226,11 @@ function App() {
             if (hasPermission) return "granted";
             return prev === "blocked" ? "blocked" : "denied";
           });
+          if (nextAppState === "active") {
+            AppUpdateService.verificarActualizacion().catch((error) =>
+              console.warn("[App] Error verificando actualización al volver:", error),
+            );
+          }
           PedidoNotificacionService.procesarNavegacionPendiente().catch((error) =>
             console.warn("[App] Error procesando pedido pendiente al volver a la app:", error),
           );
@@ -242,6 +248,14 @@ function App() {
   }, [permissionStatus]);
 
   const [servicesReady, setServicesReady] = useState(false);
+
+  useEffect(() => {
+    if (permissionStatus === null) return;
+
+    AppUpdateService.inicializar()
+      .then(() => AppUpdateService.verificarActualizacion())
+      .catch((error) => console.warn("[App] Error inicializando actualizador:", error));
+  }, [permissionStatus]);
 
   useEffect(() => {
     // App initialization - solo si hay permisos de ubicación

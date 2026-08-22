@@ -21,6 +21,7 @@ import AuthService from "./AuthService";
 import BackgroundFetch from "react-native-background-fetch";
 import BitacoraService from "./BitacoraService";
 import GpsBitacoraService from "./GpsBitacoraService";
+import AppUpdateService from "./AppUpdateService";
 import BackgroundActions from "react-native-background-actions";
 
 export type SyncStatus =
@@ -549,6 +550,7 @@ class BackgroundSyncService {
     console.log(TAG, "Iniciando sincronización headless, taskId:", taskId);
 
     try {
+      await AppUpdateService.verificarActualizacion();
       await FullSyncService.initialize();
 
       const user = await AuthService.restoreSession();

@@ -169,6 +169,21 @@ if (fs.existsSync(bluetoothJavaFile)) {
   }
 }
 
+const gradlePluginSettings = path.join(__dirname, 'node_modules', '@react-native', 'gradle-plugin', 'settings.gradle.kts');
+if (fs.existsSync(gradlePluginSettings)) {
+  let settingsSrc = fs.readFileSync(gradlePluginSettings, 'utf8');
+  if (!settingsSrc.includes('/.xallapan/react-native-gradle-plugin/')) {
+    settingsSrc = settingsSrc.replace(
+      'plugins { id("org.gradle.toolchains.foojay-resolver-convention").version("0.5.0") }',
+      'plugins { id("org.gradle.toolchains.foojay-resolver-convention").version("0.5.0") }\n\ngradle.beforeProject {\n  layout.buildDirectory.set(file("${System.getProperty("user.home")}/.xallapan/react-native-gradle-plugin/${project.name}"))\n}'
+    );
+    fs.writeFileSync(gradlePluginSettings, settingsSrc, 'utf8');
+    console.log('Parche del plugin de Gradle aplicado correctamente.');
+  } else {
+    console.log('El parche del plugin de Gradle ya está aplicado.');
+  }
+}
+
 const codegenFile = path.join(__dirname, 'node_modules', '@react-native', 'codegen', 'lib', 'cli', 'combine', 'combine-js-to-schema.js');
 if (fs.existsSync(codegenFile)) {
   let codegenSrc = fs.readFileSync(codegenFile, 'utf8');
