@@ -9,6 +9,7 @@ jest.mock("../services/AuthService", () => ({
   __esModule: true,
   default: {
     currentUser: null,
+    restoreSession: jest.fn().mockResolvedValue({ id: 8 }),
   },
 }));
 
@@ -20,10 +21,27 @@ jest.mock("../services/PedidoNotificacionService", () => ({
   },
 }));
 
+const mockPedidoBitacoraExecute = jest.fn();
+
+jest.mock("../services/sync/SyncTask", () => ({
+  SyncTask: class {
+    realm: any;
+    syncLogId: string;
+
+    constructor(realm: any, syncLogId: string) {
+      this.realm = realm;
+      this.syncLogId = syncLogId;
+    }
+  },
+}));
+
 jest.mock("../services/sync/tasks/PedidoBitacoraUploadSyncTask", () => ({
   __esModule: true,
+  PedidoBitacoraUploadSyncTask: class {
+    execute = mockPedidoBitacoraExecute;
+  },
   PedidoEstadoUploadSyncTask: class {
-    execute = jest.fn();
+    execute = jest.fn().mockResolvedValue({ success: true });
   },
 }));
 
@@ -111,6 +129,70 @@ describe("reglas de pedidos", () => {
   it("identifica la observación de un producto agregado", () => {
     expect(esProductoAgregado({ observaciones: `Nota ${PRODUCTO_AGREGADO_OBSERVACION}` })).toBe(true);
     expect(esProductoAgregado({ observaciones: "Nota normal" })).toBe(false);
+  });
+});
+
+describe("envío inmediato de bitácora al cerrar pedidos", () => {
+  beforeEach(() => {
+    mockPedidoBitacoraExecute.mockReset();
+    mockPedidoBitacoraExecute.mockResolvedValue({ success: true, registrosGuardados: 1 });
+  });
+
+  it.each([
+    ESTATUS_PEDIDO.ENTREGADO,
+    ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+    ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+  ])("inicia el arrastre al cerrar con estatus %s", (estatus) => {
+    const { realm } = crearRealmMock();
+    const service = PedidosService.getInstance();
+    service.setRealm(realm as any);
+
+    expect(service.finalizarPedido(42, estatus).success).toBe(true);
+    expect(mockPedidoBitacoraExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("no inicia el arrastre de bitácora para otros estados", () => {
+    const { realm } = crearRealmMock();
+    const service = PedidosService.getInstance();
+    service.setRealm(realm as any);
+
+    expect(service.cambiarEstatusPedido(42, ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA)).toBe(true);
+    expect(mockPedidoBitacoraExecute).not.toHaveBeenCalled();
+  });
+});
+
+describe("PedidoBitacoraUploadSyncTask", () => {
+  const { PedidoBitacoraUploadSyncTask } = jest.requireActual(
+    "../services/sync/tasks/PedidoBitacoraUploadSyncTask",
+  );
+
+  const crearTask = (response: { ok: boolean; status?: number }) => {
+    const bitacora: any = crearPedido({ enviado: false, estatus: ESTATUS_PEDIDO.ENTREGADO });
+    const realm = {
+      objects: jest.fn(() => ({ filtered: jest.fn(() => [bitacora]) })),
+      write: jest.fn((callback: () => void) => callback()),
+    };
+    const task = new PedidoBitacoraUploadSyncTask(realm as any, "test");
+    (task as any).fetchWithTimeout = jest.fn().mockResolvedValue({
+      ...response,
+      status: response.status ?? 200,
+      text: jest.fn().mockResolvedValue("error"),
+    });
+    return { bitacora, task };
+  };
+
+  it("marca la bitácora como enviada sólo cuando el servidor responde exitosamente", async () => {
+    const { bitacora, task } = crearTask({ ok: true });
+
+    await expect(task.execute()).resolves.toMatchObject({ success: true, registrosGuardados: 1 });
+    expect(bitacora.enviado).toBe(true);
+  });
+
+  it("conserva la bitácora pendiente cuando falla el envío", async () => {
+    const { bitacora, task } = crearTask({ ok: false, status: 500 });
+
+    await expect(task.execute()).resolves.toMatchObject({ success: false, registrosGuardados: 0 });
+    expect(bitacora.enviado).toBe(false);
   });
 });
 

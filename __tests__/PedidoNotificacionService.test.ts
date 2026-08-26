@@ -5,6 +5,8 @@ const mockPedidosService = {
   getPedidoByFolio: jest.fn(),
   syncPedidos: jest.fn(),
   iniciarAtencionPedido: jest.fn(),
+  actualizarPedidosDesdeRespuesta: jest.fn(),
+  cambiarEstatusPedido: jest.fn(),
 };
 
 jest.mock("@react-native-async-storage/async-storage", () => ({
@@ -24,7 +26,10 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
 
 jest.mock("@notifee/react-native", () => ({
   __esModule: true,
-  default: {},
+  default: {
+    createChannel: jest.fn().mockResolvedValue("pedidos-central"),
+    displayNotification: jest.fn().mockResolvedValue(undefined),
+  },
   AndroidImportance: { HIGH: 4 },
   EventType: { PRESS: 1, ACTION_PRESS: 2 },
 }));
@@ -76,13 +81,60 @@ jest.mock("../services/fetchWithTimeout", () => ({
 }));
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import notifee from "@notifee/react-native";
 import PedidoNotificacionService from "../services/PedidoNotificacionService";
+import { fetchWithTimeout } from "../services/fetchWithTimeout";
 import { navigationRef } from "../services/navigationRef";
 
 const PENDING_NAVIGATION_KEY = "@xallapan/pedido_pendiente_navegacion";
 
 const servicio = PedidoNotificacionService as any;
 const navegacion = navigationRef as any;
+
+describe("PedidoNotificacionService polling", () => {
+  beforeEach(() => {
+    mockStorage.clear();
+    jest.clearAllMocks();
+    const pedido = {
+      folio: 110,
+      cliente: 6606,
+      ruta: 38,
+      idVendedor: 8,
+      idProducto: 26,
+      numeroProductos: 1,
+      cantPedido: 1,
+      estatus: 3,
+      syncedAt: new Date(),
+    };
+    const realm = {
+      isClosed: false,
+      objects: jest.fn(() => ({ filtered: jest.fn(() => [pedido]) })),
+      objectForPrimaryKey: jest.fn(() => null),
+      write: jest.fn((callback: () => void) => callback()),
+      create: jest.fn(),
+    };
+    servicio.setRealm(realm);
+    mockPedidosService.getPedidoByFolio.mockReturnValue(pedido);
+    (fetchWithTimeout as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: jest.fn().mockResolvedValue(JSON.stringify([pedido])),
+    });
+  });
+
+  it("notifica pedidos confirmados recibidos en el primer sondeo", async () => {
+    await expect(servicio.verificarPedidosNuevos(38)).resolves.toBe(1);
+
+    expect(notifee.displayNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "pedido-110", title: "Nuevo pedido de Central" }),
+    );
+    expect(mockPedidosService.cambiarEstatusPedido).toHaveBeenCalledWith(110, 4);
+    expect(JSON.parse(mockStorage.get("@xallapan/pedidos_poll_state:38") || "{}")).toMatchObject({
+      initialized: true,
+      knownFolios: [110],
+    });
+  });
+});
 
 describe("PedidoNotificacionService navegación pendiente", () => {
   beforeEach(() => {

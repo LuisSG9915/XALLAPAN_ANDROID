@@ -3,7 +3,7 @@ import { SyncTask, SyncTaskResult } from "../SyncTask";
 
 /**
  * Tarea de descarga del historial completo de InventarioEnvases desde el servidor.
- * Se usa en sincronización inicial y parcial.
+ * Se usa en sincronización inicial y completa.
  * Endpoint: GET /api/MovilesVentas/inventario-envases/full/{sucursal}
  */
 export class InventarioEnvasesHistorialSyncTask extends SyncTask {

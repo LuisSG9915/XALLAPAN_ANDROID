@@ -27,7 +27,10 @@ import { CiasSyncTask } from "./tasks/CiasSyncTask";
 import { CatalogosPedidosSyncTask } from "./tasks/CatalogosPedidosSyncTask";
 import { PedidosSyncTask } from "./tasks/PedidosSyncTask";
 // import { PedidosDetalleSyncTask } from "./tasks/PedidosDetalleSyncTask";
-import { PedidoEstadoUploadSyncTask } from "./tasks/PedidoBitacoraUploadSyncTask";
+import {
+  PedidoBitacoraUploadSyncTask,
+  PedidoEstadoUploadSyncTask,
+} from "./tasks/PedidoBitacoraUploadSyncTask";
 import { ClienteFotosSyncTask, ClienteFotosArrastreSyncTask } from "./tasks/ClienteFotosSyncTask";
 
 /**
@@ -97,6 +100,7 @@ export class SyncOrchestrator {
       new PedidosSyncTask(this.realm, this.syncLogId),
       // Envío de estados de pedidos al servidor - prioridad 1 (primero, antes de descargar)
       new PedidoEstadoUploadSyncTask(this.realm, this.syncLogId),
+      new PedidoBitacoraUploadSyncTask(this.realm, this.syncLogId),
     ];
 
     // Asignar idUsuario a todas las tareas
@@ -195,28 +199,33 @@ export class SyncOrchestrator {
         // fetchWithTimeout (1 min) dentro de la task; esto solo cubre cuelgues
         // que no sean de red (p. ej. un procesamiento local muy largo).
         const TIMEOUT_MS = 90000;
-        let timeoutId: number | null = null;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const controller = new AbortController();
 
         const timeoutPromise = new Promise<SyncTaskResult>((resolve) => {
           timeoutId = setTimeout(() => {
             const segundos = Math.round(TIMEOUT_MS / 1000);
+            controller.abort();
             console.warn(
-              `[SyncOrchestrator] ⏱️ ${task.getTableName()} excedió ${segundos}s, se omite y se continúa con la siguiente tarea`,
+              `[SyncOrchestrator] ⏱️ ${task.getTableName()} excedió ${segundos}s; se cancela la petición y se continúa con la siguiente tarea`,
             );
             resolve({
               success: false,
-              error: `Tiempo de espera agotado (${segundos}s): la tarea tardó demasiado y se omitió. Revisa tu conexión.`,
+              error: `Tiempo de espera agotado (${segundos}s): la tarea fue cancelada. Revisa tu conexión.`,
               timedOut: true,
             });
           }, TIMEOUT_MS);
         });
 
-        const taskPromise = task.executeWithLogging();
+        const taskPromise = task.executeWithLogging(controller.signal);
         const result = await Promise.race([taskPromise, timeoutPromise]);
 
         // Cancelar el timeout si la tarea terminó antes
         if (timeoutId) {
           clearTimeout(timeoutId);
+        }
+        if (result.timedOut) {
+          controller.abort();
         }
 
         results.set(task.getTableName(), result);

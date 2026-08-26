@@ -71,6 +71,22 @@ describe("formatClienteFotosFechaInicial", () => {
   });
 });
 
+describe("ClienteFotosService.getLastLogDate", () => {
+  it("ignora fotos sin fecha y toma la fecha máxima válida", () => {
+    const latest = new Date("2026-08-26T18:00:00.000Z");
+    ClienteFotosService.setRealm({
+      isClosed: false,
+      objects: jest.fn().mockReturnValue([
+        { fechaLog: null },
+        { fechaLog: new Date("2026-08-26T12:00:00.000Z") },
+        { fechaLog: latest },
+      ]),
+    } as any);
+
+    expect(ClienteFotosService.getLastLogDate()).toEqual(new Date(latest.getTime() + 10));
+  });
+});
+
 describe("parseActiva", () => {
   it.each([
     [true, true],

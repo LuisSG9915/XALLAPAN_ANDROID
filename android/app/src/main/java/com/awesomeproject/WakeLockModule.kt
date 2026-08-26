@@ -9,6 +9,10 @@ import com.facebook.react.bridge.ReactMethod
 
 class WakeLockModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
+    private companion object {
+        const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
+    }
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun getName(): String = "WakeLockModule"
@@ -27,7 +31,7 @@ class WakeLockModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "Xallapan::GPSWakeLock"
             )
-            wakeLock?.acquire()
+            wakeLock?.acquire(WAKE_LOCK_TIMEOUT_MS)
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("WAKELOCK_ACQUIRE_ERROR", e.message)

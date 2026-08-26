@@ -2,7 +2,10 @@ import Realm from "realm";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import AuthService from "./AuthService";
 import PedidoNotificacionService from "./PedidoNotificacionService";
-import { PedidoEstadoUploadSyncTask } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
+import {
+  PedidoBitacoraUploadSyncTask,
+  PedidoEstadoUploadSyncTask,
+} from "./sync/tasks/PedidoBitacoraUploadSyncTask";
 
 // Generación de id_movil corto e irrepetible para pedidos/ventas locales.
 // Estructura: MOVIL_ID_BASE + (segundos desde EPOCH * 1000) + sucursal
@@ -846,6 +849,7 @@ class PedidosService {
         console.log(
           `[PedidosService] Bitácoras de cierre pendientes folio=${folio}, estatus=${nuevoEstatus}: ${bitacorasPendientes.length}`,
         );
+        this.enviarBitacoraInmediata();
       }
 
       if (
@@ -1191,6 +1195,19 @@ class PedidosService {
       });
     } catch (error) {
       console.error("[PedidosService] Error al registrar bitácora de estado:", error);
+    }
+  }
+
+  private enviarBitacoraInmediata(): void {
+    try {
+      const task = new PedidoBitacoraUploadSyncTask(this.getRealm(), `realtime-${Date.now()}`);
+      task.execute().then((result) => {
+        if (!result.success) {
+          console.warn("[PedidosService] Bitácora pendiente para la siguiente sincronización:", result.error);
+        }
+      });
+    } catch (error) {
+      console.warn("[PedidosService] No se pudo iniciar el envío de bitácora:", error);
     }
   }
 

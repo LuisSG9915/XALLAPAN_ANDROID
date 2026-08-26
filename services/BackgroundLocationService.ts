@@ -24,9 +24,9 @@ class BackgroundLocationService {
   private static instance: BackgroundLocationService;
   private isReady = false;
   private intervalMs = 30000;
-  private intervaloNativo = 5000;
-  private readonly INTERVALO_ADQUISICION_MS = 1000;
-  private readonly INTERVALO_ENGANCHADO_MS = 5000;
+  private intervaloNativo = 15000;
+  private readonly INTERVALO_ADQUISICION_MS = 5000;
+  private readonly INTERVALO_ENGANCHADO_MS = 15000;
   private readonly UMBRAL_ENGANCHE_ACCURACY = 30;
   private readonly FIXES_PARA_ENGANCHE = 2;
   private readonly FIXES_PARA_PERDER_ENGANCHE = 3;
@@ -41,6 +41,8 @@ class BackgroundLocationService {
   private lastCaptureAt = 0;
   private lastTrackingUploadAttemptAt = 0;
   private trackingUploadInFlight: Promise<void> | null = null;
+  private lastNetworkCheckAt = 0;
+  private lastNetworkConnected = false;
   // Token de generación: invalida callbacks/watchdogs de loops anteriores.
   private generation = 0;
   // Evita carreras en start() (varios health-checks/disparadores simultáneos).
@@ -48,6 +50,7 @@ class BackgroundLocationService {
   // Evita que el Alert de notificaciones salte en cada reintento del servicio.
   private notificationAlertShown = false;
   private batteryOptimizationAlertShown = false;
+  private wakeLockRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   private ultimoFixTracking: {
     latitud: number;
@@ -100,7 +103,7 @@ class BackgroundLocationService {
       );
       // Si la validación de venta dejó su watch rápido activo, watchPosition NO
       // vuelve a llamar startObserving y el LocationRequest nativo se quedaría
-      // en 1 s indefinidamente. Forzamos el intervalo de tracking.
+      // en un intervalo rápido indefinidamente. Forzamos el intervalo de tracking.
       LocationService.forzarIntervaloNativo(opcionesWatch);
       console.log(TAG, `watchPosition suscrito (gen=${generation}, watchId=${this.watchId}, nativo=${this.intervaloNativo}ms, escritura=${this.intervalMs}ms)`);
     } catch (e) {
@@ -119,11 +122,23 @@ class BackgroundLocationService {
     }
   }
 
+  private async getCachedNetworkConnected(): Promise<boolean> {
+    const now = Date.now();
+    if (now - this.lastNetworkCheckAt < 60000) {
+      return this.lastNetworkConnected;
+    }
+
+    this.lastNetworkCheckAt = now;
+    const netInfo = await NetInfo.fetch().catch(() => null);
+    this.lastNetworkConnected = netInfo?.isConnected === true;
+    return this.lastNetworkConnected;
+  }
+
   private async onLocationFix(position: GeoPosition, generation: number): Promise<void> {
     if (!this.isTaskRunning || generation !== this.generation) return;
 
     // La suscripción nativa es única y compartida: cuando una validación de
-    // venta fuerza el intervalo rápido (1 s), este callback también recibe esa
+    // venta fuerza el intervalo rápido, este callback también recibe esa
     // ráfaga. Se ignoran los fixes anteriores a la ventana de tracking para no
     // escribir en Realm varias veces por segundo.
     const ahora = Date.now();
@@ -144,8 +159,7 @@ class BackgroundLocationService {
     console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}`);
 
     try {
-      const netInfo = await NetInfo.fetch().catch(() => null);
-      const conCobertura = netInfo ? netInfo.isConnected === true : false;
+      const conCobertura = await this.getCachedNetworkConnected();
 
       await GpsBitacoraService.registrarCapturaTracking(
         latitude,
@@ -175,7 +189,7 @@ class BackgroundLocationService {
   }
 
   /**
-   * Conmuta entre modo adquisición (1s) y modo enganchado (5s) usando histéresis:
+   * Conmuta entre modo adquisición (5s) y modo enganchado (15s) usando histéresis:
    * - Subir a enganchado: 2 fixes consecutivos con accuracy <= 30 m.
    * - Bajar a adquisición: 3 fixes consecutivos con accuracy > 30 m.
    */
@@ -537,7 +551,15 @@ class BackgroundLocationService {
     try {
       const { WakeLockModule } = NativeModules as any;
       await WakeLockModule.acquire();
-      console.log(TAG, "WakeLock adquirido");
+      if (!this.wakeLockRefreshTimer) {
+        this.wakeLockRefreshTimer = setInterval(() => {
+          if (!this.isTaskRunning) return;
+          WakeLockModule.acquire().catch((error: unknown) =>
+            console.warn(TAG, "No se pudo renovar WakeLock:", error),
+          );
+        }, 25 * 60 * 1000);
+      }
+      console.log(TAG, "WakeLock adquirido con renovación periódica");
     } catch (e) {
       console.warn(TAG, "No se pudo adquirir WakeLock:", e);
     }
@@ -548,6 +570,10 @@ class BackgroundLocationService {
    */
   private async releaseWakeLock(): Promise<void> {
     if (Platform.OS !== "android") return;
+    if (this.wakeLockRefreshTimer) {
+      clearInterval(this.wakeLockRefreshTimer);
+      this.wakeLockRefreshTimer = null;
+    }
     try {
       const { WakeLockModule } = NativeModules as any;
       await WakeLockModule.release();

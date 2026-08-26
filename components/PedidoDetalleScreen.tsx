@@ -981,11 +981,6 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     if (!ventaArrastre.success) {
       console.warn(`[PedidoDetalle] Arrastre de venta pendiente para folio ${pedidoCerrado.folio}:`, ventaArrastre.error);
     }
-
-    const bitacoraArrastre = await FullSyncService.sendPendingPedidoBitacoraToServer(idUsuario);
-    if (!bitacoraArrastre.success) {
-      console.warn(`[PedidoDetalle] Arrastre de bitácora pendiente para folio ${pedidoCerrado.folio}:`, bitacoraArrastre.error);
-    }
   };
 
   const validarInventarioPedido = (

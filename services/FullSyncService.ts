@@ -1611,14 +1611,19 @@ class FullSyncService {
           name: "ClienteFotosIncremental",
           run: async () => {
             const tableName = "ClienteFoto";
-            const fotoRows = this.realm!.objects("ClienteFoto").sorted(
-              "fechaLog",
-              true
-            ) as any;
-            const since: Date =
-              fotoRows[0]?.fechaLog instanceof Date
-                ? fotoRows[0].fechaLog
-                : new Date("1900-01-01T00:00:00");
+            ClienteFotosService.setRealm(this.realm!);
+            const lastSuccessfulSync = this.realm!
+              .objects("SyncTableLog")
+              .filtered(
+                "(tabla == $0 OR tabla == $1) AND exitoso == true AND fechaFinal != null",
+                "ClienteFoto",
+                "ClienteFotoIncremental"
+              )
+              .sorted("fechaFinal", true)[0] as any;
+            const since =
+              lastSuccessfulSync?.fechaFinal instanceof Date
+                ? lastSuccessfulSync.fechaFinal
+                : ClienteFotosService.getLastLogDate();
             const url = `${
               this.apiBaseUrl
             }/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
@@ -2983,11 +2988,35 @@ class FullSyncService {
           name: "InventarioEnvasesHistorialIncremental",
           run: async () => {
             const tableName = "InventarioEnvasesHistorial";
-            const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-envases/full/${sucursal}`;
+            const lastSuccessfulSync = this.realm!
+              .objects("SyncTableLog")
+              .filtered(
+                "(tabla == $0 OR tabla == $1) AND exitoso == true AND fechaFinal != null",
+                tableName,
+                "InventarioEnvasesHistorialIncremental"
+              )
+              .sorted("fechaFinal", true)[0] as any;
+            const since =
+              lastSuccessfulSync?.fechaFinal instanceof Date
+                ? lastSuccessfulSync.fechaFinal
+                : new Date("2026-03-01T00:00:00");
+            const fechaInicial = this.formatDateTimeForApi(since);
+            const url = `${this.apiBaseUrl}/api/MovilesVentas/inventario-envases/${sucursal}?fechaInicial=${encodeURIComponent(
+              fechaInicial
+            )}`;
+            const idBitacora = await BitacoraService.registrarInicioSync(
+              tableName,
+              "incremental",
+              "background",
+              idUsuario,
+              sucursal,
+              url
+            );
 
             try {
               console.log(
                 "[Incremental] InventarioEnvasesHistorial desde",
+                fechaInicial,
                 url
               );
 
@@ -3001,7 +3030,6 @@ class FullSyncService {
               }
 
               const data = await response.json();
-              console.log({ data });
               console.log("INVENTARIO HISTORIAL DE ENVASES ");
               const registrosLeidos = Array.isArray(data) ? data.length : 0;
               const nowMexico = this.getMexicoNow();
@@ -3072,6 +3100,11 @@ class FullSyncService {
                 `[Incremental] InventarioEnvasesHistorial leídos=${registrosLeidos}, guardados=${registrosGuardados}, actualizados=${registrosActualizados}`
               );
 
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: true,
+                registrosLeidos,
+              });
+
               return {
                 tabla: tableName,
                 endpoint: url,
@@ -3086,6 +3119,11 @@ class FullSyncService {
                 "[Incremental] InventarioEnvasesHistorial - Error:",
                 errorMsg
               );
+              await BitacoraService.registrarFinSync(idBitacora, {
+                exitoso: false,
+                error: errorMsg,
+                errorCode: "500",
+              });
               throw error;
             }
           },

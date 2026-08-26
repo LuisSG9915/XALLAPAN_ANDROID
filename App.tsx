@@ -17,6 +17,7 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  Switch,
   BackHandler,
   AppState,
   AppStateStatus,
@@ -56,12 +57,15 @@ import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
 import PedidoNotificacionService from "./services/PedidoNotificacionService";
 import AppUpdateService from "./services/AppUpdateService";
+import { fetchWithTimeout } from "./services/fetchWithTimeout";
 import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
 import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
 import SyncStatusPanel from "./components/SyncStatusPanel";
+import NetworkUsagePanel from "./components/NetworkUsagePanel";
+import NetworkUsageService from "./services/NetworkUsageService";
 import SucursalBadge from "./components/SucursalBadge";
 import ManualSyncScreen from "./components/ManualSyncScreen";
 
@@ -513,10 +517,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const pedidosPollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pedidosPollingInFlightRef = useRef(false);
   const lastPedidosPollingStartedAtRef = useRef<number | null>(null);
-  const [pressingCierre, setPressingCierre] = useState(false);
-  const [pressProgress, setPressProgress] = useState(0);
-  const pressTimerRef = useRef<any>(null);
-  const pressStartTimeRef = useRef<number>(0);
+  const [cerrandoRuta, setCerrandoRuta] = useState(false);
+  const [networkUsageEnabled, setNetworkUsageEnabled] = useState(false);
   const lastTapRef = useRef<number>(0);
 
   useEffect(() => {
@@ -564,7 +566,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           fechaHoy,
         )}&fecha2=${encodeURIComponent(fechaHoy)}`;
 
-        const response = await fetch(url, { timeout: 1000 } as any);
+        const response = await fetchWithTimeout(url, { headers: { accept: "application/json" } }, 8000);
         if (response.ok) {
           const data = await response.json();
 
@@ -586,7 +588,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
     pollingIntervalRef.current = setInterval(() => {
       checkPendingTraspasos();
-    }, 5000);
+    }, 15000);
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -645,10 +647,11 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         console.log("[App] Sincronizando tracking: ruta abierta, iniciando GPS...");
         const started = await RouteTrackingService.iniciarRuta();
         console.log(`[App] Tracking GPS iniciado: ${started}`);
-      } else {
-        console.log("[App] Sincronizando tracking: ruta cerrada, deteniendo GPS...");
-        await RouteTrackingService.finalizarRuta();
+        return null;
       }
+
+      console.log("[App] Sincronizando tracking: ruta cerrada, deteniendo GPS...");
+      return await RouteTrackingService.finalizarRuta();
     } catch (trackingError) {
       console.error("[App] Error al sincronizar tracking GPS:", trackingError);
     }
@@ -775,46 +778,8 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     }
   }, [syncing]);
 
-  const handlePressInCierre = useCallback(() => {
-    if (!currentUser || rutaCerrada) return;
-
-    setPressingCierre(true);
-    setPressProgress(0);
-    pressStartTimeRef.current = Date.now();
-
-    const updateProgress = () => {
-      const elapsed = Date.now() - pressStartTimeRef.current;
-      const progress = Math.min(elapsed / 5000, 1);
-      setPressProgress(progress);
-
-      if (progress >= 1) {
-        handleCierreRutaComplete();
-      } else {
-        pressTimerRef.current = requestAnimationFrame(updateProgress);
-      }
-    };
-
-    pressTimerRef.current = requestAnimationFrame(updateProgress);
-  }, [currentUser, rutaCerrada]);
-
-  const handlePressOutCierre = useCallback(() => {
-    if (pressTimerRef.current) {
-      cancelAnimationFrame(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-    setPressingCierre(false);
-    setPressProgress(0);
-  }, []);
-
   const handleCierreRutaComplete = useCallback(async () => {
-    if (pressTimerRef.current) {
-      cancelAnimationFrame(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-    setPressingCierre(false);
-    setPressProgress(0);
-
-    if (!currentUser) return;
+    if (!currentUser || rutaCerrada || cerrandoRuta) return;
 
     if (!FullSyncService.isServiceInitialized()) {
       await FullSyncService.initialize();
@@ -834,6 +799,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         "No se puede cerrar la ruta",
         "No se encontró una ruta válida para validar los pedidos.",
       );
+      setCerrandoRuta(false);
       return;
     }
 
@@ -844,6 +810,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         "No se puede cerrar la ruta",
         "No fue posible validar los pedidos de hoy. La ruta permanecerá abierta; intente nuevamente.",
       );
+      setCerrandoRuta(false);
       return;
     }
 
@@ -868,14 +835,16 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           },
         ],
       );
+      setCerrandoRuta(false);
       return;
     }
 
+    setCerrandoRuta(true);
     Alert.alert(
       "Cerrar Ruta",
       "¿Confirma que desea cerrar la ruta? El punto de venta será bloqueado hasta recibir una carga.",
       [
-        { text: "Cancelar", style: "cancel" },
+        { text: "Cancelar", style: "cancel", onPress: () => setCerrandoRuta(false) },
         {
           text: "Sí, cerrar",
           style: "destructive",
@@ -887,6 +856,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
                 "No se puede cerrar la ruta",
                 "No fue posible validar los pedidos de hoy. La ruta permanecerá abierta; intente nuevamente.",
               );
+              setCerrandoRuta(false);
               return;
             }
 
@@ -895,15 +865,16 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
                 "No se puede cerrar la ruta",
                 "La ruta tiene pedidos sin resolver de hoy. Atiéndalos o registre una causa válida y vuelva a intentarlo.",
               );
+              setCerrandoRuta(false);
               return;
             }
 
             await CierreRutaService.setRutaCerrada(sucursal, vendedor, true);
             setRutaCerrada(true);
-            await syncRouteTracking(true);
+            const resumenRuta = await syncRouteTracking(true);
             Alert.alert(
               "Ruta Cerrada",
-              "El punto de venta ha sido bloqueado. Solo se desbloqueará al recibir una carga.",
+              `El punto de venta ha sido bloqueado. Distancia total: ${typeof resumenRuta === "object" && resumenRuta?.distanciaKm !== undefined ? resumenRuta.distanciaKm.toFixed(2) : "0.00"} km.`,
             );
           },
         },
@@ -951,7 +922,13 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
   // Menús que solo se muestran al usuario ID 4
   const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
-  const isAdmin = currentUser?.id === 4;
+  const isAdmin = Number(currentUser?.id ?? currentUser?.idUsuario) === 4;
+
+  useEffect(() => {
+    const canViewNetworkUsage = isAdmin && networkUsageEnabled;
+    NetworkUsageService.setEnabled(canViewNetworkUsage);
+    if (!isAdmin && networkUsageEnabled) setNetworkUsageEnabled(false);
+  }, [isAdmin, networkUsageEnabled]);
 
   const allMenuItems = [
     {
@@ -1175,44 +1152,49 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.cierreRutaButton,
-              rutaCerrada && styles.cierreRutaButtonClosed,
-              pressingCierre && styles.cierreRutaButtonPressing,
-            ]}
-            onPressIn={rutaCerrada ? undefined : handlePressInCierre}
-            onPressOut={rutaCerrada ? undefined : handlePressOutCierre}
-            onPress={rutaCerrada ? handleTapRutaCerrada : undefined}
+            style={[styles.cierreRutaButton, rutaCerrada && styles.cierreRutaButtonClosed]}
+            onPress={rutaCerrada ? handleTapRutaCerrada : handleCierreRutaComplete}
             activeOpacity={0.85}
-            disabled={pressingCierre}
+            disabled={cerrandoRuta}
           >
-            {pressingCierre ? (
-              <View style={styles.pressProgressContainer}>
-                <View style={[styles.pressProgressBar, { width: `${pressProgress * 100}%` }]} />
-                <View style={styles.pressProgressContent}>
-                  <Icon name="lock" type="material" size={20} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.syncButtonText}>Mantenga presionado ({Math.ceil((1 - pressProgress) * 5)}s)</Text>
-                </View>
-              </View>
-            ) : (
-              <>
-                <Icon
-                  name={rutaCerrada ? "lock" : "lock-open"}
-                  type="material"
-                  size={20}
-                  color="#fff"
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={styles.syncButtonText}>{rutaCerrada ? "Ruta Cerrada" : "Mantener 5s para Cerrar"}</Text>
-              </>
-            )}
+            <Icon
+              name={rutaCerrada ? "lock" : "lock-open"}
+              type="material"
+              size={20}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.syncButtonText}>
+              {rutaCerrada ? "Ruta Cerrada" : cerrandoRuta ? "Cerrando ruta..." : "Fin de Ruta"}
+            </Text>
           </TouchableOpacity>
         </View>
         <SyncStatusPanel />
+        {isAdmin && (
+          <View style={styles.networkUsageToggleContainer}>
+            <View style={styles.networkUsageToggleTextContainer}>
+              <Icon name="data-usage" type="material" size={20} color={COLORS.primary} />
+              <View>
+                <Text style={styles.networkUsageToggleTitle}>Monitorear consumo de datos</Text>
+                <Text style={styles.networkUsageToggleSubtitle}>
+                  Solo para diagnóstico del usuario 4
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={networkUsageEnabled}
+              onValueChange={setNetworkUsageEnabled}
+              trackColor={{ false: COLORS.muted, true: COLORS.primaryLight }}
+              thumbColor={networkUsageEnabled ? COLORS.primary : "#f4f3f4"}
+              accessibilityLabel="Activar monitor de consumo de datos"
+            />
+          </View>
+        )}
+        {isAdmin && networkUsageEnabled && <NetworkUsagePanel />}
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.3.7</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.3.8</Text>
         </View>
       </ScrollView>
 
@@ -1322,6 +1304,33 @@ const styles = StyleSheet.create({
   syncContainer: {
     padding: SPACING.m,
     marginTop: SPACING.m,
+  },
+  networkUsageToggleContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.m,
+    marginHorizontal: SPACING.m,
+    marginBottom: SPACING.m,
+    padding: SPACING.m,
+    ...SHADOWS.small,
+  },
+  networkUsageToggleTextContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.s,
+    flex: 1,
+  },
+  networkUsageToggleTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  networkUsageToggleSubtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
   },
   syncButton: {
     backgroundColor: COLORS.primary,

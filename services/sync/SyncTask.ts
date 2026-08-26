@@ -37,6 +37,7 @@ export abstract class SyncTask {
   protected syncLogId: string;
   protected sucursal?: number;
   protected idUsuario?: number;
+  protected abortSignal?: AbortSignal;
 
   constructor(realm: Realm, syncLogId: string, sucursal?: number, idUsuario?: number) {
     this.realm = realm;
@@ -62,7 +63,11 @@ export abstract class SyncTask {
     init: RequestInit = {},
     timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<Response> {
-    return fetchWithTimeout(input, init, timeoutMs);
+    return fetchWithTimeout(
+      input,
+      { ...init, signal: this.abortSignal ?? init.signal },
+      timeoutMs,
+    );
   }
 
   /**
@@ -129,7 +134,8 @@ export abstract class SyncTask {
   /**
    * Ejecuta la tarea con retry logic y logging automático
    */
-  async executeWithLogging(): Promise<SyncTaskResult> {
+  async executeWithLogging(signal?: AbortSignal): Promise<SyncTaskResult> {
+    this.abortSignal = signal;
     const fechaInicio = new Date();
     console.log(`[${this.getTableName()}] Iniciando sincronización con retry logic...`);
 

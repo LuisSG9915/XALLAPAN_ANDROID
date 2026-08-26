@@ -85,12 +85,17 @@ class ClienteFotosService {
   }
 
   getLastLogDate(): Date {
-    if (!this.realm || this.realm.isClosed)
-      return new Date("1900-01-01T00:00:00Z");
-    const rows = Array.from(
-      this.realm.objects<ClienteFoto>("ClienteFoto").sorted("fechaLog", true)
-    );
-    return rows[0]?.fechaLog || new Date("1900-01-01T00:00:00Z");
+    const fallback = new Date("1900-01-01T00:00:00Z");
+    if (!this.realm || this.realm.isClosed) return fallback;
+
+    let latest: Date | null = null;
+    const rows = Array.from(this.realm.objects<ClienteFoto>("ClienteFoto"));
+    for (const row of rows) {
+      const value = row.fechaLog instanceof Date ? row.fechaLog : row.fechaLog ? new Date(row.fechaLog) : null;
+      if (!value || Number.isNaN(value.getTime())) continue;
+      if (!latest || value.getTime() > latest.getTime()) latest = value;
+    }
+    return latest ? new Date(latest.getTime() + 10) : fallback;
   }
 
   canAdd(idCliente: number): boolean {
@@ -391,6 +396,8 @@ class ClienteFotosService {
         ) || matches[0];
         if (existing && ESTADOS_PENDIENTES.includes(existing.estado)) continue;
         const activa = parseActiva(row.activa ?? row.Activa);
+        const fechaLogRaw = row.fechaLog ?? row.fecha_log ?? row.FechaLog;
+        const fechaLog = fechaLogRaw ? new Date(fechaLogRaw) : new Date();
         console.log("[ClienteFotos] Aplicando estado remoto:", {
           idServidor,
           idLocal: existing?.id,
@@ -414,7 +421,7 @@ class ClienteFotosService {
           nombreArchivo: null,
           etiqueta: row.etiqueta == null ? null : String(row.etiqueta),
           fechaCaptura: row.fechaCaptura ? new Date(row.fechaCaptura) : null,
-          fechaLog: row.fechaLog ? new Date(row.fechaLog) : new Date(),
+          fechaLog: Number.isNaN(fechaLog.getTime()) ? new Date() : fechaLog,
           activa,
           estado: "sincronizada",
           errorMensaje: null,

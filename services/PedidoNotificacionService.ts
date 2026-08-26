@@ -265,27 +265,9 @@ class PedidoNotificacionService {
 
       const knownFolios = new Set(state.knownFolios);
       if (!state.initialized) {
-        if (pedidosClienteAgrupados.length > 0) {
-          console.log("[PedidoNotificacionService][DEBUG 6606] El polling está creando línea base", {
-            folios: pedidosClienteAgrupados.map(([folio]) => folio),
-            noSeProcesanVisitasEnEstaRonda: true,
-          });
-        }
-        pedidos.forEach((_row, folio) => knownFolios.add(folio));
-        const lastPollAt = Date.now();
-        await AsyncStorage.setItem(
-          stateKey,
-          JSON.stringify({
-            initialized: true,
-            knownFolios: Array.from(knownFolios).slice(-1000),
-            lastPollAt,
-          }),
-        );
-        this.ultimoPollingPorRuta.set(ruta, lastPollAt);
         console.log(
-          `[PedidoNotificacionService] Línea base creada para ruta ${ruta}: ${pedidos.size} folio(s)`,
+          `[PedidoNotificacionService] Primer sondeo para ruta ${ruta}: se evaluarán ${pedidos.size} folio(s) recientes`,
         );
-        return 0;
       }
 
       const foliosNuevos = Array.from(pedidos.keys()).filter((folio) => !knownFolios.has(folio));
@@ -341,6 +323,7 @@ class PedidoNotificacionService {
         }
 
         if (await this.mostrarNotificacionPedido(pedido)) {
+          this.marcarPedidoNotificado(folio);
           knownFolios.add(folio);
           notificados++;
         }

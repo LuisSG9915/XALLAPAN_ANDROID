@@ -680,6 +680,12 @@ export default function DataViewScreen() {
     </TouchableOpacity>
   );
 
+  const getTipoVisitaDescripcion = (tipoVisita: unknown): string => {
+    const tipo = Number(tipoVisita);
+    const catalogo = FullSyncService.getTipoVisitas().find((item: any) => Number(item.id) === tipo) as any;
+    return catalogo?.descripcion || (Number.isFinite(tipo) ? String(tipo) : "N/A");
+  };
+
   const renderDetalleVisitas = ({ item }: { item: any }) => (
     <TouchableOpacity onPress={() => console.log(item)}>
       <View style={styles.card}>
@@ -690,7 +696,7 @@ export default function DataViewScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.cardText}>Usuario: {item.idUsuario}</Text>
           <Text style={styles.cardText}>Ruta: {item.idRuta}</Text>
-          <Text style={styles.cardText}>Tipo: {item.tipoVisita}</Text>
+          <Text style={styles.cardText}>Tipo: {getTipoVisitaDescripcion(item.tipoVisita)}</Text>
           <Text style={styles.cardText}>Inicio: {item.fechaInicio?.toLocaleString() || "N/A"}</Text>
           <Text style={styles.cardText}>Fin: {item.fechaFin?.toLocaleString() || "N/A"}</Text>
           <Text style={styles.cardText}>Sincronizado: {item.syncedAt?.toLocaleString() || "Pendiente"}</Text>

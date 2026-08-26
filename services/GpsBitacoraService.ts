@@ -4,6 +4,7 @@ import NetInfo from "@react-native-community/netinfo";
 import DeviceInfo from "react-native-device-info";
 import AuthService from "./AuthService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import NetworkUsageService from "./NetworkUsageService";
 
 export type DatosValidacionUbicacion = {
   idCliente: number | null;
@@ -606,6 +607,8 @@ class GpsBitacoraService {
     console.log(
       `[GpsBitacoraService][TrackingUpload] Transporte XHR nativo iniciado (timeout=${TRACKING_REQUEST_TIMEOUT_MS}ms)`,
     );
+    const requestBody = JSON.stringify(payload);
+    const startedAt = Date.now();
 
     return new Promise<boolean>((resolve) => {
       const xhr = new XMLHttpRequest();
@@ -614,6 +617,18 @@ class GpsBitacoraService {
       const finish = (success: boolean, reason?: string): void => {
         if (settled) return;
         settled = true;
+        const contentLength = Number(xhr.getResponseHeader?.("content-length"));
+        const responseBodyBytes = typeof xhr.responseText === "string" ? xhr.responseText.length : 0;
+        NetworkUsageService.recordRequest({
+          url,
+          method: "POST",
+          status: xhr.status,
+          bytesReceived: Number.isFinite(contentLength) && contentLength > 0 ? contentLength : responseBodyBytes,
+          bytesSent: requestBody.length,
+          durationMs: Date.now() - startedAt,
+          success,
+          timedOut: reason === "timeout nativo",
+        });
 
         if (!success) {
           console.error("[GpsBitacoraService][TrackingUpload] Transporte XHR falló", {
@@ -663,7 +678,7 @@ class GpsBitacoraService {
           );
           finish(false, "timeout nativo");
         };
-        xhr.send(JSON.stringify(payload));
+        xhr.send(requestBody);
       } catch (error) {
         finish(false, error instanceof Error ? error.message : String(error));
       }
