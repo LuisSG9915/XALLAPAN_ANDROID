@@ -35,6 +35,8 @@ class RouteTrackingService {
   private realm: Realm | null = null;
   private status: RouteStatus = "idle";
   private listeners: Set<(status: RouteStatus) => void> = new Set();
+  private iniciarPromise: Promise<boolean> | null = null;
+  private finalizarPromise: Promise<RouteSummary | null> | null = null;
 
   private constructor() {}
 
@@ -64,8 +66,6 @@ class RouteTrackingService {
       realm.write(() => {
         config = realm.create("RouteConfig", {
           id: ROUTE_CONFIG_ID,
-          intervaloGPS: DEFAULT_INTERVAL_SECONDS,
-          radioTolerancia: DEFAULT_TOLERANCE_METERS,
           rutaActiva: false,
           updatedAt: new Date(),
         });
@@ -74,33 +74,43 @@ class RouteTrackingService {
     return config;
   }
 
-  async getConfig(): Promise<{ intervaloGPS: number; radioTolerancia: number; rutaActiva: boolean }> {
-    const config = this.ensureConfig();
+  private clampInterval(seconds: unknown): number {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return DEFAULT_INTERVAL_SECONDS;
+    return Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, Math.round(value)));
+  }
+
+  private async getCompanySettings(): Promise<{ intervaloGPS: number; metrosPermitidos: number }> {
+    const realm = this.getRealm();
+    const user = await AuthService.restoreSession();
+    const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
+    const realmUser = idUsuario > 0 ? realm.objectForPrimaryKey("Usuario", idUsuario) as any : null;
+
     return {
-      intervaloGPS: Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, config.intervaloGPS || DEFAULT_INTERVAL_SECONDS)),
-      radioTolerancia: config.radioTolerancia || DEFAULT_TOLERANCE_METERS,
-      rutaActiva: config.rutaActiva || false,
+      intervaloGPS: this.clampInterval(realmUser?.segundosRecorrido ?? user?.segundosRecorrido),
+      metrosPermitidos: Number(realmUser?.metros ?? user?.metros) || DEFAULT_TOLERANCE_METERS,
     };
   }
 
-  async setIntervaloGPS(seconds: number): Promise<void> {
-    const clamped = Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, seconds));
-    const realm = this.getRealm();
-    const config = this.ensureConfig();
-    realm.write(() => {
-      config.intervaloGPS = clamped;
-      config.updatedAt = new Date();
-    });
-    console.log(`[RouteTrackingService] Intervalo GPS actualizado: ${clamped}s`);
+  private async applyCompanyInterval(): Promise<number> {
+    const { intervaloGPS } = await this.getCompanySettings();
+    if (this.status === "active") {
+      await BackgroundLocationService.setInterval(intervaloGPS * 1000);
+    }
+    return intervaloGPS;
   }
 
-  async setRadioTolerancia(meters: number): Promise<void> {
-    const realm = this.getRealm();
+  async getConfig(): Promise<{ intervaloGPS: number; metrosPermitidos: number; rutaActiva: boolean }> {
+    const settings = await this.getCompanySettings();
     const config = this.ensureConfig();
-    realm.write(() => {
-      config.radioTolerancia = meters;
-      config.updatedAt = new Date();
-    });
+    return {
+      ...settings,
+      rutaActiva: config.rutaActiva === true,
+    };
+  }
+
+  async refreshCompanyConfig(): Promise<number> {
+    return this.applyCompanyInterval();
   }
 
   async isRouteActive(): Promise<boolean> {
@@ -134,18 +144,38 @@ class RouteTrackingService {
    * Activa captura GPS periódica y almacena puntos localmente.
    */
   async iniciarRuta(): Promise<boolean> {
+    if (this.finalizarPromise) return false;
+    if (this.iniciarPromise) return this.iniciarPromise;
+
+    const operation = this.doIniciarRuta();
+    this.iniciarPromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.iniciarPromise === operation) this.iniciarPromise = null;
+    }
+  }
+
+  private async doIniciarRuta(): Promise<boolean> {
     const existingConfig = this.ensureConfig();
+    const { intervaloGPS } = await this.getCompanySettings();
     if (this.status === "active" || existingConfig.rutaActiva) {
       console.log("[RouteTrackingService] La ruta ya está activa");
-      if (this.status !== "active") {
-        this.setStatus("active");
-        try {
-          await BackgroundLocationService.start();
-        } catch (e) {
-          console.error("[RouteTrackingService] Error iniciando background location:", e);
+      if (this.status === "active" && (await BackgroundLocationService.getState()).enabled) return true;
+
+      try {
+        await BackgroundLocationService.setInterval(intervaloGPS * 1000);
+        const state = await BackgroundLocationService.start();
+        if (!state.enabled) {
+          console.warn("[RouteTrackingService] El servicio background no quedó activo");
+          return false;
         }
+        this.setStatus("active");
+        return true;
+      } catch (e) {
+        console.error("[RouteTrackingService] Error iniciando background location:", e);
+        return false;
       }
-      return true;
     }
 
     const realm = this.getRealm();
@@ -168,21 +198,26 @@ class RouteTrackingService {
       config.updatedAt = new Date();
     });
 
-    this.setStatus("active");
-    const updatedConfig = this.ensureConfig();
-    const intervalo = Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, updatedConfig.intervaloGPS || DEFAULT_INTERVAL_SECONDS));
-    console.log(`[RouteTrackingService] ✅ Ruta iniciada con intervalo GPS: ${intervalo}s`);
+    console.log(`[RouteTrackingService] ✅ Ruta iniciada con intervalo GPS: ${intervaloGPS}s`);
 
     // Capturar primer punto inmediatamente y iniciar seguimiento continuo en background
     await this.captureRoutePoint();
 
     try {
-      await BackgroundLocationService.setInterval(intervalo * 1000);
-      await BackgroundLocationService.start();
+      await BackgroundLocationService.setInterval(intervaloGPS * 1000);
+      const state = await BackgroundLocationService.start();
+      if (!state.enabled) {
+        console.warn("[RouteTrackingService] El servicio background no quedó activo");
+        this.setStatus("idle");
+        return false;
+      }
+      this.setStatus("active");
+      return true;
     } catch (e) {
       console.error("[RouteTrackingService] Error iniciando background location:", e);
+      this.setStatus("idle");
+      return false;
     }
-    return true;
   }
 
   /**
@@ -190,7 +225,24 @@ class RouteTrackingService {
    * Detiene captura, calcula distancia total y limpia timer.
    */
   async finalizarRuta(): Promise<RouteSummary | null> {
-    if (this.status !== "active") {
+    if (this.finalizarPromise) return this.finalizarPromise;
+    if (this.iniciarPromise) {
+      await this.iniciarPromise.catch(() => false);
+    }
+
+    const operation = this.doFinalizarRuta();
+    this.finalizarPromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.finalizarPromise === operation) this.finalizarPromise = null;
+    }
+  }
+
+  private async doFinalizarRuta(): Promise<RouteSummary | null> {
+    const realm = this.getRealm();
+    const config = this.ensureConfig();
+    if (this.status !== "active" && config.rutaActiva !== true) {
       console.warn("[RouteTrackingService] No hay ruta activa para finalizar");
       return null;
     }
@@ -199,24 +251,39 @@ class RouteTrackingService {
 
     try {
       await BackgroundLocationService.stop();
+      await BackgroundLocationService.waitForTrackingUpload();
     } catch (e) {
       console.error("[RouteTrackingService] Error deteniendo background location:", e);
     }
 
-    // Capturar último punto al finalizar
     await this.captureRoutePoint();
 
-    const realm = this.getRealm();
-    const config = this.ensureConfig();
     const now = new Date();
+    const fechaInicio = config.fechaInicioRuta;
+    const user = await AuthService.restoreSession();
+    const sucursal = Number(user?.sucursal ?? user?.sucursal_origen ?? config.sucursal ?? 0);
+    const idUsuario = Number(user?.id ?? user?.idUsuario ?? config.idUsuario ?? 0);
 
-    realm.write(() => {
-      config.rutaActiva = false;
-      config.fechaFinRuta = now;
-      config.updatedAt = now;
-    });
+    try {
+      realm.write(() => {
+        config.rutaActiva = false;
+        config.fechaFinRuta = now;
+        config.updatedAt = now;
+      });
+    } catch (e) {
+      this.setStatus("active");
+      throw e;
+    }
 
-    const summary = this.calcularResumenRuta(config.fechaInicioRuta, now);
+    if (sucursal > 0 && idUsuario > 0) {
+      try {
+        await GpsBitacoraService.enviarTrackingPendientes(sucursal, idUsuario, true);
+      } catch (e) {
+        console.warn("[RouteTrackingService] No se pudieron enviar todos los puntos al finalizar; quedarán pendientes:", e);
+      }
+    }
+
+    const summary = this.calcularResumenRuta(fechaInicio, now);
 
     this.setStatus("idle");
     console.log("[RouteTrackingService] ✅ Ruta finalizada", summary);
@@ -241,12 +308,19 @@ class RouteTrackingService {
       const netInfo = await NetInfo.fetch();
       const conCobertura = netInfo.isConnected === true;
 
-      await GpsBitacoraService.registrarUbicacion(
+      const { intervaloGPS } = await this.getCompanySettings();
+      const persisted = await GpsBitacoraService.registrarCapturaTracking(
         location.latitude,
         location.longitude,
         location.accuracy,
         conCobertura,
+        intervaloGPS * 1000,
+        location.timestamp,
       );
+      if (!persisted) {
+        console.warn("[RouteTrackingService] El punto GPS no pudo persistirse");
+        return;
+      }
       console.log(`[RouteTrackingService] ✅ Punto GPS capturado: lat=${location.latitude}, lng=${location.longitude}, cobertura=${conCobertura}`);
     } catch (error) {
       console.error("[RouteTrackingService] Error al capturar punto:", error);
@@ -261,14 +335,21 @@ class RouteTrackingService {
     const user = await AuthService.restoreSession();
     if (!user) return [];
 
-    const idUsuario = user.id || user.idUsuario || 0;
-    const inicio = fechaInicio || this.ensureConfig().fechaInicioRuta;
+    const idUsuario = Number(user.id || user.idUsuario || 0);
+    const config = this.ensureConfig();
+    const sucursal = Number(config.sucursal ?? user.sucursal ?? user.sucursal_origen ?? 0);
+    const inicio = fechaInicio || config.fechaInicioRuta;
     if (!inicio) return [];
 
-    const fin = fechaFin || new Date();
+    const fin = fechaFin || config.fechaFinRuta || new Date();
     const puntos = realm
-      .objects("BitacoraGps")
-      .filtered("idUsuario == $0 AND fecha >= $1 AND fecha <= $2", idUsuario, inicio, fin)
+      .objects("BitacoraTrackingGps")
+      .filtered(
+        sucursal > 0
+          ? "idUsuario == $0 AND sucursal == $1 AND fecha >= $2 AND fecha <= $3"
+          : "idUsuario == $0 AND fecha >= $1 AND fecha <= $2",
+        ...(sucursal > 0 ? [idUsuario, sucursal, inicio, fin] : [idUsuario, inicio, fin]),
+      )
       .sorted("fecha");
 
     return Array.from(puntos).map((p: any) => ({
@@ -305,18 +386,55 @@ class RouteTrackingService {
     const realm = this.getRealm();
     const config = this.ensureConfig();
     const user = AuthService.currentUser;
-    const idUsuario = user?.id || user?.idUsuario || config.idUsuario || 0;
+    const idUsuario = Number(user?.id || user?.idUsuario || config.idUsuario || 0);
+    const sucursal = Number(config.sucursal ?? user?.sucursal ?? user?.sucursal_origen ?? 0);
     if (!idUsuario) return [];
 
     const inicio = fechaInicio || config.fechaInicioRuta;
     if (!inicio) return [];
-    const fin = fechaFin || new Date();
+    const fin = fechaFin || config.fechaFinRuta || new Date();
 
     const puntos = realm
-      .objects("BitacoraGps")
-      .filtered("idUsuario == $0 AND fecha >= $1 AND fecha <= $2", idUsuario, inicio, fin)
+      .objects("BitacoraTrackingGps")
+      .filtered(
+        sucursal > 0
+          ? "idUsuario == $0 AND sucursal == $1 AND fecha >= $2 AND fecha <= $3"
+          : "idUsuario == $0 AND fecha >= $1 AND fecha <= $2",
+        ...(sucursal > 0 ? [idUsuario, sucursal, inicio, fin] : [idUsuario, inicio, fin]),
+      )
       .sorted("fecha");
     return Array.from(puntos);
+  }
+
+  async isTrackingHealthy(): Promise<boolean> {
+    const config = this.ensureConfig();
+    if (config.rutaActiva !== true) return false;
+
+    const user = await AuthService.restoreSession();
+    if (!user) return false;
+
+    const idUsuario = Number(user.id ?? user.idUsuario ?? config.idUsuario ?? 0);
+    const sucursal = Number(config.sucursal ?? user.sucursal ?? user.sucursal_origen ?? 0);
+    if (idUsuario <= 0 || sucursal <= 0) return false;
+
+    const puntos = this.getRealm()
+      .objects("BitacoraTrackingGps")
+      .filtered(
+        config.fechaInicioRuta
+          ? "idUsuario == $0 AND sucursal == $1 AND fecha >= $2"
+          : "idUsuario == $0 AND sucursal == $1",
+        ...(config.fechaInicioRuta ? [idUsuario, sucursal, config.fechaInicioRuta] : [idUsuario, sucursal]),
+      )
+      .sorted("fecha", true);
+    if (puntos.length === 0) return false;
+
+    const ultimo = puntos[0] as any;
+    const fecha = ultimo?.fecha instanceof Date ? ultimo.fecha : new Date(ultimo?.fecha);
+    if (Number.isNaN(fecha.getTime())) return false;
+
+    const { intervaloGPS } = await this.getCompanySettings();
+    const maxAgeMs = Math.max(180000, intervaloGPS * 3 * 1000);
+    return Date.now() - fecha.getTime() <= maxAgeMs;
   }
 
   /**
@@ -326,11 +444,16 @@ class RouteTrackingService {
     const user = await AuthService.restoreSession();
     if (!user) return { ubicacion: null, conCobertura: false };
 
-    const idUsuario = user.id || user.idUsuario || 0;
+    const idUsuario = Number(user.id || user.idUsuario || 0);
+    const config = this.ensureConfig();
+    const sucursal = Number(config.sucursal ?? user.sucursal ?? user.sucursal_origen ?? 0);
     const realm = this.getRealm();
     const puntos = realm
-      .objects("BitacoraGps")
-      .filtered("idUsuario == $0", idUsuario)
+      .objects("BitacoraTrackingGps")
+      .filtered(
+        sucursal > 0 ? "idUsuario == $0 AND sucursal == $1" : "idUsuario == $0",
+        ...(sucursal > 0 ? [idUsuario, sucursal] : [idUsuario]),
+      )
       .sorted("fecha", true);
 
     if (puntos.length === 0) {
@@ -338,14 +461,13 @@ class RouteTrackingService {
     }
 
     const ultimo = puntos[0] as any;
-    const netInfo = await NetInfo.fetch();
     return {
       ubicacion: {
         latitude: ultimo.latitud,
         longitude: ultimo.longitud,
         accuracy: ultimo.precision,
       },
-      conCobertura: ultimo.conCobertura === true || netInfo.isConnected === true,
+      conCobertura: ultimo.conCobertura === true,
       fecha: ultimo.fecha,
     };
   }

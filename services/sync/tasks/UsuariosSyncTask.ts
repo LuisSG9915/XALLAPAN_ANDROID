@@ -37,6 +37,9 @@ export class UsuariosSyncTask extends SyncTask {
       }
 
       const usuarios = await response.json();
+      if (!Array.isArray(usuarios)) {
+        throw new Error("Respuesta inválida del endpoint de usuarios");
+      }
       console.log({ usuarios });
       const registrosLeidos = usuarios.length;
       const nowMexico = this.getMexicoNow();
@@ -49,6 +52,13 @@ export class UsuariosSyncTask extends SyncTask {
       this.realm.write(() => {
         for (const usuario of usuarios) {
           const existing = this.realm.objectForPrimaryKey("Usuario", usuario.id);
+          const segundosRecorrido = Number(
+            usuario.segundosRecorrido ?? usuario.SegundosRecorrido,
+          );
+          const intervaloGPS =
+            Number.isFinite(segundosRecorrido) && segundosRecorrido > 0
+              ? segundosRecorrido
+              : Number(existing?.segundosRecorrido) || 30;
 
           const usuarioData: any = {
             id: usuario.id,
@@ -101,7 +111,9 @@ export class UsuariosSyncTask extends SyncTask {
                 : usuario.envaseRuta === 0
                 ? false
                 : null,
-            syncedAt: new Date(),
+            segundosRecorrido: intervaloGPS,
+            syncedAt: nowMexico,
+            syncedAr: nowMexico,
           };
 
           if (existing) {
@@ -112,7 +124,25 @@ export class UsuariosSyncTask extends SyncTask {
             registrosGuardados++;
           }
         }
+
+        this.realm.create(
+          "SyncStatus",
+          {
+            id: "Usuario",
+            lastSyncDate: nowMexico,
+            totalRecords: registrosLeidos,
+            status: "completed",
+          },
+          UpdateMode.Modified,
+        );
       });
+
+      try {
+        const RouteTrackingService = (await import("../../RouteTrackingService")).default;
+        await RouteTrackingService.refreshCompanyConfig();
+      } catch (error) {
+        console.warn("[UsuariosSyncTask] No se pudo aplicar el intervalo empresarial al tracking:", error);
+      }
 
       console.log(`[UsuariosSyncTask] Guardados: ${registrosGuardados}, Actualizados: ${registrosActualizados}`);
 

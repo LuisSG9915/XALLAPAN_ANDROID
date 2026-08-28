@@ -55,8 +55,14 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 65,
+        schemaVersion: 67,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 67) {
+            console.log("[Migration v67] Eliminando parámetros duplicados de RouteConfig");
+          }
+          if (oldRealm.schemaVersion < 66) {
+            console.log("[Migration v66] Agregando segundosRecorrido a Usuario");
+          }
           if (oldRealm.schemaVersion < 65) {
             const ventasAnteriores = oldRealm.objects("Venta");
             const ventasNuevas = newRealm.objects("Venta");
@@ -487,15 +493,9 @@ class FullSyncService {
     if (!this.realm || this.realm.isClosed) return null;
 
     const collection: any = this.realm.objects(tableName);
-    if (!collection || collection.length === 0) return null;
+    let maxDate: Date | null = null;
 
-    const firstWithSyncedAr = Array.from(collection).find(
-      (record: any) => record?.syncedAr != null
-    ) as any;
-    if (!firstWithSyncedAr) return null;
-
-    if (typeof firstWithSyncedAr.syncedAr === "string") {
-      let maxDate: Date | null = null;
+    if (collection && collection.length > 0) {
       for (const record of collection) {
         const value = record?.syncedAr;
         if (!value) continue;
@@ -507,11 +507,17 @@ class FullSyncService {
           maxDate = candidate;
         }
       }
-      return maxDate;
     }
 
-    const maxDate = collection.max("syncedAr") as Date | null;
-    return maxDate || null;
+    const syncStatus = this.realm.objectForPrimaryKey("SyncStatus", tableName) as any;
+    const statusDate = syncStatus?.status === "completed" && syncStatus.lastSyncDate
+      ? new Date(syncStatus.lastSyncDate)
+      : null;
+    if (statusDate && !Number.isNaN(statusDate.getTime()) && (!maxDate || statusDate > maxDate)) {
+      maxDate = statusDate;
+    }
+
+    return maxDate;
   }
 
   /**
@@ -1827,10 +1833,11 @@ class FullSyncService {
               }
 
               const usuarios = await response.json();
+              if (!Array.isArray(usuarios)) {
+                throw new Error("Respuesta inválida del endpoint de usuarios");
+              }
               console.log({ usuarios });
-              const registrosLeidos = Array.isArray(usuarios)
-                ? usuarios.length
-                : 0;
+              const registrosLeidos = usuarios.length;
               let registrosGuardados = 0;
               let registrosActualizados = 0;
 
@@ -1840,6 +1847,13 @@ class FullSyncService {
                     "Usuario",
                     usuario.id
                   ) as any;
+                  const segundosRecorrido = Number(
+                    usuario.segundosRecorrido ?? usuario.SegundosRecorrido,
+                  );
+                  const intervaloGPS =
+                    Number.isFinite(segundosRecorrido) && segundosRecorrido > 0
+                      ? segundosRecorrido
+                      : Number(existing?.segundosRecorrido) || 30;
 
                   const usuarioData: any = {
                     id: usuario.id,
@@ -1895,7 +1909,9 @@ class FullSyncService {
                         : usuario.envaseRuta === 0
                         ? false
                         : null,
+                    segundosRecorrido: intervaloGPS,
                     syncedAt: nowMexico,
+                    syncedAr: nowMexico,
                   };
 
                   if (existing) {
@@ -1910,7 +1926,25 @@ class FullSyncService {
                     registrosGuardados++;
                   }
                 }
+
+                this.realm!.create(
+                  "SyncStatus",
+                  {
+                    id: tableName,
+                    lastSyncDate: nowMexico,
+                    totalRecords: registrosLeidos,
+                    status: "completed",
+                  },
+                  UpdateMode.Modified,
+                );
               });
+
+              try {
+                const RouteTrackingService = (await import("./RouteTrackingService")).default;
+                await RouteTrackingService.refreshCompanyConfig();
+              } catch (error) {
+                console.warn("[Incremental] No se pudo aplicar el intervalo empresarial al tracking:", error);
+              }
 
               await BitacoraService.registrarFinSync(idBitacora, {
                 exitoso: true,
@@ -4485,6 +4519,8 @@ class FullSyncService {
           "TipoVisita",
           "BitacoraSync",
           "BitacoraGps",
+          "BitacoraTrackingGps",
+          "RouteConfig",
           "InventarioEnvase",
           "InventarioEnvasesHistorial",
           "VisitaRealizada",

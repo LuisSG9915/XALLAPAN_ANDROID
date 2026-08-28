@@ -11,6 +11,7 @@ export type Usuario = {
   sucursal?: number | null;
   sucursal_origen?: number | null;
   idDepartamento?: number | null;
+  segundosRecorrido?: number | null;
   [key: string]: any;
 };
 

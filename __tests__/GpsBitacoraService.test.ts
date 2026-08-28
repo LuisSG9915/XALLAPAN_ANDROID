@@ -55,6 +55,7 @@ type XhrMock = {
   send: jest.Mock;
 };
 
+import AuthService from "../services/AuthService";
 import GpsBitacoraService, {
   TRACKING_UPLOAD_INTERVAL_MS,
 } from "../services/GpsBitacoraService";
@@ -83,6 +84,8 @@ const createXhr = (): XhrMock => {
 
 const createRealm = () => ({
   isClosed: false,
+  objectForPrimaryKey: jest.fn(() => null),
+  create: jest.fn(),
   objects: jest.fn((name: string) => {
     if (name !== "BitacoraTrackingGps") {
       throw new Error(`Colección inesperada: ${name}`);
@@ -122,8 +125,10 @@ describe("GpsBitacoraService tracking native transport", () => {
     realm = createRealm();
     service.setRealm(realm);
     service.enviandoTracking = false;
+    service.trackingUploadPromise = null;
     service.lastTrackingUploadAttemptAt = 0;
     service.lastTrackingUploadIdentity = null;
+    (AuthService.restoreSession as jest.Mock).mockResolvedValue({ id: 4, sucursal_origen: 38 });
     (globalThis as any).XMLHttpRequest = jest.fn(createXhr);
   });
 
@@ -147,9 +152,15 @@ describe("GpsBitacoraService tracking native transport", () => {
 
     expect(records[0].enviado).toBe(true);
     expect(service.enviandoTracking).toBe(false);
+    const collection = realm.objects.mock.results[0].value;
+    expect(collection.filtered).toHaveBeenCalledWith(
+      "enviado == false AND idUsuario == $0 AND sucursal == $1",
+      4,
+      38,
+    );
   });
 
-  it("omite nuevos pendientes antes de cumplir siete minutos", async () => {
+  it("omite nuevos pendientes antes de cumplir la ventana de 30 segundos", async () => {
     const firstRequest = service.enviarTrackingPendientes(38, 4);
     xhrInstances[0].status = 200;
     xhrInstances[0].onload?.();
@@ -160,6 +171,32 @@ describe("GpsBitacoraService tracking native transport", () => {
 
     expect(xhrInstances).toHaveLength(1);
     expect(records[1].enviado).toBe(false);
+  });
+
+  it("persiste la fecha real del fix y una clave aislada por usuario, sucursal e intervalo", async () => {
+    const capturedAt = new Date("2026-08-27T12:00:00.000Z");
+
+    const persisted = await service.registrarCapturaTracking(
+      19.55,
+      -96.95,
+      7,
+      true,
+      30000,
+      capturedAt,
+    );
+
+    expect(persisted).toBe(true);
+    expect(realm.create).toHaveBeenCalledWith(
+      "BitacoraTrackingGps",
+      expect.objectContaining({
+        id: expect.stringContaining("4-38-30000-"),
+        idUsuario: 4,
+        sucursal: 38,
+        fecha: capturedAt,
+        enviado: false,
+      }),
+      "modified",
+    );
   });
 
   it("libera el lock y conserva pendientes cuando ocurre timeout nativo", async () => {
@@ -173,7 +210,7 @@ describe("GpsBitacoraService tracking native transport", () => {
     expect(service.enviandoTracking).toBe(false);
   });
 
-  it("permite reintentar después de siete minutos y marcar el lote", async () => {
+  it("permite reintentar después de 30 segundos y marcar el lote", async () => {
     jest.useFakeTimers();
     const firstRequest = service.enviarTrackingPendientes(38, 4);
     xhrInstances[0].ontimeout?.();
@@ -187,6 +224,25 @@ describe("GpsBitacoraService tracking native transport", () => {
     await secondRequest;
 
     expect(records[0].enviado).toBe(true);
+  });
+
+  it("deja pendientes las filas cuando la confirmación del servidor es incompleta", async () => {
+    const request = service.enviarTrackingPendientes(38, 4);
+    const xhr = xhrInstances[0];
+
+    xhr.status = 200;
+    xhr.responseText = JSON.stringify({
+      recibidos: 1,
+      insertados: 0,
+      duplicados: 0,
+      rechazados: 1,
+      aceptado: false,
+    });
+    xhr.onload?.();
+    await request;
+
+    expect(records[0].enviado).toBe(false);
+    expect(service.enviandoTracking).toBe(false);
   });
 
   it("deja pendientes las filas cuando el servidor responde HTTP 500", async () => {

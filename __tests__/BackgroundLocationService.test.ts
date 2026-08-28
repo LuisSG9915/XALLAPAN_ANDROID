@@ -27,6 +27,7 @@ jest.mock("../services/FullSyncService", () => ({
   __esModule: true,
   default: {
     initialize: jest.fn(),
+    getRealm: jest.fn(() => ({})),
   },
 }));
 
@@ -39,7 +40,7 @@ jest.mock("../services/AuthService", () => ({
 
 jest.mock("../services/GpsBitacoraService", () => ({
   __esModule: true,
-  TRACKING_UPLOAD_INTERVAL_MS: 7 * 60 * 1000,
+  TRACKING_UPLOAD_INTERVAL_MS: 30 * 1000,
   default: {
     registrarCapturaTracking: jest.fn(),
     enviarTrackingPendientes: jest.fn(),
@@ -59,7 +60,7 @@ import GpsBitacoraService from "../services/GpsBitacoraService";
 import BackgroundLocationService from "../services/BackgroundLocationService";
 
 const service = BackgroundLocationService as any;
-const TRACKING_UPLOAD_INTERVAL_MS = 7 * 60 * 1000;
+const TRACKING_UPLOAD_INTERVAL_MS = 30 * 1000;
 const netInfoFetch = NetInfo.fetch as jest.Mock;
 const restoreSession = AuthService.restoreSession as jest.Mock;
 const registrarCapturaTracking =
@@ -83,7 +84,12 @@ describe("BackgroundLocationService tracking upload", () => {
     service.lastCaptureAt = 0;
     service.lastTrackingUploadAttemptAt = 0;
     service.trackingUploadInFlight = null;
-    registrarCapturaTracking.mockResolvedValue(undefined);
+    service.backgroundTaskInFlight = null;
+    service.captureInFlight = false;
+    service.gpsEnganchado = false;
+    service.intervalMs = 30000;
+    service.intervaloNativo = 5000;
+    registrarCapturaTracking.mockResolvedValue(true);
     netInfoFetch.mockResolvedValue({
       isConnected: true,
       isInternetReachable: true,
@@ -138,7 +144,7 @@ describe("BackgroundLocationService tracking upload", () => {
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(2);
   });
 
-  it("dispara la subida desde un fix y respeta la ventana de siete minutos", async () => {
+  it("dispara la subida desde un fix y respeta la ventana de 30 segundos", async () => {
     jest.useFakeTimers();
     const position = {
       coords: { latitude: 19.55, longitude: -96.95, accuracy: 8 },
@@ -148,20 +154,41 @@ describe("BackgroundLocationService tracking upload", () => {
     await service.onLocationFix(position, 1);
     await flushPromises();
     expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
+    expect(registrarCapturaTracking).toHaveBeenCalledWith(
+      19.55,
+      -96.95,
+      8,
+      true,
+      30000,
+      position.timestamp,
+    );
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(1);
 
-    await jest.advanceTimersByTimeAsync(60000);
+    await jest.advanceTimersByTimeAsync(15000);
     await service.onLocationFix(position, 1);
     await flushPromises();
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(1);
 
-    await jest.advanceTimersByTimeAsync(TRACKING_UPLOAD_INTERVAL_MS - 60000);
+    await jest.advanceTimersByTimeAsync(15000);
     await service.onLocationFix(position, 1);
     await flushPromises();
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(2);
   });
 
-  it("mantiene el watchdog como respaldo y respeta la ventana de siete minutos", async () => {
+  it("no persiste ubicaciones simuladas", async () => {
+    await service.onLocationFix(
+      {
+        coords: { latitude: 19.55, longitude: -96.95, accuracy: 8 },
+        timestamp: Date.now(),
+        mocked: true,
+      } as any,
+      1,
+    );
+
+    expect(registrarCapturaTracking).not.toHaveBeenCalled();
+  });
+
+  it("mantiene el watchdog como respaldo y respeta la ventana de 30 segundos", async () => {
     jest.useFakeTimers();
     const taskPromise = service.backgroundTask();
 
@@ -169,10 +196,16 @@ describe("BackgroundLocationService tracking upload", () => {
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(1);
 
     await jest.advanceTimersByTimeAsync(120000);
-    expect(enviarTrackingPendientes).toHaveBeenCalledTimes(1);
+    await flushPromises();
+    expect(enviarTrackingPendientes).toHaveBeenCalledTimes(2);
 
     await jest.advanceTimersByTimeAsync(TRACKING_UPLOAD_INTERVAL_MS + 60000);
+    await flushPromises();
     expect(enviarTrackingPendientes).toHaveBeenCalledTimes(2);
+
+    await jest.advanceTimersByTimeAsync(30000);
+    await flushPromises();
+    expect(enviarTrackingPendientes).toHaveBeenCalledTimes(3);
 
     service.isTaskRunning = false;
     service.generation = 2;

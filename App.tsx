@@ -50,8 +50,6 @@ import FullSyncService, { SyncProgress } from "./services/FullSyncService";
 import SyncProgressModal from "./components/SyncProgressModal";
 import BluetoothPrinterService from "./services/BluetoothPrinterService";
 import BackgroundSyncService from "./services/BackgroundSyncService";
-import BackgroundActions from "react-native-background-actions";
-import BackgroundLocationService from "./services/BackgroundLocationService";
 import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
@@ -511,7 +509,6 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const [userName, setUserName] = useState<string>("");
   const [hasPendingTraspasos, setHasPendingTraspasos] = useState(false);
   const [rutaCerrada, setRutaCerrada] = useState(false);
-  const prevRutaCerradaRef = useRef<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const pollingIntervalRef = useRef<any>(null);
   const pedidosPollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -643,17 +640,27 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
   const syncRouteTracking = useCallback(async (rutaStatus: boolean) => {
     try {
-      if (!rutaStatus) {
-        console.log("[App] Sincronizando tracking: ruta abierta, iniciando GPS...");
-        const started = await RouteTrackingService.iniciarRuta();
-        console.log(`[App] Tracking GPS iniciado: ${started}`);
+      const config = await RouteTrackingService.getConfig();
+      if (rutaStatus) {
+        if (config.rutaActiva) {
+          console.log("[App] Ruta cerrada; finalizando tracking GPS activo...");
+          return await RouteTrackingService.finalizarRuta();
+        }
         return null;
       }
 
-      console.log("[App] Sincronizando tracking: ruta cerrada, deteniendo GPS...");
-      return await RouteTrackingService.finalizarRuta();
+      if (!config.rutaActiva) {
+        console.log("[App] Ruta comercial abierta, pero el tracking aún no fue iniciado por el vendedor.");
+        return null;
+      }
+
+      console.log("[App] Restaurando tracking GPS de una ruta activa...");
+      const started = await RouteTrackingService.iniciarRuta();
+      console.log(`[App] Tracking GPS restaurado: ${started}`);
+      return null;
     } catch (trackingError) {
       console.error("[App] Error al sincronizar tracking GPS:", trackingError);
+      return null;
     }
   }, []);
 
@@ -666,26 +673,9 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
       setRutaCerrada(rutaStatus);
       await syncRouteTracking(rutaStatus);
-
-      // Health check por TRANSICIÓN: solo intentar reiniciar el foreground service
-      // cuando la ruta pasa de cerrada (prev=true) a abierta (rutaStatus=false).
-      // Así se evita llamar start() repetidamente cada 60 s.
-      if (prevRutaCerradaRef.current === true && !rutaStatus) {
-        const servicioCorriendo = BackgroundActions.isRunning();
-        if (!servicioCorriendo) {
-          console.warn("[App] Ruta recién abierta y foreground service detenido. Reiniciando...");
-          try {
-            await BackgroundLocationService.start();
-            console.log("[App] Foreground service reiniciado exitosamente");
-          } catch (e) {
-            console.error("[App] Error al reiniciar foreground service:", e);
-          }
-        }
-      }
-      prevRutaCerradaRef.current = rutaStatus;
     };
 
-    verificarRuta();
+    void verificarRuta();
     const interval = setInterval(verificarRuta, 60000);
     return () => clearInterval(interval);
   }, [servicesReady, currentUser, syncRouteTracking]);
@@ -697,7 +687,14 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         text: "Cerrar Sesión",
         style: "destructive",
         onPress: async () => {
-          // Limpiar todos los datos excepto usuarios
+          try {
+            if (FullSyncService.isServiceInitialized() && await RouteTrackingService.isRouteActive()) {
+              await RouteTrackingService.finalizarRuta();
+            }
+          } catch (error) {
+            console.error("[App] Error al finalizar tracking antes de cerrar sesión:", error);
+          }
+
           try {
             if (FullSyncService.isServiceInitialized()) {
               FullSyncService.clearAllDataExceptUsers();

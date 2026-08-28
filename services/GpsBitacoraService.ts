@@ -56,7 +56,7 @@ function coerceString(value: any): string | null {
   return String(value);
 }
 
-export const TRACKING_UPLOAD_INTERVAL_MS = 7 * 60 * 1000;
+export const TRACKING_UPLOAD_INTERVAL_MS = 30 * 1000;
 const TRACKING_REQUEST_TIMEOUT_MS = 20_000;
 
 class GpsBitacoraService {
@@ -68,6 +68,7 @@ class GpsBitacoraService {
   // servidor recibía cada registro duplicado.
   private enviandoGps = false;
   private enviandoTracking = false;
+  private trackingUploadPromise: Promise<void> | null = null;
   private lastTrackingUploadAttemptAt = 0;
   private lastTrackingUploadIdentity: string | null = null;
   private enviandoValidaciones = false;
@@ -103,26 +104,49 @@ class GpsBitacoraService {
     precision: number | undefined,
     conCobertura: boolean | undefined,
     intervalMs: number = 30000,
-  ): Promise<void> {
+    capturedAt?: Date | number,
+  ): Promise<boolean> {
     try {
+      if (!Number.isFinite(latitud) || latitud < -90 || latitud > 90) {
+        console.warn("[GpsBitacoraService] Latitud inválida; se omitirá registro de tracking", latitud);
+        return false;
+      }
+      if (!Number.isFinite(longitud) || longitud < -180 || longitud > 180) {
+        console.warn("[GpsBitacoraService] Longitud inválida; se omitirá registro de tracking", longitud);
+        return false;
+      }
       if (!this.realm || this.realm.isClosed) {
         console.warn("[GpsBitacoraService] Realm no inicializado. Se omitirá registro de tracking.");
-        return;
+        return false;
       }
 
       const realm = this.getRealm();
       const user = await AuthService.restoreSession();
       if (!user) {
         console.warn("[GpsBitacoraService] Usuario no logueado, omitiendo registro de tracking");
-        return;
+        return false;
       }
 
-      const idUsuario = user.id || user.idUsuario || 0;
-      const sucursal = user.sucursal || user.sucursal_origen || 0;
+      const idUsuario = Number(user.id ?? user.idUsuario ?? 0);
+      const sucursal = Number(user.sucursal || user.sucursal_origen || 0);
+      if (!Number.isInteger(idUsuario) || idUsuario <= 0 || !Number.isInteger(sucursal) || sucursal <= 0) {
+        console.warn("[GpsBitacoraService] Identidad inválida; se omitirá registro de tracking", {
+          idUsuario,
+          sucursal,
+        });
+        return false;
+      }
 
       const now = new Date();
-      const windowMs = Math.max(1000, intervalMs);
-      const idLocal = `${idUsuario}-${Math.floor(now.getTime() / windowMs)}`;
+      const capturedDate = capturedAt === undefined ? now : new Date(capturedAt);
+      const fecha = Number.isNaN(capturedDate.getTime()) ? now : capturedDate;
+      const windowMs = Math.max(1000, Number(intervalMs) || 30000);
+      const idLocal = `${idUsuario}-${sucursal}-${windowMs}-${Math.floor(fecha.getTime() / windowMs)}`;
+      const existing = realm.objectForPrimaryKey("BitacoraTrackingGps", idLocal) as any;
+      if (existing?.enviado === true) return true;
+
+      const precisionNormalizada =
+        precision !== undefined && Number.isFinite(precision) && precision >= 0 ? precision : null;
 
       realm.write(() => {
         realm.create(
@@ -133,9 +157,9 @@ class GpsBitacoraService {
             sucursal,
             latitud,
             longitud,
-            precision: precision ?? null,
+            precision: precisionNormalizada,
             conCobertura: conCobertura ?? null,
-            fecha: now,
+            fecha,
             enviado: false,
           },
           UpdateMode.Modified,
@@ -144,10 +168,12 @@ class GpsBitacoraService {
 
       console.log(
         `[GpsBitacoraService] Tracking registrado: idLocal=${idLocal}, lat=${latitud}, lng=${longitud}, ` +
-          `precision=${precision}, cobertura=${conCobertura}`,
+          `precision=${precisionNormalizada}, cobertura=${conCobertura}, fecha=${fecha.toISOString()}`,
       );
+      return true;
     } catch (error) {
       console.warn("[GpsBitacoraService] Error al registrar captura de tracking:", error);
+      return false;
     }
   }
 
@@ -337,6 +363,15 @@ class GpsBitacoraService {
    * y al final de cada ciclo en BackgroundSyncService.
    */
   async enviarTiemposVentaPendientes(sucursal: number, idUsuario: number): Promise<void> {
+    const sucursalSegura = Number(sucursal);
+    const idUsuarioSeguro = Number(idUsuario);
+    if (!Number.isInteger(sucursalSegura) || sucursalSegura <= 0 || !Number.isInteger(idUsuarioSeguro) || idUsuarioSeguro <= 0) {
+      console.warn("[GpsBitacoraService] Identidad inválida; se omite envío de tiempos", {
+        sucursal,
+        idUsuario,
+      });
+      return;
+    }
     if (this.enviandoTiempos) {
       console.log("[GpsBitacoraService] Envío de tiempos de venta ya en curso; se omite esta llamada (evita duplicados).");
       return;
@@ -349,13 +384,15 @@ class GpsBitacoraService {
 
       // Colección "viva": se toman siempre los PRIMEROS BATCH_SIZE hasta vaciarla
       // (los offsets crecientes sobre una colección que se encoge saltaban registros).
-      const todosPendientes = realm.objects("BitacoraTiemposVenta").filtered("enviado == false");
+      const todosPendientes = realm
+        .objects("BitacoraTiemposVenta")
+        .filtered("enviado == false AND idUsuario == $0 AND sucursal == $1", idUsuarioSeguro, sucursalSegura);
       if (todosPendientes.length === 0) return;
 
       const BATCH_SIZE = 100;
       console.log(`[GpsBitacoraService] Enviando ${todosPendientes.length} registros de tiempos de venta al servidor en lotes de ${BATCH_SIZE}...`);
 
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraTiemposVentaArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraTiemposVentaArrastreJSON?sucursal=${sucursalSegura}&idUsuario=${idUsuarioSeguro}`;
 
       while (todosPendientes.length > 0) {
         const batch = todosPendientes.slice(0, BATCH_SIZE);
@@ -394,6 +431,15 @@ class GpsBitacoraService {
    * y al final de cada ciclo en BackgroundSyncService.
    */
   async enviarBitacorasPendientes(sucursal: number, idUsuario: number): Promise<void> {
+    const sucursalSegura = Number(sucursal);
+    const idUsuarioSeguro = Number(idUsuario);
+    if (!Number.isInteger(sucursalSegura) || sucursalSegura <= 0 || !Number.isInteger(idUsuarioSeguro) || idUsuarioSeguro <= 0) {
+      console.warn("[GpsBitacoraService] Identidad inválida; se omite envío GPS", {
+        sucursal,
+        idUsuario,
+      });
+      return;
+    }
     if (this.enviandoGps) {
       console.log("[GpsBitacoraService] Envío GPS ya en curso; se omite esta llamada (evita duplicados).");
       return;
@@ -407,13 +453,15 @@ class GpsBitacoraService {
       // OJO: la colección Realm es "viva": al marcar enviado=true se encoge sola.
       // Por eso se toman siempre los PRIMEROS BATCH_SIZE hasta vaciarla; usar
       // offsets crecientes sobre la colección viva saltaba registros.
-      const todosPendientes = realm.objects("BitacoraGps").filtered("enviado == false");
+      const todosPendientes = realm
+        .objects("BitacoraGps")
+        .filtered("enviado == false AND idUsuario == $0 AND sucursal == $1", idUsuarioSeguro, sucursalSegura);
       if (todosPendientes.length === 0) return;
 
       const BATCH_SIZE = 100;
       console.log(`[GpsBitacoraService] Enviando ${todosPendientes.length} registros GPS al servidor en lotes de ${BATCH_SIZE}...`);
 
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraGpsArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraGpsArrastreJSON?sucursal=${sucursalSegura}&idUsuario=${idUsuarioSeguro}`;
 
       while (todosPendientes.length > 0) {
         const batch = todosPendientes.slice(0, BATCH_SIZE);
@@ -448,12 +496,30 @@ class GpsBitacoraService {
     idUsuario: number,
     force = false,
   ): Promise<void> {
+    const sucursalSegura = Number(sucursal);
+    const idUsuarioSeguro = Number(idUsuario);
+    if (!Number.isInteger(sucursalSegura) || sucursalSegura <= 0 || !Number.isInteger(idUsuarioSeguro) || idUsuarioSeguro <= 0) {
+      console.warn("[GpsBitacoraService][TrackingUpload] Identidad inválida; se omite envío", {
+        sucursal,
+        idUsuario,
+      });
+      return;
+    }
+
+    if (this.trackingUploadPromise) {
+      try {
+        await this.trackingUploadPromise;
+      } catch (error) {
+        console.warn("[GpsBitacoraService][TrackingUpload] El envío anterior terminó con error", error);
+      }
+    }
+
     if (this.enviandoTracking) {
       console.log("[GpsBitacoraService] Envío de tracking GPS ya en curso; se omite esta llamada (evita duplicados).");
       return;
     }
 
-    const trackingIdentity = `${sucursal}:${idUsuario}`;
+    const trackingIdentity = `${sucursalSegura}:${idUsuarioSeguro}`;
     const now = Date.now();
     const elapsed = now - this.lastTrackingUploadAttemptAt;
     if (
@@ -463,8 +529,8 @@ class GpsBitacoraService {
       elapsed < TRACKING_UPLOAD_INTERVAL_MS
     ) {
       console.log("[GpsBitacoraService][TrackingUpload] Envío omitido por intervalo", {
-        sucursal,
-        idUsuario,
+        sucursal: sucursalSegura,
+        idUsuario: idUsuarioSeguro,
         remainingMs: TRACKING_UPLOAD_INTERVAL_MS - elapsed,
       });
       return;
@@ -476,19 +542,21 @@ class GpsBitacoraService {
     }
 
     this.enviandoTracking = true;
-    this.lastTrackingUploadAttemptAt = Date.now();
+    this.lastTrackingUploadAttemptAt = now;
     this.lastTrackingUploadIdentity = trackingIdentity;
-    try {
+    const operation = (async (): Promise<void> => {
       const realm = this.getRealm();
 
       // OJO: la colección Realm es "viva": al marcar enviado=true se encoge sola.
       // Por eso se toman siempre los PRIMEROS BATCH_SIZE hasta vaciarla; usar
       // offsets crecientes sobre la colección viva saltaba registros.
-      const todosPendientes = realm.objects("BitacoraTrackingGps").filtered("enviado == false");
+      const todosPendientes = realm
+        .objects("BitacoraTrackingGps")
+        .filtered("enviado == false AND idUsuario == $0 AND sucursal == $1", idUsuarioSeguro, sucursalSegura);
       const totalInicial = todosPendientes.length;
       console.log("[GpsBitacoraService][TrackingUpload] Consulta de pendientes", {
-        sucursal,
-        idUsuario,
+        sucursal: sucursalSegura,
+        idUsuario: idUsuarioSeguro,
         totalInicial,
       });
       if (totalInicial === 0) {
@@ -499,7 +567,7 @@ class GpsBitacoraService {
       const BATCH_SIZE = 100;
       console.log(`[GpsBitacoraService] Enviando ${totalInicial} registros de tracking GPS al servidor en lotes de ${BATCH_SIZE}...`);
 
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraTrackingGpsArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraTrackingGpsArrastreJSON?sucursal=${sucursalSegura}&idUsuario=${idUsuarioSeguro}`;
 
       while (todosPendientes.length > 0) {
         const batch = todosPendientes.slice(0, BATCH_SIZE);
@@ -533,7 +601,15 @@ class GpsBitacoraService {
         enviados: totalInicial - todosPendientes.length,
         pendientesRestantes: todosPendientes.length,
       });
+    })();
+    this.trackingUploadPromise = operation;
+
+    try {
+      await operation;
     } finally {
+      if (this.trackingUploadPromise === operation) {
+        this.trackingUploadPromise = null;
+      }
       this.enviandoTracking = false;
     }
   }
@@ -544,6 +620,15 @@ class GpsBitacoraService {
    * y al final de cada ciclo en BackgroundSyncService.
    */
   async enviarValidacionesPendientes(sucursal: number, idUsuario: number): Promise<void> {
+    const sucursalSegura = Number(sucursal);
+    const idUsuarioSeguro = Number(idUsuario);
+    if (!Number.isInteger(sucursalSegura) || sucursalSegura <= 0 || !Number.isInteger(idUsuarioSeguro) || idUsuarioSeguro <= 0) {
+      console.warn("[GpsBitacoraService] Identidad inválida; se omite envío de validaciones", {
+        sucursal,
+        idUsuario,
+      });
+      return;
+    }
     if (this.enviandoValidaciones) {
       console.log("[GpsBitacoraService] Envío de validaciones ya en curso; se omite esta llamada (evita duplicados).");
       return;
@@ -556,13 +641,15 @@ class GpsBitacoraService {
 
       // Colección "viva": se toman siempre los PRIMEROS BATCH_SIZE hasta vaciarla
       // (los offsets crecientes sobre una colección que se encoge saltaban registros).
-      const todosPendientes = realm.objects("BitacoraValidacion").filtered("enviado == false");
+      const todosPendientes = realm
+        .objects("BitacoraValidacion")
+        .filtered("enviado == false AND idUsuario == $0 AND sucursal == $1", idUsuarioSeguro, sucursalSegura);
       if (todosPendientes.length === 0) return;
 
       const BATCH_SIZE = 100;
       console.log(`[GpsBitacoraService] Enviando ${todosPendientes.length} validaciones de ubicación al servidor en lotes de ${BATCH_SIZE}...`);
 
-      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraValidacionArrastreJSON?sucursal=${sucursal}&idUsuario=${idUsuario}`;
+      const url = `${this.apiBaseUrl}/api/MovilesVentas/sp_MovilesBitacoraValidacionArrastreJSON?sucursal=${sucursalSegura}&idUsuario=${idUsuarioSeguro}`;
 
       while (todosPendientes.length > 0) {
         const batch = todosPendientes.slice(0, BATCH_SIZE);
@@ -595,6 +682,30 @@ class GpsBitacoraService {
       }
     } finally {
       this.enviandoValidaciones = false;
+    }
+  }
+
+  private trackingResponseAccepted(responseText: string, expected: number): boolean {
+    const text = responseText?.trim();
+    if (!text) return true;
+
+    try {
+      const response = JSON.parse(text) as any;
+      if ((response.aceptado ?? response.Aceptado) === false) return false;
+
+      const recibidos = coerceNumber(response.recibidos ?? response.Recibidos);
+      const insertados = coerceNumber(response.insertados ?? response.Insertados);
+      const duplicados = coerceNumber(response.duplicados ?? response.Duplicados);
+      const rechazados = coerceNumber(response.rechazados ?? response.Rechazados);
+      if (rechazados !== null && rechazados > 0) return false;
+      if (recibidos !== null && recibidos < expected) return false;
+      if (insertados !== null || duplicados !== null) {
+        return (insertados ?? 0) + (duplicados ?? 0) >= expected;
+      }
+
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -634,6 +745,15 @@ class GpsBitacoraService {
           console.error("[GpsBitacoraService][TrackingUpload] Transporte XHR falló", {
             status: xhr.status,
             reason: reason ?? "desconocido",
+          });
+          resolve(false);
+          return;
+        }
+
+        if (!this.trackingResponseAccepted(xhr.responseText, batch.length)) {
+          console.error("[GpsBitacoraService][TrackingUpload] Respuesta del servidor no confirma el lote", {
+            status: xhr.status,
+            cantidad: batch.length,
           });
           resolve(false);
           return;

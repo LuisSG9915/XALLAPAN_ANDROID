@@ -19,6 +19,7 @@ import FullSyncService from "../services/FullSyncService";
 import RouteTrackingService, { RoutePoint, RouteSummary } from "../services/RouteTrackingService";
 import LocationService from "../services/LocationService";
 import AuthService from "../services/AuthService";
+import CierreRutaService from "../services/CierreRutaService";
 
 type ClientMarker = {
   id: string;
@@ -53,6 +54,7 @@ export default function MapaClientesScreen() {
   const [sinCobertura, setSinCobertura] = useState(false);
   const [ultimaPosicion, setUltimaPosicion] = useState<{ lat: number; lng: number; fecha?: Date } | null>(null);
   const [intervaloGPS, setIntervaloGPS] = useState(30);
+  const [routeActionLoading, setRouteActionLoading] = useState(false);
 
   useEffect(() => {
     navigation.setOptions({ title: "Mapa de Clientes" });
@@ -372,39 +374,61 @@ export default function MapaClientesScreen() {
   }, []);
 
   const handleIniciarRuta = useCallback(async () => {
-    const permisoFine = await LocationService.requestPermission();
-    if (permisoFine !== "granted") {
-      Alert.alert("Permiso requerido", "Se requiere acceso a la ubicación para registrar la ruta.");
-      return;
+    if (routeActionLoading) return;
+    setRouteActionLoading(true);
+    try {
+      const user = await AuthService.restoreSession();
+      const sucursal = Number(user?.sucursal_origen || user?.sucursal || 0);
+      const vendedor = Number(user?.id || user?.idUsuario || 0);
+      if (sucursal > 0 && vendedor > 0 && await CierreRutaService.getRutaStatus(sucursal, vendedor)) {
+        Alert.alert("Ruta cerrada", "La ruta está cerrada y no puede iniciar un nuevo recorrido.");
+        return;
+      }
+
+      const permisoFine = await LocationService.requestPermission();
+      if (permisoFine !== "granted") {
+        Alert.alert("Permiso requerido", "Se requiere acceso a la ubicación para registrar la ruta.");
+        return;
+      }
+      const permisoBackground = await LocationService.requestBackgroundLocationPermission();
+      if (permisoBackground !== "granted") {
+        Alert.alert("Permiso requerido", "Permite el acceso a la ubicación en segundo plano para continuar registrando con la pantalla apagada.");
+        return;
+      }
+      const ok = await RouteTrackingService.iniciarRuta();
+      if (ok) {
+        setRouteActive(true);
+        Alert.alert("Ruta iniciada", "El GPS comenzará a registrar tu recorrido aun con la pantalla apagada.");
+      } else {
+        Alert.alert("Error", "No se pudo iniciar la ruta. Verifica permisos y usuario.");
+      }
+    } catch (error) {
+      console.error("[MapaClientesScreen] Error iniciando ruta:", error);
+      Alert.alert("Error", "No se pudo iniciar la ruta. Verifica permisos y conexión.");
+    } finally {
+      setRouteActionLoading(false);
     }
-    const permisoBackground = await LocationService.requestBackgroundLocationPermission();
-    if (permisoBackground === "blocked") {
-      return;
-    }
-    const ok = await RouteTrackingService.iniciarRuta();
-    if (ok) {
-      setRouteActive(true);
-      Alert.alert("Ruta iniciada", "El GPS comenzará a registrar tu recorrido aun con la pantalla apagada.");
-    } else {
-      Alert.alert("Error", "No se pudo iniciar la ruta. Verifica permisos y usuario.");
-    }
-  }, []);
+  }, [routeActionLoading]);
 
   const handleFinalizarRuta = useCallback(async () => {
-    const summary = await RouteTrackingService.finalizarRuta();
-    if (summary) {
-      setRouteActive(false);
-      setRouteSummary(summary);
-      Alert.alert("Ruta finalizada", `Distancia: ${summary.distanciaKm} km\nPuntos GPS: ${summary.puntos}`);
-    } else {
-      Alert.alert("Error", "No se pudo finalizar la ruta.");
+    if (routeActionLoading) return;
+    setRouteActionLoading(true);
+    try {
+      const summary = await RouteTrackingService.finalizarRuta();
+      if (summary) {
+        setRouteActive(false);
+        setRouteSummary(summary);
+        Alert.alert("Ruta finalizada", `Distancia: ${summary.distanciaKm} km\nPuntos GPS: ${summary.puntos}`);
+      } else {
+        Alert.alert("Información", "No hay una ruta activa para finalizar.");
+      }
+    } catch (error) {
+      console.error("[MapaClientesScreen] Error finalizando ruta:", error);
+      Alert.alert("Error", "No se pudo finalizar la ruta. Los puntos locales se conservarán.");
+    } finally {
+      setRouteActionLoading(false);
     }
-  }, []);
-
-  const handleIntervalChange = useCallback(async (seconds: number) => {
-    await RouteTrackingService.setIntervaloGPS(seconds);
-    setIntervaloGPS(seconds);
-  }, []);
+  }, [routeActionLoading]);
 
   const handleMiUbicacion = useCallback(async () => {
     try {
@@ -473,14 +497,7 @@ export default function MapaClientesScreen() {
       <View style={styles.controls}>
         <View style={styles.row}>
           <Text style={styles.label}>Intervalo GPS: {intervaloGPS}s</Text>
-          <View style={styles.intervalButtons}>
-            <TouchableOpacity style={styles.smallButton} onPress={() => handleIntervalChange(Math.max(15, intervaloGPS - 15))}>
-              <Text style={styles.smallButtonText}>-15s</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.smallButton} onPress={() => handleIntervalChange(Math.min(300, intervaloGPS + 15))}>
-              <Text style={styles.smallButtonText}>+15s</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.configuredText}>Configurado por la empresa</Text>
         </View>
 
         <View style={styles.row}>
@@ -494,14 +511,22 @@ export default function MapaClientesScreen() {
         </TouchableOpacity>
 
         {routeActive ? (
-          <TouchableOpacity style={[styles.routeButton, styles.routeButtonActive]} onPress={handleFinalizarRuta}>
+          <TouchableOpacity
+            style={[styles.routeButton, styles.routeButtonActive, routeActionLoading && styles.disabledButton]}
+            onPress={handleFinalizarRuta}
+            disabled={routeActionLoading}
+          >
             <Icon name="stop" size={20} color="#fff" />
-            <Text style={styles.routeButtonText}>Finalizar Ruta</Text>
+            <Text style={styles.routeButtonText}>{routeActionLoading ? "Finalizando..." : "Finalizar Ruta"}</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity style={styles.routeButton} onPress={handleIniciarRuta}>
+          <TouchableOpacity
+            style={[styles.routeButton, routeActionLoading && styles.disabledButton]}
+            onPress={handleIniciarRuta}
+            disabled={routeActionLoading}
+          >
             <Icon name="play-arrow" size={20} color="#fff" />
-            <Text style={styles.routeButtonText}>Iniciar Ruta</Text>
+            <Text style={styles.routeButtonText}>{routeActionLoading ? "Iniciando..." : "Iniciar Ruta"}</Text>
           </TouchableOpacity>
         )}
 
@@ -559,14 +584,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.m,
   },
   label: { ...TYPOGRAPHY.body, fontSize: 14 },
-  intervalButtons: { flexDirection: "row", gap: SPACING.s },
-  smallButton: {
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.s,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.s,
-  },
-  smallButtonText: { color: COLORS.primary, fontWeight: "bold" },
+  configuredText: { color: COLORS.textSecondary, fontSize: 12 },
   routeButton: {
     backgroundColor: COLORS.success,
     flexDirection: "row",
@@ -577,6 +595,7 @@ const styles = StyleSheet.create({
     gap: SPACING.s,
   },
   routeButtonActive: { backgroundColor: COLORS.error },
+  disabledButton: { opacity: 0.55 },
   routeButtonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
   locationButton: {
     backgroundColor: COLORS.primary,

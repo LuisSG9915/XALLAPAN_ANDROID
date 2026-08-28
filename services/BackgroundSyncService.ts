@@ -583,6 +583,7 @@ class BackgroundSyncService {
         await GpsBitacoraService.enviarValidacionesPendientes(sucursal, idUsuario);
         await GpsBitacoraService.enviarTiemposVentaPendientes(sucursal, idUsuario);
         GpsBitacoraService.limpiarRegistrosEnviados(7);
+        await this.checkAndRestartGpsTracking(sucursal, idUsuario);
         console.log(TAG, "Sincronización headless completada exitosamente");
       } else {
         console.warn(TAG, "Sincronización headless con errores:", result.error);
@@ -610,14 +611,26 @@ class BackgroundSyncService {
         return;
       }
 
-      if (BackgroundActions.isRunning()) {
+      const RouteTrackingService = require("./RouteTrackingService").default;
+      const trackingActive = await RouteTrackingService.isRouteActive();
+      if (!trackingActive) {
+        return;
+      }
+
+      if (BackgroundActions.isRunning() || await RouteTrackingService.isTrackingHealthy()) {
         return;
       }
 
       console.log("[BackgroundSync] GPS tracking detenido con ruta abierta, reintentando...");
+      const intervalo = await RouteTrackingService.refreshCompanyConfig();
       const BackgroundLocationService = require("./BackgroundLocationService").default;
-      await BackgroundLocationService.start();
-      console.log("[BackgroundSync] GPS tracking reiniciado por heartbeat");
+      await BackgroundLocationService.setInterval(intervalo * 1000);
+      const state = await BackgroundLocationService.start();
+      if (state.enabled) {
+        console.log("[BackgroundSync] GPS tracking reiniciado por heartbeat");
+      } else {
+        console.warn("[BackgroundSync] El GPS no pudo reiniciarse por falta de servicio activo");
+      }
     } catch (e) {
       console.warn("[BackgroundSync] No se pudo reiniciar GPS tracking:", e);
     }

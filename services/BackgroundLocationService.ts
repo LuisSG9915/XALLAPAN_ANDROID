@@ -26,12 +26,13 @@ class BackgroundLocationService {
   private intervalMs = 30000;
   private intervaloNativo = 15000;
   private readonly INTERVALO_ADQUISICION_MS = 5000;
-  private readonly INTERVALO_ENGANCHADO_MS = 15000;
   private readonly UMBRAL_ENGANCHE_ACCURACY = 30;
   private readonly FIXES_PARA_ENGANCHE = 2;
   private readonly FIXES_PARA_PERDER_ENGANCHE = 3;
   private isTaskRunning = false;
   private gpsEnganchado = false;
+  private captureInFlight = false;
+  private backgroundTaskInFlight: Promise<void> | null = null;
   private consecutiveGoodFixes = 0;
   private consecutiveBadFixes = 0;
   private watchId: number | null = null;
@@ -41,8 +42,6 @@ class BackgroundLocationService {
   private lastCaptureAt = 0;
   private lastTrackingUploadAttemptAt = 0;
   private trackingUploadInFlight: Promise<void> | null = null;
-  private lastNetworkCheckAt = 0;
-  private lastNetworkConnected = false;
   // Token de generación: invalida callbacks/watchdogs de loops anteriores.
   private generation = 0;
   // Evita carreras en start() (varios health-checks/disparadores simultáneos).
@@ -77,14 +76,23 @@ class BackgroundLocationService {
    * en el contexto headless del foreground service).
    */
   private async ensureReady(): Promise<void> {
-    if (this.isReady) return;
+    if (this.isReady && FullSyncService.getRealm()) return;
+    this.isReady = false;
     await FullSyncService.initialize();
+    if (!FullSyncService.getRealm()) {
+      throw new Error("Realm no disponible para el tracking GPS");
+    }
     this.isReady = true;
+  }
+
+  private getNativeIntervalMs(): number {
+    return this.gpsEnganchado ? this.intervalMs : Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
   }
 
   private async startWatch(generation: number): Promise<void> {
     if (generation !== this.generation) return;
     this.stopWatch();
+    this.intervaloNativo = this.getNativeIntervalMs();
 
     const opcionesWatch = {
       enableHighAccuracy: true,
@@ -122,16 +130,9 @@ class BackgroundLocationService {
     }
   }
 
-  private async getCachedNetworkConnected(): Promise<boolean> {
-    const now = Date.now();
-    if (now - this.lastNetworkCheckAt < 60000) {
-      return this.lastNetworkConnected;
-    }
-
-    this.lastNetworkCheckAt = now;
+  private async getNetworkConnected(): Promise<boolean> {
     const netInfo = await NetInfo.fetch().catch(() => null);
-    this.lastNetworkConnected = netInfo?.isConnected === true;
-    return this.lastNetworkConnected;
+    return netInfo?.isConnected === true;
   }
 
   private async onLocationFix(position: GeoPosition, generation: number): Promise<void> {
@@ -141,6 +142,11 @@ class BackgroundLocationService {
     // venta fuerza el intervalo rápido, este callback también recibe esa
     // ráfaga. Se ignoran los fixes anteriores a la ventana de tracking para no
     // escribir en Realm varias veces por segundo.
+    if (position.mocked === true) {
+      console.warn(TAG, "Se descartó un fix GPS simulado");
+      return;
+    }
+
     const ahora = Date.now();
     this.lastFixAt = ahora;
     this.ultimoFixTracking = {
@@ -149,27 +155,39 @@ class BackgroundLocationService {
       accuracy: position.coords.accuracy ?? 999,
       timestamp: position.timestamp ?? ahora,
     };
+
     this.evaluateGpsState(position.coords.accuracy ?? 999);
 
+    if (this.captureInFlight) return;
     if (this.lastCaptureAt > 0 && ahora - this.lastCaptureAt < this.intervalMs * 0.8) {
       return;
     }
-    this.lastCaptureAt = ahora;
+
+    this.captureInFlight = true;
     const { latitude, longitude, accuracy } = position.coords;
     console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}`);
 
     try {
-      const conCobertura = await this.getCachedNetworkConnected();
+      const conCobertura = await this.getNetworkConnected();
+      if (!this.isTaskRunning || generation !== this.generation) return;
 
-      await GpsBitacoraService.registrarCapturaTracking(
+      const persisted = await GpsBitacoraService.registrarCapturaTracking(
         latitude,
         longitude,
         accuracy,
         conCobertura,
         this.intervalMs,
+        position.timestamp,
       );
+      if (!persisted) {
+        console.warn(TAG, "El fix GPS no pudo persistirse");
+        return;
+      }
 
-      void this.uploadTrackingPendientes(generation, "gps-fix");
+      this.lastCaptureAt = ahora;
+      if (this.isTaskRunning && generation === this.generation) {
+        void this.uploadTrackingPendientes(generation, "gps-fix");
+      }
 
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const acc = Math.round(accuracy ?? 0);
@@ -180,6 +198,8 @@ class BackgroundLocationService {
       console.log(TAG, `Tracking registrado: cobertura=${conCobertura}`);
     } catch (error) {
       console.error(TAG, "Error procesando fix GPS:", error);
+    } finally {
+      this.captureInFlight = false;
     }
   }
 
@@ -189,8 +209,8 @@ class BackgroundLocationService {
   }
 
   /**
-   * Conmuta entre modo adquisición (5s) y modo enganchado (15s) usando histéresis:
-   * - Subir a enganchado: 2 fixes consecutivos con accuracy <= 30 m.
+   * Conmuta entre modo adquisición y el intervalo configurado usando histéresis:
+   * - Subir a intervalo configurado: 2 fixes consecutivos con accuracy <= 30 m.
    * - Bajar a adquisición: 3 fixes consecutivos con accuracy > 30 m.
    */
   private evaluateGpsState(accuracy: number): void {
@@ -202,9 +222,9 @@ class BackgroundLocationService {
       this.consecutiveGoodFixes++;
       if (!this.gpsEnganchado && this.consecutiveGoodFixes >= this.FIXES_PARA_ENGANCHE) {
         this.gpsEnganchado = true;
-        if (this.intervaloNativo !== this.INTERVALO_ENGANCHADO_MS) {
-          this.intervaloNativo = this.INTERVALO_ENGANCHADO_MS;
-          console.log(TAG, `GNSS enganchado (${acc}m), bajando a intervalo ${this.intervaloNativo}ms`);
+        if (this.intervaloNativo !== this.intervalMs) {
+          this.intervaloNativo = this.intervalMs;
+          console.log(TAG, `GNSS enganchado (${acc}m), usando intervalo configurado ${this.intervaloNativo}ms`);
           void this.startWatch(this.generation);
         }
       }
@@ -213,8 +233,9 @@ class BackgroundLocationService {
       this.consecutiveBadFixes++;
       if (this.gpsEnganchado && this.consecutiveBadFixes >= this.FIXES_PARA_PERDER_ENGANCHE) {
         this.gpsEnganchado = false;
-        if (this.intervaloNativo !== this.INTERVALO_ADQUISICION_MS) {
-          this.intervaloNativo = this.INTERVALO_ADQUISICION_MS;
+        const intervaloAdquisicion = Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
+        if (this.intervaloNativo !== intervaloAdquisicion) {
+          this.intervaloNativo = intervaloAdquisicion;
           console.log(TAG, `GNSS perdido (${acc}m), subiendo a intervalo ${this.intervaloNativo}ms`);
           void this.startWatch(this.generation);
         }
@@ -338,41 +359,69 @@ class BackgroundLocationService {
    * re-suscribe; también intenta subir el tracking GPS pendiente.
    */
   private async backgroundTask(): Promise<void> {
-    await this.ensureReady();
-    const gen = this.generation;
-    console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
+    if (this.backgroundTaskInFlight) return this.backgroundTaskInFlight;
 
-    // Arrancar en modo adquisición para calentar el GNSS desde frío
-    this.intervaloNativo = this.INTERVALO_ADQUISICION_MS;
-    this.gpsEnganchado = false;
-    this.consecutiveGoodFixes = 0;
-    this.consecutiveBadFixes = 0;
-
-    await this.startWatch(gen);
-    this.lastFixAt = Date.now();
-    console.log(TAG, "[TrackingUpload] Disparo inicial del foreground service", { gen });
-    void this.uploadTrackingPendientes(gen, "foreground-start", true);
-
-    while (this.isTaskRunning && this.generation === gen) {
-      await sleep(WATCHDOG_INTERVAL_MS);
-      if (!this.isTaskRunning || this.generation !== gen) break;
-
-      const sinceLastFix = Date.now() - this.lastFixAt;
-      if (sinceLastFix > MAX_FIX_AGE_MS) {
-        console.warn(TAG, `Sin fixes durante ${Math.round(sinceLastFix / 1000)}s, re-suscribiendo watchPosition...`);
-        await this.startWatch(gen);
-        this.updateNotificationText(`Sin señal GPS ${Math.round(sinceLastFix / 1000)}s - reconectando...`);
-      }
-
-      console.log(TAG, "[TrackingUpload] Disparo periódico del watchdog", {
-        gen,
-        sinceLastFixMs: sinceLastFix,
-      });
-      void this.uploadTrackingPendientes(gen, "watchdog");
+    const task = this.runBackgroundTask();
+    this.backgroundTaskInFlight = task;
+    try {
+      await task;
+    } finally {
+      if (this.backgroundTaskInFlight === task) this.backgroundTaskInFlight = null;
     }
+  }
 
-    this.stopWatch();
-    console.log(TAG, `Tarea FGS finalizada (gen=${gen})`);
+  private async runBackgroundTask(): Promise<void> {
+    const gen = this.generation;
+    try {
+      await this.ensureReady();
+      if (!this.isTaskRunning || this.generation !== gen) return;
+
+      console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
+
+      // Arrancar en modo adquisición para calentar el GNSS desde frío
+      this.intervaloNativo = Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
+      this.gpsEnganchado = false;
+      this.captureInFlight = false;
+      this.lastCaptureAt = 0;
+      this.consecutiveGoodFixes = 0;
+      this.consecutiveBadFixes = 0;
+
+      await this.startWatch(gen);
+      if (!this.isTaskRunning || this.generation !== gen) return;
+      this.lastFixAt = Date.now();
+      console.log(TAG, "[TrackingUpload] Disparo inicial del foreground service", { gen });
+      void this.uploadTrackingPendientes(gen, "foreground-start", true);
+
+      while (this.isTaskRunning && this.generation === gen) {
+        await sleep(WATCHDOG_INTERVAL_MS);
+        if (!this.isTaskRunning || this.generation !== gen) break;
+
+        const sinceLastFix = Date.now() - this.lastFixAt;
+        const maxFixAgeMs = Math.max(MAX_FIX_AGE_MS, this.intervalMs * 3);
+        if (sinceLastFix > maxFixAgeMs) {
+          console.warn(TAG, `Sin fixes durante ${Math.round(sinceLastFix / 1000)}s, re-suscribiendo watchPosition...`);
+          await this.startWatch(gen);
+          this.updateNotificationText(`Sin señal GPS ${Math.round(sinceLastFix / 1000)}s - reconectando...`);
+        }
+
+        console.log(TAG, "[TrackingUpload] Disparo periódico del watchdog", {
+          gen,
+          sinceLastFixMs: sinceLastFix,
+        });
+        void this.uploadTrackingPendientes(gen, "watchdog");
+      }
+    } catch (error) {
+      if (this.generation === gen) {
+        this.isTaskRunning = false;
+        LocationService.setWatchRestoreHandler(null);
+        this.stopWatch();
+        await this.releaseWakeLock();
+        console.error(TAG, "Error en la tarea foreground de ubicación:", error);
+      }
+    } finally {
+      if (this.generation === gen) this.stopWatch();
+      console.log(TAG, `Tarea FGS finalizada (gen=${gen})`);
+    }
   }
 
   /**
@@ -398,9 +447,15 @@ class BackgroundLocationService {
    * Si el servicio está corriendo, reinicia el watch para aplicar el nuevo intervalo.
    */
   async setInterval(ms: number): Promise<State> {
-    this.intervalMs = Math.max(5000, Math.min(300000, ms));
+    const value = Number(ms);
+    const nextIntervalMs = Number.isFinite(value)
+      ? Math.max(5000, Math.min(300000, value))
+      : 30000;
+    const changed = this.intervalMs !== nextIntervalMs;
+    this.intervalMs = nextIntervalMs;
+    this.intervaloNativo = this.getNativeIntervalMs();
     console.log(TAG, "Intervalo actualizado a", this.intervalMs, "ms");
-    if (this.isTaskRunning) {
+    if (changed && this.isTaskRunning) {
       await this.startWatch(this.generation);
     }
     return this.getState();
@@ -426,9 +481,16 @@ class BackgroundLocationService {
   private async doStart(): Promise<State> {
     // Guardas ANTES de cualquier await para evitar que un segundo start()
     // concurrente vea el servicio como detenido.
-    if (this.isTaskRunning || BackgroundActions.isRunning()) {
+    if (BackgroundActions.isRunning()) {
+      this.isTaskRunning = true;
       console.log(TAG, "El servicio ya está corriendo");
       return this.getState();
+    }
+
+    if (this.isTaskRunning) {
+      this.isTaskRunning = false;
+      this.generation++;
+      this.stopWatch();
     }
 
     this.isTaskRunning = true;
@@ -442,6 +504,8 @@ class BackgroundLocationService {
       console.log(TAG, "Permiso background location:", bgPermission);
       if (bgPermission !== "granted") {
         console.warn(TAG, "Permiso de ubicación en segundo plano no concedido:", bgPermission);
+        this.isTaskRunning = false;
+        return { enabled: false };
       }
 
       const notificationPermission = await LocationService.requestNotificationPermission();
@@ -497,6 +561,9 @@ class BackgroundLocationService {
       await this.acquireWakeLock();
     } catch (error) {
       this.isTaskRunning = false;
+      LocationService.setWatchRestoreHandler(null);
+      this.stopWatch();
+      await this.releaseWakeLock();
       console.error(TAG, "Error iniciando BackgroundActions:", error);
       Alert.alert(
         "Error del servicio GPS",
@@ -583,6 +650,16 @@ class BackgroundLocationService {
     }
   }
 
+  async waitForTrackingUpload(): Promise<void> {
+    const upload = this.trackingUploadInFlight;
+    if (!upload) return;
+    try {
+      await upload;
+    } catch (error) {
+      console.warn(TAG, "El envío de tracking terminó con error:", error);
+    }
+  }
+
   /**
    * Detiene el seguimiento de la ruta.
    */
@@ -597,6 +674,7 @@ class BackgroundLocationService {
     } catch (error) {
       console.error(TAG, "Error deteniendo BackgroundActions:", error);
     }
+    await this.waitForTrackingUpload();
     // Liberar WakeLock
     await this.releaseWakeLock();
     return this.getState();

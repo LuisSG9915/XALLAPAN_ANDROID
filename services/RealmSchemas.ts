@@ -58,6 +58,7 @@ export const UsuarioSchema = {
     permisoDomicilioTicket: "bool?",
     dobleTicket: "bool?",
     envaseRuta: "bool?",
+    segundosRecorrido: "int?",
     syncedAt: "date",
     syncedAr: "date?",
   },
@@ -549,8 +550,6 @@ export const RouteConfigSchema = {
     id: "string", // clave fija: "routeConfig"
     idUsuario: "int?",
     sucursal: "int?",
-    intervaloGPS: "int", // segundos entre capturas (default 30, min 15, max 300)
-    radioTolerancia: "int", // metros para validación geoposición (default 100)
     rutaActiva: { type: "bool" as const, default: false }, // true = inicio de ruta activo
     fechaInicioRuta: "date?",
     fechaFinRuta: "date?",

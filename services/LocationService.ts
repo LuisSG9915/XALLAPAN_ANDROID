@@ -9,6 +9,9 @@ export type LocationCoordinates = {
   latitude: number;
   longitude: number;
   accuracy?: number; // precisión en metros (cuanto menor, mejor)
+  timestamp?: number;
+  mocked?: boolean;
+  provider?: string;
 };
 
 export type MotivoValidacion = "ok" | "ok_cache" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango" | "red_no_gnss";
@@ -434,6 +437,12 @@ class LocationService {
     return new Promise((resolve) => {
       Geolocation.getCurrentPosition(
         (position: GeoPosition) => {
+          if (position.mocked === true) {
+            console.warn("[LocationService] Se descartó una ubicación simulada");
+            resolve(null);
+            return;
+          }
+
           console.log("[LocationService] Ubicación obtenida:", {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
@@ -451,6 +460,9 @@ class LocationService {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
+            timestamp: position.timestamp,
+            mocked: position.mocked,
+            provider: position.provider,
           });
         },
         (error: GeoError) => {
@@ -478,9 +490,21 @@ class LocationService {
     return new Promise((resolve) => {
       Geolocation.getCurrentPosition(
         (position: GeoPosition) => {
+          if (position.mocked === true) {
+            console.warn("[LocationService] Se descartó una ubicación simulada");
+            resolve(null);
+            return;
+          }
           const { latitude, longitude, accuracy } = position.coords;
           GpsBitacoraService.registrarUbicacion(latitude, longitude, accuracy);
-          resolve({ latitude, longitude, accuracy });
+          resolve({
+            latitude,
+            longitude,
+            accuracy,
+            timestamp: position.timestamp,
+            mocked: position.mocked,
+            provider: position.provider,
+          });
         },
         (error: GeoError) => {
           console.warn("[LocationService] No se pudo obtener ubicación rápida:", error.message);
@@ -631,10 +655,18 @@ class LocationService {
 
       watchId = Geolocation.watchPosition(
         (position: GeoPosition) => {
+          if (position.mocked === true) {
+            console.warn("[LocationService] Se descartó una ubicación simulada");
+            return;
+          }
+
           const coords: LocationCoordinates = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
+            timestamp: position.timestamp,
+            mocked: position.mocked,
+            provider: position.provider,
           };
 
           const edadFix = Date.now() - (position.timestamp ?? Date.now());
