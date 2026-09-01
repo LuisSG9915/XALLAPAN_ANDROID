@@ -8,7 +8,6 @@ import {
   Alert,
   Linking,
   Platform,
-  Switch,
 } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { useNavigation } from "@react-navigation/native";
@@ -29,6 +28,7 @@ type ClientMarker = {
   lat: number;
   lng: number;
   estado: "agendado" | "visitado" | "no_localizado";
+  tipoVisita?: string;
   orden?: number;
 };
 
@@ -50,6 +50,10 @@ export default function MapaClientesScreen() {
   const [routeActive, setRouteActive] = useState(false);
   const [routeSummary, setRouteSummary] = useState<RouteSummary | null>(null);
   const [puntosRuta, setPuntosRuta] = useState<RoutePoint[]>([]);
+  const [mostrarVisitados, setMostrarVisitados] = useState(true);
+  const [mostrarAgendados, setMostrarAgendados] = useState(true);
+  const [mostrarNoLocalizados, setMostrarNoLocalizados] = useState(true);
+  const [mostrarMiPosicion, setMostrarMiPosicion] = useState(true);
   const [mostrarRuta, setMostrarRuta] = useState(true);
   const [sinCobertura, setSinCobertura] = useState(false);
   const [ultimaPosicion, setUltimaPosicion] = useState<{ lat: number; lng: number; fecha?: Date } | null>(null);
@@ -122,6 +126,13 @@ export default function MapaClientesScreen() {
         }
       });
 
+      const tiposVisita = FullSyncService.getTipoVisitas();
+      const descripcionTipoVisita = (tipoVisita: unknown): string | undefined => {
+        const tipo = Number(tipoVisita);
+        const catalogo = tiposVisita.find((item: any) => Number(item.id) === tipo) as any;
+        return catalogo?.descripcion || (Number.isFinite(tipo) && tipo > 0 ? `Tipo ${tipo}` : undefined);
+      };
+
       const markers: ClientMarker[] = [];
       Array.from(visitas).forEach((visita: any) => {
         const cliente = realm.objectForPrimaryKey("ClienteFull", visita.idCliente) as any;
@@ -132,8 +143,12 @@ export default function MapaClientesScreen() {
 
         let estado: ClientMarker["estado"] = "agendado";
         const detalle = detallesPorCliente[visita.idCliente];
-        if (visita.visitado === 1 || detalle?.fechaFin) {
-          estado = detalle?.tipoVisita === 1 ? "visitado" : "no_localizado";
+        const tipoVisitaAgenda = Number(visita.tipo);
+        const tipoVisitaDetalle = Number(detalle?.tipoVisita);
+        const tipoVisita = tipoVisitaAgenda > 0 ? tipoVisitaAgenda : tipoVisitaDetalle;
+        const estaVisitada = visita.visitado === 1 || Boolean(detalle?.fechaFin);
+        if (estaVisitada) {
+          estado = tipoVisita === 1 ? "visitado" : "no_localizado";
         }
 
         markers.push({
@@ -144,6 +159,7 @@ export default function MapaClientesScreen() {
           lat: cliente.latitud,
           lng: cliente.longitud,
           estado,
+          tipoVisita: estado === "visitado" ? descripcionTipoVisita(tipoVisita) : undefined,
           orden: visita.orden,
         });
       });
@@ -182,8 +198,12 @@ export default function MapaClientesScreen() {
       return;
     }
     const cargarPuntosRuta = async () => {
-      const puntos = await RouteTrackingService.getRoutePoints();
-      console.log(`[MapaClientesScreen] Puntos de ruta cargados: ${puntos.length}`);
+      const inicioDelDia = new Date();
+      inicioDelDia.setHours(0, 0, 0, 0);
+      const finDelDia = new Date();
+      finDelDia.setHours(23, 59, 59, 999);
+      const puntos = await RouteTrackingService.getRoutePoints(inicioDelDia, finDelDia);
+      console.log(`[MapaClientesScreen] Puntos de ruta cargados de hoy: ${puntos.length}`);
       setPuntosRuta(puntos);
     };
     cargarPuntosRuta();
@@ -196,12 +216,19 @@ export default function MapaClientesScreen() {
   }, [puntosRuta]);
 
   const html = useMemo(() => {
-    const center = currentLocation || ultimaPosicion || (clientes[0] ? { lat: clientes[0].lat, lng: clientes[0].lng } : { lat: 19.4326, lng: -99.1332 });
+    const center = (mostrarMiPosicion ? currentLocation || ultimaPosicion : null) ||
+      (clientes[0] ? { lat: clientes[0].lat, lng: clientes[0].lng } : { lat: 19.4326, lng: -99.1332 });
     const markersJson = JSON.stringify(clientes);
     const routeJson = JSON.stringify(routePoints);
-    const currentJson = JSON.stringify(currentLocation || ultimaPosicion);
+    const currentJson = JSON.stringify(currentLocation);
     const ultimaJson = JSON.stringify(ultimaPosicion);
     const sinCoberturaJson = JSON.stringify(sinCobertura);
+    const mostrarEstadosJson = JSON.stringify({
+      visitado: mostrarVisitados,
+      agendado: mostrarAgendados,
+      no_localizado: mostrarNoLocalizados,
+    });
+    const mostrarMiPosicionJson = JSON.stringify(mostrarMiPosicion);
 
     return `
 <!DOCTYPE html>
@@ -254,10 +281,12 @@ export default function MapaClientesScreen() {
     try {
     const center = ${JSON.stringify(center)};
     rnLog('Map init - center: ' + JSON.stringify(center));
-    const hasLocation = ${JSON.stringify(!!(currentLocation || ultimaPosicion))};
+    const mostrarMiPosicion = ${mostrarMiPosicionJson};
+    const mostrarEstados = ${mostrarEstadosJson};
+    const hasLocation = mostrarMiPosicion && !!(${JSON.stringify(!!(currentLocation || ultimaPosicion))});
     const initialZoom = hasLocation ? 15 : 14;
     rnLog('Map init - hasLocation: ' + hasLocation + ', zoom: ' + initialZoom);
-    const markers = ${markersJson};
+    const markers = ${markersJson}.filter(m => mostrarEstados[m.estado]);
     rnLog('Map init - markers count: ' + markers.length);
     const map = L.map('map').setView([center.lat, center.lng], initialZoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -284,16 +313,17 @@ export default function MapaClientesScreen() {
         weight: 2
       }).addTo(map);
       const ordenText = m.orden ? 'Orden: ' + m.orden + '<br/>' : '';
+      const tipoVisitaText = m.tipoVisita ? '<br/><small>Tipo de visita: ' + String(m.tipoVisita).replace(/'/g, "&#39;") + '</small>' : '';
       const popupHtml = '<b>' + String(m.nombre || '').replace(/'/g, "&#39;") + '</b><br/>' +
         ordenText +
-        String(m.direccion || '').replace(/'/g, "&#39;") + '<br/><small>' + m.estado + '</small><br/><br/>' +
+        String(m.direccion || '').replace(/'/g, "&#39;") + '<br/><small>Estado: ' + m.estado + '</small>' + tipoVisitaText + '<br/><br/>' +
         '<button onclick="navigateToClient(' + m.lat + ', ' + m.lng + ')" ' +
         'style="background:#2B306E;color:#fff;border:none;border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer;">Navegar</button>';
       marker.bindPopup(popupHtml);
     });
 
     const current = ${currentJson};
-    if (current) {
+    if (current && mostrarMiPosicion) {
       L.circleMarker([current.lat, current.lng], {
         color: '#fff',
         fillColor: '#00BCD4',
@@ -305,7 +335,7 @@ export default function MapaClientesScreen() {
 
     const ultima = ${ultimaJson};
     const sinCob = ${sinCoberturaJson};
-    if (ultima && sinCob) {
+    if (ultima && sinCob && mostrarMiPosicion) {
       L.circleMarker([ultima.lat, ultima.lng], {
         color: '#FF9800',
         fillColor: '#FF9800',
@@ -328,8 +358,8 @@ export default function MapaClientesScreen() {
     const boundsElements = [];
     if (markers.length > 0) boundsElements.push(...markers.map(m => L.marker([m.lat, m.lng])));
     if (route.length > 1) boundsElements.push(...route.map(p => L.marker([p.lat, p.lng])));
-    if (current) boundsElements.push(L.marker([current.lat, current.lng]));
-    if (ultima && sinCob) boundsElements.push(L.marker([ultima.lat, ultima.lng]));
+    if (current && mostrarMiPosicion) boundsElements.push(L.marker([current.lat, current.lng]));
+    if (ultima && sinCob && mostrarMiPosicion) boundsElements.push(L.marker([ultima.lat, ultima.lng]));
 
     if (boundsElements.length > 0 && !hasLocation) {
       const group = new L.featureGroup(boundsElements);
@@ -345,7 +375,18 @@ export default function MapaClientesScreen() {
 </body>
 </html>
     `;
-  }, [clientes, currentLocation, routePoints, ultimaPosicion, sinCobertura, mostrarRuta]);
+  }, [
+    clientes,
+    currentLocation,
+    routePoints,
+    ultimaPosicion,
+    sinCobertura,
+    mostrarVisitados,
+    mostrarAgendados,
+    mostrarNoLocalizados,
+    mostrarMiPosicion,
+    mostrarRuta,
+  ]);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
@@ -500,9 +541,57 @@ export default function MapaClientesScreen() {
           <Text style={styles.configuredText}>Configurado por la empresa</Text>
         </View>
 
-        <View style={styles.row}>
-          <Text style={styles.label}>Mostrar ruta</Text>
-          <Switch value={mostrarRuta} onValueChange={setMostrarRuta} />
+        <Text style={styles.sectionLabel}>Capas del mapa</Text>
+        <View style={styles.filterGrid}>
+          <TouchableOpacity
+            style={[styles.filterChip, mostrarVisitados && styles.filterChipActive]}
+            onPress={() => setMostrarVisitados((visible) => !visible)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: mostrarVisitados }}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#2B306E" }]} />
+            <Text style={[styles.filterText, mostrarVisitados && styles.filterTextActive]}>Visitados</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, mostrarAgendados && styles.filterChipActive]}
+            onPress={() => setMostrarAgendados((visible) => !visible)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: mostrarAgendados }}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#9C27B0" }]} />
+            <Text style={[styles.filterText, mostrarAgendados && styles.filterTextActive]}>Agendados</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, mostrarNoLocalizados && styles.filterChipActive]}
+            onPress={() => setMostrarNoLocalizados((visible) => !visible)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: mostrarNoLocalizados }}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#FF9800" }]} />
+            <Text style={[styles.filterText, mostrarNoLocalizados && styles.filterTextActive]}>No localizados</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, mostrarMiPosicion && styles.filterChipActive]}
+            onPress={() => setMostrarMiPosicion((visible) => !visible)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: mostrarMiPosicion }}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#00BCD4" }]} />
+            <Text style={[styles.filterText, mostrarMiPosicion && styles.filterTextActive]}>Mi posición</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, mostrarRuta && styles.filterChipActive]}
+            onPress={() => setMostrarRuta((visible) => !visible)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: mostrarRuta }}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#64AD45" }]} />
+            <Text style={[styles.filterText, mostrarRuta && styles.filterTextActive]}>Ruta inicial</Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.locationButton} onPress={handleMiUbicacion}>
@@ -510,7 +599,7 @@ export default function MapaClientesScreen() {
           <Text style={styles.locationButtonText}>Mi ubicación</Text>
         </TouchableOpacity>
 
-        {routeActive ? (
+        {/* {routeActive ? (
           <TouchableOpacity
             style={[styles.routeButton, styles.routeButtonActive, routeActionLoading && styles.disabledButton]}
             onPress={handleFinalizarRuta}
@@ -528,7 +617,7 @@ export default function MapaClientesScreen() {
             <Icon name="play-arrow" size={20} color="#fff" />
             <Text style={styles.routeButtonText}>{routeActionLoading ? "Iniciando..." : "Iniciar Ruta"}</Text>
           </TouchableOpacity>
-        )}
+        )} */}
 
         {routeSummary && !routeActive && (
           <View style={styles.summary}>
@@ -585,6 +674,50 @@ const styles = StyleSheet.create({
   },
   label: { ...TYPOGRAPHY.body, fontSize: 14 },
   configuredText: { color: COLORS.textSecondary, fontSize: 12 },
+  sectionLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: SPACING.s,
+  },
+  filterGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.s,
+    marginBottom: SPACING.m,
+  },
+  filterChip: {
+    minWidth: 100,
+    flexGrow: 1,
+    flexBasis: "30%",
+    minHeight: 36,
+    paddingHorizontal: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  filterChipActive: {
+    backgroundColor: "#EEF0FF",
+    borderColor: COLORS.primary,
+  },
+  filterDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  filterText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  filterTextActive: {
+    color: COLORS.primary,
+    fontWeight: "bold",
+  },
   routeButton: {
     backgroundColor: COLORS.success,
     flexDirection: "row",

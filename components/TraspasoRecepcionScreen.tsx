@@ -344,6 +344,14 @@ export default function TraspasoRecepcionScreen() {
 
       console.log("[TraspasoRecepcion] DEBUG - Recepción exitosa en servidor");
 
+      console.log(
+        "[TraspasoRecepcion] DEBUG - Abriendo ruta inmediatamente...",
+      );
+      await CierreRutaService.setRutaCerrada(sucursal, vendedorId, false);
+      console.log("[TraspasoRecepcion] ✅ Ruta abierta exitosamente");
+      const trackingIniciado = await RouteTrackingService.iniciarRuta();
+      console.log(`[TraspasoRecepcion] Tracking GPS iniciado: ${trackingIniciado}`);
+
       // Sincronizar inventario incremental desde el servidor
       // El servidor ya actualizó el inventario, solo necesitamos sincronizarlo
       console.log("[TraspasoRecepcion] DEBUG - Sincronizando inventario incremental...");
@@ -365,19 +373,31 @@ export default function TraspasoRecepcionScreen() {
         setSyncingInventario(false);
       }
 
-      console.log(
-        "[TraspasoRecepcion] DEBUG - Abriendo ruta (estableciendo cierre a false)...",
-      );
-      await CierreRutaService.setRutaCerrada(sucursal, vendedorId, false);
-      console.log("[TraspasoRecepcion] ✅ Ruta abierta exitosamente");
-      await RouteTrackingService.iniciarRuta();
-      console.log("[TraspasoRecepcion] ✅ Tracking GPS iniciado");
-
       console.log("[TraspasoRecepcion] DEBUG - Recargando traspasos...");
       await loadTraspasos();
 
       console.log("[TraspasoRecepcion] DEBUG - Cerrando modal");
       setModalOpen(false);
+
+      void FullSyncService.sendPendingCierreRutaToServer(sucursal, vendedorId)
+        .then((cierreResult) => {
+          if (cierreResult.success) {
+            console.log(
+              `[TraspasoRecepcion] ✅ Arrastre de reapertura enviado: ${cierreResult.sent} registro(s)`,
+            );
+          } else {
+            console.warn(
+              "[TraspasoRecepcion] El arrastre de reapertura quedó pendiente:",
+              cierreResult.error,
+            );
+          }
+        })
+        .catch((error) => {
+          console.warn(
+            "[TraspasoRecepcion] El arrastre de reapertura quedó pendiente:",
+            error,
+          );
+        });
 
       const msg =
         (data && (data.mensaje1 || data.mensaje)) ||

@@ -515,8 +515,18 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const pedidosPollingInFlightRef = useRef(false);
   const lastPedidosPollingStartedAtRef = useRef<number | null>(null);
   const [cerrandoRuta, setCerrandoRuta] = useState(false);
+  const [presionandoCierre, setPresionandoCierre] = useState(false);
+  const cierreRutaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [networkUsageEnabled, setNetworkUsageEnabled] = useState(false);
   const lastTapRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (cierreRutaTimerRef.current) {
+        clearTimeout(cierreRutaTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     // Solo cargar info del usuario cuando los servicios estén listos
@@ -672,13 +682,20 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       const vendedor = currentUser.id || 0;
       const rutaStatus = await CierreRutaService.getRutaStatus(sucursal, vendedor);
       setRutaCerrada(rutaStatus);
+      if (!rutaStatus) {
+        setCerrandoRuta(false);
+      }
       await syncRouteTracking(rutaStatus);
     };
 
     void verificarRuta();
+    const unsubscribeFocus = navigation.addListener("focus", verificarRuta);
     const interval = setInterval(verificarRuta, 60000);
-    return () => clearInterval(interval);
-  }, [servicesReady, currentUser, syncRouteTracking]);
+    return () => {
+      unsubscribeFocus();
+      clearInterval(interval);
+    };
+  }, [servicesReady, currentUser, syncRouteTracking, navigation]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Cerrar Sesión", "¿Estás seguro de que deseas cerrar sesión?", [
@@ -868,6 +885,18 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
             await CierreRutaService.setRutaCerrada(sucursal, vendedor, true);
             setRutaCerrada(true);
+            setCerrandoRuta(false);
+
+            void FullSyncService.sendPendingCierreRutaToServer(sucursal, vendedor)
+              .then((cierreResult) => {
+                if (!cierreResult.success) {
+                  console.warn("[App] El cierre quedó pendiente de arrastre:", cierreResult.error);
+                }
+              })
+              .catch((error) => {
+                console.warn("[App] El cierre quedó pendiente de arrastre:", error);
+              });
+
             const resumenRuta = await syncRouteTracking(true);
             Alert.alert(
               "Ruta Cerrada",
@@ -877,7 +906,26 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         },
       ],
     );
-  }, [currentUser, syncRouteTracking, navigation]);
+  }, [currentUser, rutaCerrada, cerrandoRuta, syncRouteTracking, navigation]);
+
+  const handleCierreRutaPressIn = useCallback(() => {
+    if (rutaCerrada || cerrandoRuta) return;
+
+    setPresionandoCierre(true);
+    cierreRutaTimerRef.current = setTimeout(() => {
+      cierreRutaTimerRef.current = null;
+      setPresionandoCierre(false);
+      void handleCierreRutaComplete();
+    }, 5000);
+  }, [rutaCerrada, cerrandoRuta, handleCierreRutaComplete]);
+
+  const handleCierreRutaPressOut = useCallback(() => {
+    if (cierreRutaTimerRef.current) {
+      clearTimeout(cierreRutaTimerRef.current);
+      cierreRutaTimerRef.current = null;
+    }
+    setPresionandoCierre(false);
+  }, []);
 
   const handleTapRutaCerrada = useCallback(() => {
     Alert.alert(
@@ -1150,9 +1198,13 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
           <TouchableOpacity
             style={[styles.cierreRutaButton, rutaCerrada && styles.cierreRutaButtonClosed]}
-            onPress={rutaCerrada ? handleTapRutaCerrada : handleCierreRutaComplete}
+            onPress={rutaCerrada ? handleTapRutaCerrada : undefined}
+            onPressIn={rutaCerrada ? undefined : handleCierreRutaPressIn}
+            onPressOut={rutaCerrada ? undefined : handleCierreRutaPressOut}
             activeOpacity={0.85}
             disabled={cerrandoRuta}
+            accessibilityRole="button"
+            accessibilityHint={rutaCerrada ? "Muestra el estado de la ruta" : "Mantén presionado durante 5 segundos para cerrar la ruta"}
           >
             <Icon
               name={rutaCerrada ? "lock" : "lock-open"}
@@ -1162,7 +1214,13 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
               style={{ marginRight: 8 }}
             />
             <Text style={styles.syncButtonText}>
-              {rutaCerrada ? "Ruta Cerrada" : cerrandoRuta ? "Cerrando ruta..." : "Fin de Ruta"}
+              {rutaCerrada
+                ? "Ruta Cerrada"
+                : cerrandoRuta
+                ? "Cerrando ruta..."
+                : presionandoCierre
+                ? "Sigue presionando..."
+                : "Mantén 5 s para cerrar"}
             </Text>
           </TouchableOpacity>
         </View>

@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "start \"Xallapan Metro\" cmd /k \"pnpm start\" && pnpm exec react-native run-android",
+    "android": "node scripts/run-android.js",
     "android:install": "android\\gradlew.bat -p android app:installDebug",
     "android:dev": "pnpm run android:install && pnpm run start",
     "android:clean-locks": "powershell -NoProfile -Command \"android\\gradlew.bat --stop; Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item -Recurse -Force android\\app\\build\\intermediates\\incremental -ErrorAction SilentlyContinue; Write-Host 'Locks liberados'\"",
