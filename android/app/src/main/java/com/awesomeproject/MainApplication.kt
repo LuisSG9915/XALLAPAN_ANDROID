@@ -19,6 +19,7 @@ class MainApplication : Application(), ReactApplication {
           add(ScreenStatePackage())
           add(BatteryOptimizationPackage())
           add(WakeLockPackage())
+          add(AppUpdatePackage())
         },
     )
   }

@@ -54,7 +54,9 @@ import LocationService, { PermissionStatus } from "./services/LocationService";
 import CierreRutaService from "./services/CierreRutaService";
 import RouteTrackingService from "./services/RouteTrackingService";
 import PedidoNotificacionService from "./services/PedidoNotificacionService";
-import AppUpdateService from "./services/AppUpdateService";
+import AppUpdateService, { AppUpdateState } from "./services/AppUpdateService";
+import FcmService from "./services/FcmService";
+import AppUpdateModal from "./components/AppUpdateModal";
 import { fetchWithTimeout } from "./services/fetchWithTimeout";
 import { navigationRef } from "./services/navigationRef";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "./theme/theme";
@@ -174,6 +176,11 @@ function App() {
   const isDarkMode = useColorScheme() === "dark";
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null);
   const [checkingPermissions, setCheckingPermissions] = useState(true);
+  const [appUpdateState, setAppUpdateState] = useState<AppUpdateState>(AppUpdateService.getState());
+
+  useEffect(() => {
+    return AppUpdateService.subscribe(setAppUpdateState);
+  }, []);
 
   useEffect(() => {
     // Solicitar permisos de ubicación al inicio
@@ -255,8 +262,21 @@ function App() {
     if (permissionStatus === null) return;
 
     AppUpdateService.inicializar()
-      .then(() => AppUpdateService.verificarActualizacion())
+      .then(() => FcmService.inicializar())
+      .then(() => AppUpdateService.verificarActualizacion(false, "startup"))
       .catch((error) => console.warn("[App] Error inicializando actualizador:", error));
+  }, [permissionStatus]);
+
+  useEffect(() => {
+    if (permissionStatus === null) return;
+
+    const intervalId = setInterval(() => {
+      AppUpdateService.verificarActualizacion(false, "poll").catch((error) =>
+        console.warn("[App] Error en sondeo de actualización:", error),
+      );
+    }, 15 * 60 * 1000);
+
+    return () => clearInterval(intervalId);
   }, [permissionStatus]);
 
   useEffect(() => {
@@ -496,6 +516,12 @@ function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
+      <AppUpdateModal
+        state={appUpdateState}
+        onUseData={() => AppUpdateService.autorizarDatos()}
+        onPostpone={() => AppUpdateService.posponerDatos()}
+        onInstall={() => AppUpdateService.instalarActualizacion()}
+      />
     </SafeAreaProvider>
   );
 }

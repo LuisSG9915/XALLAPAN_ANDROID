@@ -16,6 +16,7 @@ import { Icon } from "react-native-elements";
 import AuthService from "../services/AuthService";
 import FullSyncService, { SyncProgress } from "../services/FullSyncService";
 import BackgroundSyncService from "../services/BackgroundSyncService";
+import AppUpdateService from "../services/AppUpdateService";
 import PedidoNotificacionService from "../services/PedidoNotificacionService";
 import SyncProgressModal from "./SyncProgressModal";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
@@ -32,6 +33,7 @@ export default function LoginScreen({ navigation }: any) {
     const checkSession = async () => {
       const session = await AuthService.restoreSession();
       if (session) {
+        await AppUpdateService.verificarActualizacion(true, "restored");
         console.log("Session found, redirecting to Home");
         navigation.reset({ index: 0, routes: [{ name: "Home" }] });
         setTimeout(() => {
@@ -53,10 +55,19 @@ export default function LoginScreen({ navigation }: any) {
     setLoading(true);
     try {
       const user = await AuthService.login(usuario.trim(), password.trim());
+      await AppUpdateService.verificarActualizacion(true, "login");
+      if (AppUpdateService.getState().blocking) {
+        setLoading(false);
+        return;
+      }
 
       // Obtener la sucursal del usuario que acaba de hacer login
       const sucursal = user?.sucursal_origen || user?.sucursal || 1;
       console.log("🏢 Sincronizando datos para sucursal:", sucursal);
+      void AppUpdateService.registrarDispositivo({
+        idUsuario: user?.id || null,
+        sucursal,
+      });
 
       // Iniciar sincronización después del login exitoso
       setLoading(false);
