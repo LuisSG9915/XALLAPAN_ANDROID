@@ -22,8 +22,13 @@ function startMetro() {
   } else if (process.platform === 'win32') {
     metro = spawn(
       'cmd.exe',
-      ['/d', '/c', 'start', 'Xallapan Metro', 'cmd.exe', '/k', `cd /d "${projectRoot}" && pnpm start`],
-      { detached: true, stdio: 'ignore', windowsHide: false },
+      ['/d', '/c', 'start', '""', 'cmd.exe', '/d', '/k', 'pnpm start'],
+      {
+        cwd: projectRoot,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      },
     );
   } else {
     metro = spawn(pnpmCommand, ['start'], {
@@ -48,6 +53,7 @@ const android = spawn(
     cwd: projectRoot,
     stdio: 'inherit',
     windowsHide: false,
+    shell: process.platform === 'win32',
   },
 );
 
