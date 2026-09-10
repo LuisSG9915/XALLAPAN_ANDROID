@@ -132,6 +132,23 @@ describe("RouteTrackingService", () => {
     expect(config.intervaloGPS).toBeUndefined();
   });
 
+  it("usa 30 metros y 30 minutos como fallback de varado", async () => {
+    const result = await service.getConfig();
+
+    expect(result.metrosPermitidos).toBe(30);
+    expect(result.segundosVarado).toBe(1800);
+  });
+
+  it("lee la tolerancia y el umbral de varado sincronizados", async () => {
+    user.metrosTolerancia = 45;
+    user.segundosVarado = 900;
+
+    const result = await service.getConfig();
+
+    expect(result.metrosPermitidos).toBe(45);
+    expect(result.segundosVarado).toBe(900);
+  });
+
   it("lee la polyline y calcula la distancia desde BitacoraTrackingGps", async () => {
     const points = await service.getRoutePoints();
     const summary = service.calcularResumenRuta(config.fechaInicioRuta, new Date("2026-08-27T09:00:00"));

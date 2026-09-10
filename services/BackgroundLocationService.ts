@@ -8,8 +8,11 @@ import GpsBitacoraService, {
   TRACKING_UPLOAD_INTERVAL_MS,
 } from "./GpsBitacoraService";
 import LocationService from "./LocationService";
+import StallAlertService from "./StallAlertService";
 
 const TAG = "[BackgroundLocationService]";
+const DEFAULT_TOLERANCE_METERS = 30;
+const DEFAULT_STALLED_SECONDS = 30 * 60;
 
 // El watchdog no es el reloj principal: solo verifica que watchPosition siga
 // vivo y re-suscribe si no llega ningún fix en este tiempo.
@@ -50,6 +53,14 @@ class BackgroundLocationService {
   private notificationAlertShown = false;
   private batteryOptimizationAlertShown = false;
   private wakeLockRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private stallContext: {
+    routeKey: string;
+    idUsuario: number;
+    nombreUsuario?: string | null;
+    sucursal: number;
+    metrosTolerancia: number;
+    segundosVarado: number;
+  } | null = null;
 
   private ultimoFixTracking: {
     latitud: number;
@@ -83,6 +94,61 @@ class BackgroundLocationService {
       throw new Error("Realm no disponible para el tracking GPS");
     }
     this.isReady = true;
+  }
+
+  private async loadStallContext(): Promise<void> {
+    const user = await AuthService.restoreSession();
+    const realm = FullSyncService.getRealm();
+    const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
+    const sucursal = Number(user?.sucursal_origen ?? user?.sucursal ?? 0);
+    const canReadRealm = Boolean(realm && typeof (realm as any).objectForPrimaryKey === "function");
+    const routeConfig = canReadRealm && idUsuario > 0
+      ? realm!.objectForPrimaryKey("RouteConfig", "routeConfig") as any
+      : null;
+    const realmUser = canReadRealm && idUsuario > 0
+      ? realm!.objectForPrimaryKey("Usuario", idUsuario) as any
+      : null;
+    const tolerance = Number(
+      realmUser?.metrosTolerancia ?? realmUser?.metros ?? user?.metrosTolerancia ?? user?.metros,
+    );
+    const stalledSeconds = Number(realmUser?.segundosVarado ?? user?.segundosVarado);
+    const routeStart = routeConfig?.fechaInicioRuta instanceof Date
+      ? routeConfig.fechaInicioRuta.getTime()
+      : Date.now();
+
+    if (!idUsuario || !sucursal) {
+      this.stallContext = null;
+      return;
+    }
+
+    this.stallContext = {
+      routeKey: `${idUsuario}-${sucursal}-${routeStart}`,
+      idUsuario,
+      nombreUsuario: realmUser?.nombre ?? user?.nombre,
+      sucursal,
+      metrosTolerancia: Number.isFinite(tolerance) && tolerance > 0
+        ? tolerance
+        : DEFAULT_TOLERANCE_METERS,
+      segundosVarado: Number.isFinite(stalledSeconds) && stalledSeconds > 0
+        ? stalledSeconds
+        : DEFAULT_STALLED_SECONDS,
+    };
+  }
+
+  private async evaluateStallAlert(
+    latitude: number,
+    longitude: number,
+    timestamp?: number,
+  ): Promise<void> {
+    const context = this.stallContext;
+    if (!context) return;
+
+    await StallAlertService.evaluate({
+      ...context,
+      latitud: latitude,
+      longitud: longitude,
+      timestamp,
+    });
   }
 
   private getNativeIntervalMs(): number {
@@ -187,6 +253,9 @@ class BackgroundLocationService {
       this.lastCaptureAt = ahora;
       if (this.isTaskRunning && generation === this.generation) {
         void this.uploadTrackingPendientes(generation, "gps-fix");
+        void this.evaluateStallAlert(latitude, longitude, position.timestamp).catch((error) =>
+          console.warn(TAG, "No se pudo evaluar alerta de varado:", error),
+        );
       }
 
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -375,6 +444,7 @@ class BackgroundLocationService {
     try {
       await this.ensureReady();
       if (!this.isTaskRunning || this.generation !== gen) return;
+      await this.loadStallContext();
 
       console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
 
@@ -665,6 +735,8 @@ class BackgroundLocationService {
    */
   async stop(): Promise<State> {
     this.isTaskRunning = false;
+    this.stallContext = null;
+    StallAlertService.reset();
     this.generation++; // invalida callbacks/watchdogs del loop actual
     LocationService.setWatchRestoreHandler(null);
     this.stopWatch();

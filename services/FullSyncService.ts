@@ -55,8 +55,11 @@ class FullSyncService {
       this.realm = await Realm.open({
         path: "FullSyncDB",
         schema: allSchemas,
-        schemaVersion: 67,
+        schemaVersion: 68,
         onMigration: (oldRealm: Realm, newRealm: Realm) => {
+          if (oldRealm.schemaVersion < 68) {
+            console.log("[Migration v68] Agregando tolerancia y umbral de varado a Usuario");
+          }
           if (oldRealm.schemaVersion < 67) {
             console.log("[Migration v67] Eliminando parámetros duplicados de RouteConfig");
           }
@@ -1854,6 +1857,12 @@ class FullSyncService {
                     Number.isFinite(segundosRecorrido) && segundosRecorrido > 0
                       ? segundosRecorrido
                       : Number(existing?.segundosRecorrido) || 30;
+                  const metrosToleranciaValue = Number(
+                    usuario.metrosTolerancia ?? usuario.metros ?? existing?.metrosTolerancia ?? existing?.metros,
+                  );
+                  const segundosVaradoValue = Number(
+                    usuario.segundosVarado ?? existing?.segundosVarado,
+                  );
 
                   const usuarioData: any = {
                     id: usuario.id,
@@ -1870,7 +1879,11 @@ class FullSyncService {
                       usuario.sucursal,
                     sucursalNombre:
                       usuario.sucursal_nombre ?? usuario.sucursalNombre ?? null,
-                    metros: usuario.metros,
+                    metros: usuario.metros ?? null,
+                    metrosTolerancia:
+                      Number.isFinite(metrosToleranciaValue) && metrosToleranciaValue > 0
+                        ? metrosToleranciaValue
+                        : 30,
                     reubicacion:
                       typeof usuario.reubicacion === "boolean"
                         ? usuario.reubicacion
@@ -1910,6 +1923,10 @@ class FullSyncService {
                         ? false
                         : null,
                     segundosRecorrido: intervaloGPS,
+                    segundosVarado:
+                      Number.isFinite(segundosVaradoValue) && segundosVaradoValue > 0
+                        ? segundosVaradoValue
+                        : 1800,
                     syncedAt: nowMexico,
                     syncedAr: nowMexico,
                   };

@@ -9,7 +9,8 @@ const ROUTE_CONFIG_ID = "routeConfig";
 const DEFAULT_INTERVAL_SECONDS = 30;
 const MIN_INTERVAL_SECONDS = 15;
 const MAX_INTERVAL_SECONDS = 300;
-const DEFAULT_TOLERANCE_METERS = 100;
+const DEFAULT_TOLERANCE_METERS = 30;
+const DEFAULT_STALLED_SECONDS = 30 * 60;
 
 export type RouteStatus = "idle" | "active" | "finishing";
 
@@ -80,15 +81,30 @@ class RouteTrackingService {
     return Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, Math.round(value)));
   }
 
-  private async getCompanySettings(): Promise<{ intervaloGPS: number; metrosPermitidos: number }> {
+  private async getCompanySettings(): Promise<{
+    intervaloGPS: number;
+    metrosPermitidos: number;
+    segundosVarado: number;
+  }> {
     const realm = this.getRealm();
     const user = await AuthService.restoreSession();
     const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
     const realmUser = idUsuario > 0 ? realm.objectForPrimaryKey("Usuario", idUsuario) as any : null;
+    const metrosTolerancia = Number(
+      realmUser?.metrosTolerancia ?? realmUser?.metros ?? user?.metrosTolerancia ?? user?.metros,
+    );
+    const segundosVarado = Number(realmUser?.segundosVarado ?? user?.segundosVarado);
 
     return {
       intervaloGPS: this.clampInterval(realmUser?.segundosRecorrido ?? user?.segundosRecorrido),
-      metrosPermitidos: Number(realmUser?.metros ?? user?.metros) || DEFAULT_TOLERANCE_METERS,
+      metrosPermitidos:
+        Number.isFinite(metrosTolerancia) && metrosTolerancia > 0
+          ? metrosTolerancia
+          : DEFAULT_TOLERANCE_METERS,
+      segundosVarado:
+        Number.isFinite(segundosVarado) && segundosVarado > 0
+          ? segundosVarado
+          : DEFAULT_STALLED_SECONDS,
     };
   }
 
@@ -100,7 +116,12 @@ class RouteTrackingService {
     return intervaloGPS;
   }
 
-  async getConfig(): Promise<{ intervaloGPS: number; metrosPermitidos: number; rutaActiva: boolean }> {
+  async getConfig(): Promise<{
+    intervaloGPS: number;
+    metrosPermitidos: number;
+    segundosVarado: number;
+    rutaActiva: boolean;
+  }> {
     const settings = await this.getCompanySettings();
     const config = this.ensureConfig();
     return {

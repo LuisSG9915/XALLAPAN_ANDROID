@@ -59,6 +59,12 @@ export class UsuariosSyncTask extends SyncTask {
             Number.isFinite(segundosRecorrido) && segundosRecorrido > 0
               ? segundosRecorrido
               : Number(existing?.segundosRecorrido) || 30;
+          const metrosToleranciaValue = Number(
+            usuario.metrosTolerancia ?? usuario.metros ?? existing?.metrosTolerancia ?? existing?.metros,
+          );
+          const segundosVaradoValue = Number(
+            usuario.segundosVarado ?? existing?.segundosVarado,
+          );
 
           const usuarioData: any = {
             id: usuario.id,
@@ -73,6 +79,10 @@ export class UsuariosSyncTask extends SyncTask {
             sucursalOrigen: usuario.sucursal_origen ?? usuario.sucursalOrigen ?? null,
             sucursalNombre: toStringOrNull(usuario.sucursal_nombre ?? usuario.sucursalNombre),
             metros: usuario.metros ?? null,
+            metrosTolerancia:
+              Number.isFinite(metrosToleranciaValue) && metrosToleranciaValue > 0
+                ? metrosToleranciaValue
+                : 30,
             reubicacion:
               typeof usuario.reubicacion === "boolean"
                 ? usuario.reubicacion
@@ -112,6 +122,10 @@ export class UsuariosSyncTask extends SyncTask {
                 ? false
                 : null,
             segundosRecorrido: intervaloGPS,
+            segundosVarado:
+              Number.isFinite(segundosVaradoValue) && segundosVaradoValue > 0
+                ? segundosVaradoValue
+                : 1800,
             syncedAt: nowMexico,
             syncedAr: nowMexico,
           };

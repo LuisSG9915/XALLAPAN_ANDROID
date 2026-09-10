@@ -1,3 +1,13 @@
+jest.mock("@notifee/react-native", () => ({
+  __esModule: true,
+  default: {
+    createChannel: jest.fn(() => Promise.resolve("alertas-recorrido")),
+    displayNotification: jest.fn(() => Promise.resolve()),
+    cancelNotification: jest.fn(() => Promise.resolve()),
+  },
+  AndroidImportance: { HIGH: 4 },
+}));
+
 jest.mock("react-native-background-actions", () => ({
   __esModule: true,
   default: {
@@ -51,7 +61,12 @@ jest.mock("../services/LocationService", () => ({
   __esModule: true,
   default: {
     forzarIntervaloNativo: jest.fn(),
+    setWatchRestoreHandler: jest.fn(),
+    requestBackgroundLocationPermission: jest.fn(() => Promise.resolve(true)),
+    requestNotificationPermission: jest.fn(() => Promise.resolve(true)),
+    openSettings: jest.fn(),
   },
+  calcularDistancia: jest.fn(() => 0),
 }));
 
 import NetInfo from "@react-native-community/netinfo";
