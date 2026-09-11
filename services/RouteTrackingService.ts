@@ -131,7 +131,9 @@ class RouteTrackingService {
   }
 
   async refreshCompanyConfig(): Promise<number> {
-    return this.applyCompanyInterval();
+    const intervaloGPS = await this.applyCompanyInterval();
+    await BackgroundLocationService.refreshStallContext();
+    return intervaloGPS;
   }
 
   async isRouteActive(): Promise<boolean> {
@@ -210,6 +212,14 @@ class RouteTrackingService {
     const sucursal = user.sucursal || user.sucursal_origen || 0;
 
     const config = this.ensureConfig();
+    const previousRouteState = {
+      rutaActiva: config.rutaActiva,
+      fechaInicioRuta: config.fechaInicioRuta,
+      fechaFinRuta: config.fechaFinRuta,
+      idUsuario: config.idUsuario,
+      sucursal: config.sucursal,
+      updatedAt: config.updatedAt,
+    };
     realm.write(() => {
       config.rutaActiva = true;
       config.fechaInicioRuta = new Date();
@@ -219,23 +229,35 @@ class RouteTrackingService {
       config.updatedAt = new Date();
     });
 
+    const rollbackRouteState = () => {
+      realm.write(() => {
+        config.rutaActiva = previousRouteState.rutaActiva;
+        config.fechaInicioRuta = previousRouteState.fechaInicioRuta;
+        config.fechaFinRuta = previousRouteState.fechaFinRuta;
+        config.idUsuario = previousRouteState.idUsuario;
+        config.sucursal = previousRouteState.sucursal;
+        config.updatedAt = previousRouteState.updatedAt;
+      });
+    };
+
     console.log(`[RouteTrackingService] ✅ Ruta iniciada con intervalo GPS: ${intervaloGPS}s`);
 
-    // Capturar primer punto inmediatamente y iniciar seguimiento continuo en background
-    await this.captureRoutePoint();
-
+    // Iniciar seguimiento continuo en background y capturar el primer punto
     try {
       await BackgroundLocationService.setInterval(intervaloGPS * 1000);
       const state = await BackgroundLocationService.start();
       if (!state.enabled) {
         console.warn("[RouteTrackingService] El servicio background no quedó activo");
+        rollbackRouteState();
         this.setStatus("idle");
         return false;
       }
       this.setStatus("active");
+      await this.captureRoutePoint();
       return true;
     } catch (e) {
       console.error("[RouteTrackingService] Error iniciando background location:", e);
+      rollbackRouteState();
       this.setStatus("idle");
       return false;
     }

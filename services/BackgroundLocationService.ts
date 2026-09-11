@@ -8,7 +8,8 @@ import GpsBitacoraService, {
   TRACKING_UPLOAD_INTERVAL_MS,
 } from "./GpsBitacoraService";
 import LocationService from "./LocationService";
-import StallAlertService from "./StallAlertService";
+import StallAlertService, { StallEvaluationResult } from "./StallAlertService";
+import { cancelStallNotification, showStallNotification } from "./StallNotificationNative";
 
 const TAG = "[BackgroundLocationService]";
 const DEFAULT_TOLERANCE_METERS = 30;
@@ -53,6 +54,7 @@ class BackgroundLocationService {
   private notificationAlertShown = false;
   private batteryOptimizationAlertShown = false;
   private wakeLockRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private stallNotificationToggle = false;
   private stallContext: {
     routeKey: string;
     idUsuario: number;
@@ -133,22 +135,57 @@ class BackgroundLocationService {
         ? stalledSeconds
         : DEFAULT_STALLED_SECONDS,
     };
+    console.log(TAG, "Contexto de alerta de varado actualizado", {
+      routeKey: this.stallContext.routeKey,
+      metrosTolerancia: this.stallContext.metrosTolerancia,
+      segundosVarado: this.stallContext.segundosVarado,
+    });
+  }
+
+  async refreshStallContext(): Promise<void> {
+    if (!this.isTaskRunning) return;
+    await this.loadStallContext();
   }
 
   private async evaluateStallAlert(
     latitude: number,
     longitude: number,
     timestamp?: number,
-  ): Promise<void> {
+  ): Promise<StallEvaluationResult | null> {
     const context = this.stallContext;
-    if (!context) return;
+    if (!context) return null;
 
-    await StallAlertService.evaluate({
+    return StallAlertService.evaluate({
       ...context,
       latitud: latitude,
       longitud: longitude,
       timestamp,
     });
+  }
+
+  private async publishStallNotification(
+    result: StallEvaluationResult,
+    latitude: number,
+    longitude: number,
+  ): Promise<void> {
+    if (result.enteredStall) {
+      const minutos = Math.max(1, Math.round(result.stalledMs / 60000));
+      const nombre = this.stallContext?.nombreUsuario?.trim() || `Usuario ${this.stallContext?.idUsuario ?? ""}`;
+      await showStallNotification(nombre, minutos, latitude, longitude).catch((error) =>
+        console.warn(TAG, "No se pudo publicar la alerta nativa de varado:", error),
+      );
+    }
+
+    if (result.recovered) {
+      this.stallNotificationToggle = false;
+      await cancelStallNotification().catch((error) =>
+        console.warn(TAG, "No se pudo cancelar la alerta nativa de varado:", error),
+      );
+    }
+
+    if (result.isStalled) {
+      this.stallNotificationToggle = !this.stallNotificationToggle;
+    }
   }
 
   private getNativeIntervalMs(): number {
@@ -251,11 +288,17 @@ class BackgroundLocationService {
       }
 
       this.lastCaptureAt = ahora;
+      let stallResult: StallEvaluationResult | null = null;
       if (this.isTaskRunning && generation === this.generation) {
         void this.uploadTrackingPendientes(generation, "gps-fix");
-        void this.evaluateStallAlert(latitude, longitude, position.timestamp).catch((error) =>
-          console.warn(TAG, "No se pudo evaluar alerta de varado:", error),
-        );
+        try {
+          stallResult = await this.evaluateStallAlert(latitude, longitude, position.timestamp);
+          if (stallResult) {
+            await this.publishStallNotification(stallResult, latitude, longitude);
+          }
+        } catch (error) {
+          console.warn(TAG, "No se pudo evaluar alerta de varado:", error);
+        }
       }
 
       const hora = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -263,7 +306,21 @@ class BackgroundLocationService {
       const estadoGps = this.gpsEnganchado
         ? `GPS: enganchado ±${acc}m`
         : `GPS: buscando satélites (±${acc}m)`;
-      this.updateNotificationText(`${estadoGps} — ${hora}`);
+      if (stallResult?.isStalled) {
+        const minutos = Math.max(1, Math.round(stallResult.stalledMs / 60000));
+        const descripcion = `${this.stallNotificationToggle ? "Alerta" : "GPS"}: ${
+          this.stallNotificationToggle
+            ? `lleva aproximadamente ${minutos} min sin movimiento`
+            : `${estadoGps} — ${hora}`
+        }`;
+        await this.updateNotificationText(
+          descripcion,
+          this.stallNotificationToggle ? "Alerta de recorrido" : "Xallapan",
+          this.stallNotificationToggle ? "#C62828" : "#007AFF",
+        );
+      } else {
+        await this.updateNotificationText(`${estadoGps} — ${hora}`);
+      }
       console.log(TAG, `Tracking registrado: cobertura=${conCobertura}`);
     } catch (error) {
       console.error(TAG, "Error procesando fix GPS:", error);
@@ -421,6 +478,32 @@ class BackgroundLocationService {
     }
   }
 
+  private async logBackgroundHealth(source: "foreground-start" | "watchdog"): Promise<void> {
+    let wakeLockHeld: boolean | null = null;
+    try {
+      const wakeLockModule = (NativeModules as any)?.WakeLockModule;
+      if (wakeLockModule && typeof wakeLockModule.isHeld === "function") {
+        wakeLockHeld = await wakeLockModule.isHeld();
+      }
+    } catch (error) {
+      console.warn(TAG, "No se pudo consultar el estado del WakeLock:", error);
+    }
+
+    const sinceLastFixMs = this.lastFixAt > 0 ? Date.now() - this.lastFixAt : null;
+    const foregroundRunning = BackgroundActions.isRunning();
+    console.log(TAG, "[Health] Estado del tracking", {
+      source,
+      isTaskRunning: this.isTaskRunning,
+      foregroundRunning,
+      sinceLastFixMs,
+      wakeLockHeld,
+    });
+
+    if (!foregroundRunning && this.isTaskRunning) {
+      console.warn(TAG, "[Health] El servicio JS sigue activo, pero BackgroundActions no reporta FGS activo");
+    }
+  }
+
   /**
    * Bucle del foreground service. Ya NO usa setTimeout como reloj de captura;
    * el reloj real es FusedLocationProviderClient vía watchPosition.
@@ -445,6 +528,8 @@ class BackgroundLocationService {
       await this.ensureReady();
       if (!this.isTaskRunning || this.generation !== gen) return;
       await this.loadStallContext();
+      this.stallNotificationToggle = false;
+      await cancelStallNotification().catch(() => undefined);
 
       console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
 
@@ -460,6 +545,7 @@ class BackgroundLocationService {
       if (!this.isTaskRunning || this.generation !== gen) return;
       this.lastFixAt = Date.now();
       console.log(TAG, "[TrackingUpload] Disparo inicial del foreground service", { gen });
+      await this.logBackgroundHealth("foreground-start");
       void this.uploadTrackingPendientes(gen, "foreground-start", true);
 
       while (this.isTaskRunning && this.generation === gen) {
@@ -467,6 +553,7 @@ class BackgroundLocationService {
         if (!this.isTaskRunning || this.generation !== gen) break;
 
         const sinceLastFix = Date.now() - this.lastFixAt;
+        await this.logBackgroundHealth("watchdog");
         const maxFixAgeMs = Math.max(MAX_FIX_AGE_MS, this.intervalMs * 3);
         if (sinceLastFix > maxFixAgeMs) {
           console.warn(TAG, `Sin fixes durante ${Math.round(sinceLastFix / 1000)}s, re-suscribiendo watchPosition...`);
@@ -497,14 +584,18 @@ class BackgroundLocationService {
   /**
    * Actualiza el texto de la notificación del foreground service.
    */
-  private async updateNotificationText(desc: string): Promise<void> {
+  private async updateNotificationText(
+    desc: string,
+    title = "Xallapan",
+    color = "#007AFF",
+  ): Promise<void> {
     try {
       if (BackgroundActions.isRunning()) {
         await BackgroundActions.updateNotification({
-          taskTitle: "Xallapan",
+          taskTitle: title,
           taskDesc: desc,
           taskIcon: { name: "ic_launcher", type: "mipmap" },
-          color: "#007AFF",
+          color,
         });
       }
     } catch (e) {
@@ -599,8 +690,6 @@ class BackgroundLocationService {
         }
       }
 
-      await this.requestIgnoreBatteryOptimizations();
-
       if (!BackgroundActions || typeof BackgroundActions.start !== "function") {
         throw new Error("El módulo de rastreo en segundo plano no está disponible. La app necesita ser reconstruida (pnpm run android).");
       }
@@ -622,13 +711,14 @@ class BackgroundLocationService {
         taskDesc: "Registrando tu recorrido en segundo plano",
         taskIcon: { name: "ic_launcher", type: "mipmap" },
         color: "#007AFF",
-        linkingURI: "xallapan://",
         foregroundServiceType: ["location"] as const,
       });
       console.log(TAG, `Servicio iniciado (gen=${currentGen})`);
 
       // Adquirir WakeLock parcial para evitar que Doze difiera las entregas de GPS
       await this.acquireWakeLock();
+
+      await this.requestIgnoreBatteryOptimizations();
     } catch (error) {
       this.isTaskRunning = false;
       LocationService.setWatchRestoreHandler(null);
@@ -670,13 +760,25 @@ class BackgroundLocationService {
     if (this.batteryOptimizationAlertShown) return;
     this.batteryOptimizationAlertShown = true;
 
-    try {
-      await Linking.sendIntent("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS", []);
-      console.log(TAG, "Solicitada exclusión de optimización de batería (settings)");
-    } catch (e) {
-      console.warn(TAG, "No se pudo abrir IGNORE_BATTERY_OPTIMIZATION_SETTINGS, abriendo app settings:", e);
-      LocationService.openSettings();
-    }
+    Alert.alert(
+      "Optimización de batería",
+      "Para mantener el GPS activo durante recorridos largos, puedes excluir Xallapan de la optimización de batería. El tracking ya está activo.",
+      [
+        { text: "Ahora no", style: "cancel" },
+        {
+          text: "Abrir configuración",
+          onPress: async () => {
+            try {
+              await Linking.sendIntent("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS", []);
+              console.log(TAG, "Solicitada exclusión de optimización de batería (settings)");
+            } catch (e) {
+              console.warn(TAG, "No se pudo abrir IGNORE_BATTERY_OPTIMIZATION_SETTINGS, abriendo app settings:", e);
+              void LocationService.openSettings();
+            }
+          },
+        },
+      ],
+    );
   }
 
   /**
@@ -736,7 +838,11 @@ class BackgroundLocationService {
   async stop(): Promise<State> {
     this.isTaskRunning = false;
     this.stallContext = null;
+    this.stallNotificationToggle = false;
     StallAlertService.reset();
+    await cancelStallNotification().catch((error) =>
+      console.warn(TAG, "No se pudo cancelar la alerta nativa al detener ruta:", error),
+    );
     this.generation++; // invalida callbacks/watchdogs del loop actual
     LocationService.setWatchRestoreHandler(null);
     this.stopWatch();

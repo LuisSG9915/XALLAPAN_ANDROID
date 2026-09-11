@@ -1,8 +1,5 @@
-import notifee, { AndroidImportance } from "@notifee/react-native";
 import { calcularDistancia } from "./LocationService";
 
-const CHANNEL_ID = "alertas-recorrido";
-const NOTIFICATION_ID = "alerta-varado";
 const DEFAULT_TOLERANCE_METERS = 30;
 const DEFAULT_STALLED_SECONDS = 30 * 60;
 
@@ -12,7 +9,7 @@ type StallPoint = {
   timestamp: number;
 };
 
-type StallEvaluation = {
+export type StallEvaluation = {
   routeKey: string;
   idUsuario: number;
   nombreUsuario?: string | null;
@@ -24,26 +21,17 @@ type StallEvaluation = {
   segundosVarado?: number | null;
 };
 
+export type StallEvaluationResult = {
+  isStalled: boolean;
+  enteredStall: boolean;
+  recovered: boolean;
+  stalledMs: number;
+};
+
 class StallAlertService {
   private routeKey: string | null = null;
   private anchor: StallPoint | null = null;
   private alerted = false;
-  private channelReady: Promise<void> | null = null;
-
-  private ensureChannel(): Promise<void> {
-    if (!this.channelReady) {
-      this.channelReady = notifee
-        .createChannel({
-          id: CHANNEL_ID,
-          name: "Alertas de recorrido",
-          importance: AndroidImportance.HIGH,
-          sound: "default",
-          vibration: true,
-        })
-        .then(() => undefined);
-    }
-    return this.channelReady;
-  }
 
   private resetForRoute(routeKey: string): void {
     if (this.routeKey === routeKey) return;
@@ -52,7 +40,7 @@ class StallAlertService {
     this.alerted = false;
   }
 
-  async evaluate(input: StallEvaluation): Promise<boolean> {
+  async evaluate(input: StallEvaluation): Promise<StallEvaluationResult> {
     this.resetForRoute(input.routeKey);
 
     const tolerance = Number(input.metrosTolerancia);
@@ -72,7 +60,7 @@ class StallAlertService {
 
     if (!this.anchor) {
       this.anchor = current;
-      return false;
+      return { isStalled: false, enteredStall: false, recovered: false, stalledMs: 0 };
     }
 
     const distancia = calcularDistancia(
@@ -83,46 +71,29 @@ class StallAlertService {
     );
 
     if (!Number.isFinite(distancia) || distancia > metrosTolerancia) {
+      const recovered = this.alerted;
       this.anchor = current;
       this.alerted = false;
-      await notifee.cancelNotification(NOTIFICATION_ID).catch(() => undefined);
-      return false;
+      return { isStalled: false, enteredStall: false, recovered, stalledMs: 0 };
     }
 
     const sinMovimientoMs = Math.max(0, current.timestamp - this.anchor.timestamp);
-    if (this.alerted || sinMovimientoMs < segundosVarado * 1000) return false;
+    if (this.alerted) {
+      return { isStalled: true, enteredStall: false, recovered: false, stalledMs: sinMovimientoMs };
+    }
+
+    if (sinMovimientoMs < segundosVarado * 1000) {
+      return { isStalled: false, enteredStall: false, recovered: false, stalledMs: sinMovimientoMs };
+    }
 
     this.alerted = true;
-    await this.ensureChannel();
-    const minutos = Math.max(1, Math.round(sinMovimientoMs / 60000));
-    const nombre = input.nombreUsuario?.trim() || `Usuario ${input.idUsuario}`;
-    await notifee.displayNotification({
-      id: NOTIFICATION_ID,
-      title: "Alerta de recorrido",
-      body: `${nombre} lleva aproximadamente ${minutos} min sin movimiento.`,
-      data: {
-        type: "stall_alert",
-        routeKey: input.routeKey,
-        idUsuario: String(input.idUsuario),
-        sucursal: String(input.sucursal),
-        latitud: String(input.latitud),
-        longitud: String(input.longitud),
-      },
-      android: {
-        channelId: CHANNEL_ID,
-        importance: AndroidImportance.HIGH,
-        pressAction: { id: "default" },
-        smallIcon: "ic_launcher",
-      },
-    });
-    return true;
+    return { isStalled: true, enteredStall: true, recovered: false, stalledMs: sinMovimientoMs };
   }
 
   reset(): void {
     this.routeKey = null;
     this.anchor = null;
     this.alerted = false;
-    void notifee.cancelNotification(NOTIFICATION_ID).catch(() => undefined);
   }
 }
 

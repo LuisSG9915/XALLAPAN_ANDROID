@@ -45,6 +45,7 @@ jest.mock("../services/BackgroundLocationService", () => ({
     stop: jest.fn(),
     waitForTrackingUpload: jest.fn(),
     setInterval: jest.fn(),
+    refreshStallContext: jest.fn(),
   },
 }));
 
@@ -130,6 +131,7 @@ describe("RouteTrackingService", () => {
 
     expect(result).toBe(45);
     expect(config.intervaloGPS).toBeUndefined();
+    expect(BackgroundLocationService.refreshStallContext).toHaveBeenCalled();
   });
 
   it("usa 30 metros y 30 minutos como fallback de varado", async () => {
@@ -176,6 +178,17 @@ describe("RouteTrackingService", () => {
     const started = await service.iniciarRuta();
 
     expect(started).toBe(false);
+    expect(config.rutaActiva).toBe(false);
+    expect(service.getStatus()).toBe("idle");
+  });
+
+  it("revierte la ruta si el servicio background devuelve disabled", async () => {
+    (BackgroundLocationService.start as jest.Mock).mockResolvedValueOnce({ enabled: false });
+
+    const started = await service.iniciarRuta();
+
+    expect(started).toBe(false);
+    expect(config.rutaActiva).toBe(false);
     expect(service.getStatus()).toBe("idle");
   });
 

@@ -206,4 +206,69 @@ if (fs.existsSync(codegenFile)) {
   }
 }
 
+// --- Parche para react-native-background-actions ---
+const backgroundActionsTask = path.join(
+  __dirname,
+  'node_modules',
+  'react-native-background-actions',
+  'android',
+  'src',
+  'main',
+  'java',
+  'com',
+  'asterinet',
+  'react',
+  'bgactions',
+  'RNBackgroundActionsTask.java',
+);
+
+if (fs.existsSync(backgroundActionsTask)) {
+  let backgroundActionsSrc = fs.readFileSync(backgroundActionsTask, 'utf8');
+  let backgroundActionsChanged = false;
+
+  if (backgroundActionsSrc.includes('RN_BACKGROUND_ACTIONS_CHANNEL"')) {
+    backgroundActionsSrc = backgroundActionsSrc.replace(
+      'RN_BACKGROUND_ACTIONS_CHANNEL"',
+      'RN_BACKGROUND_ACTIONS_CHANNEL_V2"',
+    );
+    backgroundActionsChanged = true;
+  }
+
+  if (backgroundActionsSrc.includes('NotificationCompat.PRIORITY_MIN')) {
+    backgroundActionsSrc = backgroundActionsSrc.replace(
+      'NotificationCompat.PRIORITY_MIN',
+      'NotificationCompat.PRIORITY_DEFAULT',
+    );
+    backgroundActionsChanged = true;
+  }
+
+  const lowImportanceChannel = `            final int importance = NotificationManager.IMPORTANCE_LOW;
+            final NotificationChannel channel = new NotificationChannel(CHANNEL_ID, taskTitle, importance);
+            channel.setDescription(taskDesc);`;
+  const silentNormalChannel = `            final int importance = NotificationManager.IMPORTANCE_DEFAULT;
+            final NotificationChannel channel = new NotificationChannel(CHANNEL_ID, taskTitle, importance);
+            channel.setDescription(taskDesc);
+            channel.setSound(null, null);
+            channel.enableVibration(false);`;
+
+  if (backgroundActionsSrc.includes(lowImportanceChannel)) {
+    backgroundActionsSrc = backgroundActionsSrc.replace(lowImportanceChannel, silentNormalChannel);
+    backgroundActionsChanged = true;
+  }
+
+  if (backgroundActionsChanged) {
+    fs.writeFileSync(backgroundActionsTask, backgroundActionsSrc, 'utf8');
+    console.log('Parche de visibilidad GPS aplicado correctamente en', backgroundActionsTask);
+  } else if (
+    backgroundActionsSrc.includes('RN_BACKGROUND_ACTIONS_CHANNEL_V2') &&
+    backgroundActionsSrc.includes('NotificationCompat.PRIORITY_DEFAULT') &&
+    backgroundActionsSrc.includes('channel.setSound(null, null)')
+  ) {
+    console.log('El parche de visibilidad GPS ya parece estar aplicado.');
+  } else {
+    console.error('No se encontró el código esperado de react-native-background-actions.');
+    process.exit(1);
+  }
+}
+
 console.log('postinstall completado.');

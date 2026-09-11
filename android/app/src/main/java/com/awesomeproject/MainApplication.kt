@@ -20,6 +20,7 @@ class MainApplication : Application(), ReactApplication {
           add(BatteryOptimizationPackage())
           add(WakeLockPackage())
           add(AppUpdatePackage())
+          add(StallNotificationPackage())
         },
     )
   }

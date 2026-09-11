@@ -685,14 +685,10 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
         return null;
       }
 
-      if (!config.rutaActiva) {
-        console.log("[App] Ruta comercial abierta, pero el tracking aún no fue iniciado por el vendedor.");
-        return null;
-      }
-
-      console.log("[App] Restaurando tracking GPS de una ruta activa...");
+      const action = config.rutaActiva ? "restaurando" : "iniciando automáticamente";
+      console.log(`[App] Ruta comercial abierta; ${action} tracking GPS...`);
       const started = await RouteTrackingService.iniciarRuta();
-      console.log(`[App] Tracking GPS restaurado: ${started}`);
+      console.log(`[App] Tracking GPS ${action}: ${started}`);
       return null;
     } catch (trackingError) {
       console.error("[App] Error al sincronizar tracking GPS:", trackingError);
@@ -992,7 +988,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const priorityOrder = ["cumplimiento", "pedidos", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
   // Menús que solo se muestran al usuario ID 4
-  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion", "mapa"];
+  const adminOnlyMenus = ["dataview", "billing", "envaseoperacion"];
   const isAdmin = Number(currentUser?.id ?? currentUser?.idUsuario) === 4;
 
   useEffect(() => {
