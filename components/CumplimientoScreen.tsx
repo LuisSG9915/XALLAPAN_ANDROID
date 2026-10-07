@@ -554,8 +554,15 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     console.log("[Cumplimiento] Iniciando validación de ubicación...");
 
+    // Si el cliente fue reubicado, omitir validación de ubicación
+    const omitirValidacionUbicacion =
+      ReubicacionService.getInstance().clienteReubicadoRecientemente(visita.idCliente) ||
+      ReubicacionService.getInstance().clienteYaReubicado(visita.idCliente);
+
     // Verificar ubicación del vendedor
-    if (visita.latitud && visita.longitud) {
+    if (omitirValidacionUbicacion) {
+      console.log("[Cumplimiento] Cliente reubicado, se omite validación de ubicación");
+    } else if (visita.latitud && visita.longitud) {
       const ubicacionValida = await validarUbicacionConModal(
         visita.latitud,
         visita.longitud,
@@ -713,7 +720,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const t0 = Date.now();
     console.log(`[Cumplimiento] handleIrAVentas INICIO (t=0ms) -> cliente: ${visita.idCliente} ${visita.nombreCliente}`);
 
-    if (visita.latitud && visita.longitud) {
+    const omitirValidacionUbicacion =
+      ReubicacionService.getInstance().clienteReubicadoRecientemente(visita.idCliente) ||
+      ReubicacionService.getInstance().clienteYaReubicado(visita.idCliente);
+
+    if (omitirValidacionUbicacion) {
+      console.log(`[Cumplimiento] handleIrAVentas: Cliente reubicado, se omite validación de ubicación`);
+    } else if (visita.latitud && visita.longitud) {
       console.log(`[Cumplimiento] handleIrAVentas validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await validarUbicacionConModal(
         visita.latitud,
@@ -744,7 +757,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     const t0 = Date.now();
     console.log(`[Cumplimiento] handleIrAVentasCliente INICIO (t=0ms) -> cliente: ${cliente.id} ${cliente.nombre}`);
 
-    if (cliente.latitud && cliente.longitud) {
+    const omitirValidacionUbicacion =
+      ReubicacionService.getInstance().clienteReubicadoRecientemente(cliente.id) ||
+      ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
+
+    if (omitirValidacionUbicacion) {
+      console.log(`[Cumplimiento] handleIrAVentasCliente: Cliente reubicado, se omite validación de ubicación`);
+    } else if (cliente.latitud && cliente.longitud) {
       console.log(`[Cumplimiento] handleIrAVentasCliente validando ubicación... (t=${Date.now() - t0}ms)`);
       const ubicacionValida = await validarUbicacionConModal(
         cliente.latitud,
@@ -797,15 +816,40 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             setReubicandoCliente(true);
             try {
               console.log("[Cumplimiento] Obteniendo ubicación GPS para reubicación...");
-              const ubicacion = await LocationService.getBestLocation();
+              const ubicacion = await LocationService.getBestLocation(5, 10000, undefined, undefined, undefined, 3);
 
               if (!ubicacion) {
-                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado.");
+                Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado y estés a cielo abierto.");
                 setReubicandoCliente(false);
                 return;
               }
 
-              console.log("[Cumplimiento] Ubicación obtenida:", ubicacion);
+              const diagnostico = LocationService.getUltimoDiagnosticoGps();
+              const accuracy = ubicacion.accuracy ?? 999;
+              const numFixes = diagnostico.numFixes;
+
+              console.log("[Cumplimiento] Ubicación obtenida:", ubicacion, "Diagnóstico:", diagnostico);
+
+              if (accuracy > 25 || numFixes < 3) {
+                Alert.alert(
+                  "Precisión GPS insuficiente",
+                  `No se puede reubicar el cliente con la precisión actual:\n\n` +
+                  `• Precisión: ±${Math.round(accuracy)} m (se requiere ±25 m o mejor)\n` +
+                  `• Lecturas GPS: ${numFixes} (se requieren al menos 3)\n\n` +
+                  `Por favor:\n` +
+                  `• Sal a cielo abierto\n` +
+                  `• Espera 1-2 minutos sin moverte\n` +
+                  `• Intenta de nuevo`,
+                );
+                setReubicandoCliente(false);
+                return;
+              }
+
+              // Buscar coordenadas anteriores del cliente
+              const clienteEnLista = clientes.find((c) => c.id === cliente.id);
+              const visitaEnLista = visitas.find((v) => v.idCliente === cliente.id);
+              const latAnterior = cliente.latitud ?? clienteEnLista?.latitud ?? visitaEnLista?.latitud ?? undefined;
+              const lngAnterior = cliente.longitud ?? clienteEnLista?.longitud ?? visitaEnLista?.longitud ?? undefined;
 
               const reubicacionId = await ReubicacionService.getInstance().registrarReubicacion(
                 cliente.id,
@@ -813,6 +857,12 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 ubicacion.longitude,
                 currentUser.id,
                 currentSucursal,
+                {
+                  latitudAnterior: latAnterior,
+                  longitudAnterior: lngAnterior,
+                  accuracy: accuracy,
+                  numFixes: numFixes,
+                },
               );
 
               if (reubicacionId) {
@@ -848,9 +898,15 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 // Recargar clientes y visitas en segundo plano (sin pantalla de carga)
                 cargarClientes();
                 cargarDatos(fechaSeleccionada, currentSucursal, false);
-                Alert.alert("Éxito", "La ubicación del cliente ha sido actualizada. Ya puedes vender o visitar.");
+                Alert.alert(
+                  "¡Reubicación exitosa!",
+                  `Cliente reubicado correctamente.\n\nNuevas coordenadas:\nLatitud: ${ubicacion.latitude.toFixed(6)}\nLongitud: ${ubicacion.longitude.toFixed(6)}\n\nYa puedes vender o visitar al cliente.`,
+                );
               } else {
-                Alert.alert("Error", "No se pudo registrar la reubicación.");
+                Alert.alert(
+                  "Error",
+                  "No se pudo registrar la reubicación. Es posible que el cliente ya haya sido reubicado el día de hoy.",
+                );
               }
             } catch (error) {
               console.error("[Cumplimiento] Error al reubicar cliente:", error);
@@ -895,7 +951,9 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
     if (!visitaHoy) {
       // Si no hay visita programada, validar ubicación antes de permitir crear visita manual
-      const omitirValidacionUbicacion = ReubicacionService.getInstance().clienteReubicadoRecientemente(cliente.id);
+      const omitirValidacionUbicacion =
+        ReubicacionService.getInstance().clienteReubicadoRecientemente(cliente.id) ||
+        ReubicacionService.getInstance().clienteYaReubicado(cliente.id);
 
       if (!omitirValidacionUbicacion) {
         if (cliente.latitud && cliente.longitud) {
@@ -1162,7 +1220,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             {usuarioPermisoReubicacion && !esPedidoCentral && (
               <TouchableOpacity
                 style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
-                onPress={() => handleReubicarCliente({ id: item.idCliente, nombre: item.nombreCliente || "Cliente" })}
+                onPress={() =>
+                  handleReubicarCliente({
+                    id: item.idCliente,
+                    nombre: item.nombreCliente || "Cliente",
+                    latitud: item.latitud,
+                    longitud: item.longitud,
+                  })
+                }
                 disabled={reubicandoCliente}
               >
                 {reubicandoCliente ? (
