@@ -103,6 +103,7 @@ describe("BackgroundLocationService tracking upload", () => {
     service.backgroundTaskInFlight = null;
     service.captureInFlight = false;
     service.gpsEnganchado = false;
+    service.fixesRecientes = [];
     service.stallNotificationToggle = false;
     service.stallContext = {
       routeKey: "42-7-route",
@@ -332,5 +333,63 @@ describe("BackgroundLocationService tracking upload", () => {
     service.generation = 2;
     await jest.advanceTimersByTimeAsync(120000);
     await taskPromise;
+  });
+
+  describe("historial de fixes confiables", () => {
+    it("acredita un fix de buena calidad aunque no llegue a persistirse", async () => {
+      // El registro debe ocurrir ANTES del return de captureInFlight: si no,
+      // solo entrarían los fixes que además pasan el throttle de 30 s.
+      service.captureInFlight = true;
+      await service.onLocationFix(
+        {
+          coords: { latitude: 19.55, longitude: -96.95, accuracy: 8 },
+          timestamp: Date.now(),
+        } as any,
+        1,
+      );
+
+      expect(service.getFixesRecientes(5 * 60_000, 25)).toHaveLength(1);
+      service.captureInFlight = false;
+    });
+
+    it("no registra fixes con accuracy mayor a 25 m", async () => {
+      await service.onLocationFix(
+        {
+          coords: { latitude: 19.55, longitude: -96.95, accuracy: 400 },
+          timestamp: Date.now(),
+        } as any,
+        1,
+      );
+
+      expect(service.getFixesRecientes(5 * 60_000, 25)).toEqual([]);
+    });
+
+    it("nunca supera el máximo de 12 fixes", async () => {
+      for (let i = 0; i < 20; i += 1) {
+        await service.onLocationFix(
+          {
+            coords: { latitude: 19.55 + i * 1e-5, longitude: -96.95, accuracy: 8 },
+            timestamp: Date.now(),
+          } as any,
+          1,
+        );
+      }
+
+      expect(service.getFixesRecientes(5 * 60_000, 25)).toHaveLength(12);
+    });
+
+    it("devuelve [] si el servicio no está arrancado", async () => {
+      service.isTaskRunning = false;
+
+      await service.onLocationFix(
+        {
+          coords: { latitude: 19.55, longitude: -96.95, accuracy: 8 },
+          timestamp: Date.now(),
+        } as any,
+        1,
+      );
+
+      expect(service.getFixesRecientes(5 * 60_000, 25)).toEqual([]);
+    });
   });
 });

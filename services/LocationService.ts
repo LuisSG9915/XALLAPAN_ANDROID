@@ -14,7 +14,7 @@ export type LocationCoordinates = {
   provider?: string;
 };
 
-export type MotivoValidacion = "ok" | "ok_cache" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango" | "red_no_gnss";
+export type MotivoValidacion = "ok" | "ok_cache" | "ok_tracking" | "sin_permiso" | "sin_senal" | "precision_baja" | "fuera_de_rango" | "red_no_gnss";
 
 export type ValidacionUbicacionResultado = {
   valido: boolean;
@@ -57,6 +57,20 @@ export const BUFFER_MAXIMO = 20; // metros
 // el mismo cliente validado hasta 7 veces en 2.5 min. La ventana es corta a
 // propósito (anti-trampa: en 3 min el vendedor no puede alejarse mucho).
 export const TTL_VALIDACION_CACHE_MS = 3 * 60 * 1000; // 3 minutos
+
+// --- Corroboración con el tracking de ruta (`ok_tracking`) -------------------
+// El GPS puede caer justo cuando el vendedor está en la puerta (local cerrado,
+// techo metálico, mercado). En ese momento la lectura en vivo devuelve un fix
+// de red y bloquea una venta legítima, aunque el tracking de ruta sí tenga
+// evidencia de dónde estuvo el vendedor segundos antes.
+// SOLO se usa cuando la lectura falló POR FALTA DE GPS. Nunca sobre
+// `fuera_de_rango` ni sobre `sin_permiso`.
+export const HABILITAR_OK_TRACKING = true; // rollback: poner false
+export const TRACKING_EVIDENCIA_VENTANA_MS = 5 * 60 * 1000;
+export const TRACKING_EVIDENCIA_ACCURACY_MAX = 25; // metros
+export const TRACKING_VETO_VENTANA_MS = 2 * 60 * 1000;
+export const TRACKING_VETO_ACCURACY_MAX = 30; // metros
+export const TRACKING_VETO_MARGEN_M = 30; // metros
 
 /**
  * Regla ÚNICA de rango, compartida por la validación real y por las pantallas
@@ -113,6 +127,8 @@ class LocationService {
     accuracy: number;
     timestamp: number;
   } | null = null;
+  // Solo para pruebas: permite ejercitar el rollback sin recompilar la constante.
+  private okTrackingHabilitadoOverride: boolean | null = null;
 
   /** Versión del SDK de Android (0 si no es Android). */
   private getAndroidSdk(): number {
@@ -775,6 +791,118 @@ class LocationService {
   }
 
   /**
+   * Busca evidencia de que el vendedor estuvo dentro del rango del cliente en
+   * los últimos minutos, según el tracking de ruta.
+   *
+   * Devuelve null (falla segura) si:
+   *  - está deshabilitado,
+   *  - no hay fixes recientes con la calidad suficiente,
+   *  - ningún fix cae dentro del rango, o
+   *  - hay evidencia reciente y buena de que el vendedor ya se alejó (veto).
+   */
+  private corroborarPresenciaConTracking(
+    clienteLat: number,
+    clienteLng: number,
+    metrosPermitidos: number,
+  ): { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number } | null {
+    if (!HABILITAR_OK_TRACKING || this.okTrackingHabilitadoOverride === false) return null;
+
+    try {
+      const BGService = require("./BackgroundLocationService").default;
+      if (typeof BGService?.getFixesRecientes !== "function") return null;
+
+      // Veto: evidencia reciente y buena de que el vendedor ya se fue.
+      // Manda sobre la evidencia positiva de hace minutos.
+      const recientesBuenos: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
+        BGService.getFixesRecientes(TRACKING_VETO_VENTANA_MS, TRACKING_VETO_ACCURACY_MAX) ?? [];
+
+      for (const f of recientesBuenos) {
+        const dist = calcularDistancia(f.latitud, f.longitud, clienteLat, clienteLng);
+        if (dist > metrosPermitidos + TRACKING_VETO_MARGEN_M) {
+          console.log(
+            `[LocationService] ok_tracking vetado: fix reciente a ${Math.round(dist)} m ` +
+              `(permitido ${metrosPermitidos} m, accuracy ±${Math.round(f.accuracy)} m)`,
+          );
+          return null;
+        }
+      }
+
+      const evidencia: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
+        BGService.getFixesRecientes(TRACKING_EVIDENCIA_VENTANA_MS, TRACKING_EVIDENCIA_ACCURACY_MAX) ?? [];
+
+      let mejor: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number } | null = null;
+
+      for (const f of evidencia) {
+        const dist = calcularDistancia(f.latitud, f.longitud, clienteLat, clienteLng);
+        // Estricto a propósito: SIN buffer de accuracy sobre el rango.
+        if (dist > metrosPermitidos) continue;
+        if (!mejor || dist < mejor.distancia) {
+          mejor = {
+            distancia: dist,
+            accuracy: f.accuracy,
+            latitud: f.latitud,
+            longitud: f.longitud,
+            timestamp: f.timestamp,
+          };
+        }
+      }
+
+      if (!mejor) return null;
+
+      console.log(
+        `[LocationService] Evidencia de tracking: ${Math.round(mejor.distancia)} m del cliente, ` +
+          `hace ${Math.round((Date.now() - mejor.timestamp) / 1000)} s (±${Math.round(mejor.accuracy)} m)`,
+      );
+      return mejor;
+    } catch (e) {
+      console.warn("[LocationService] No se pudo corroborar con tracking:", e);
+      return null;
+    }
+  }
+
+  private construirResultadoOkTracking(
+    clienteLat: number,
+    clienteLng: number,
+    metrosPermitidos: number,
+    corr: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number },
+  ): ValidacionUbicacionResultado {
+    // Se guarda en caché igual que un `ok`: si el vendedor revalida en <3 min,
+    // la segunda llamada resuelve al instante como `ok_cache`.
+    this.ultimaValidacionOk = {
+      clienteLat,
+      clienteLng,
+      metrosPermitidos,
+      distancia: corr.distancia,
+      accuracy: corr.accuracy,
+      timestamp: Date.now(),
+    };
+
+    console.log(
+      `[LocationService] Validación VÁLIDA por tracking (ok_tracking): ` +
+        `${Math.round(corr.distancia)} m del cliente, evidencia de hace ` +
+        `${Math.round((Date.now() - corr.timestamp) / 1000)} s`,
+    );
+
+    return {
+      valido: true,
+      motivo: "ok_tracking",
+      distancia: corr.distancia,
+      accuracy: corr.accuracy,
+      metrosPermitidos,
+      ubicacion: {
+        latitude: corr.latitud,
+        longitude: corr.longitud,
+        accuracy: corr.accuracy,
+        timestamp: corr.timestamp,
+      },
+      // Igual que `ok_cache`: no hubo lectura en vivo válida que reportar.
+      numFixes: 0,
+      peorAccuracy: 0,
+      tiempoMs: 0,
+    };
+  }
+
+  /**
    * Valida si el vendedor está dentro del rango permitido de un cliente.
    *
    * Estrategia de "umbral relativo al rango" con cortes tempranos:
@@ -854,6 +982,10 @@ class LocationService {
     );
     const diag = this.getUltimoDiagnosticoGps();
     if (!ubicacion) {
+      const corr = this.corroborarPresenciaConTracking(clienteLat, clienteLng, metrosPermitidos);
+      if (corr) {
+        return this.construirResultadoOkTracking(clienteLat, clienteLng, metrosPermitidos, corr);
+      }
       return { valido: false, motivo: "sin_senal", metrosPermitidos, ...diag };
     }
 
@@ -878,6 +1010,11 @@ class LocationService {
     // 2) La posición parece estar fuera de rango (o el accuracy es absurdo). Si la
     //    precisión es baja no podemos afirmar que esté fuera: pedimos reintentar.
     if (accuracy > PRECISION_MAXIMA_ACEPTABLE) {
+      const corr = this.corroborarPresenciaConTracking(clienteLat, clienteLng, metrosPermitidos);
+      if (corr) {
+        return this.construirResultadoOkTracking(clienteLat, clienteLng, metrosPermitidos, corr);
+      }
+
       const esRedCelular = accuracy >= 100 && accuracy % 50 === 0;
       const motivo: MotivoValidacion = esRedCelular ? "red_no_gnss" : "precision_baja";
       console.warn(

@@ -20,6 +20,21 @@ const DEFAULT_STALLED_SECONDS = 30 * 60;
 const WATCHDOG_INTERVAL_MS = 120000; // 2 minutos
 const MAX_FIX_AGE_MS = 180000; // 3 minutos sin fix -> re-suscribir
 
+// Historial acotado de fixes de buena calidad, para poder corroborar una
+// validación cuando el GPS falla justo en el momento de vender.
+// NO reemplaza la lectura en vivo: solo acredita que el vendedor estuvo
+// físicamente en el punto hace unos minutos.
+const FIXES_BUENOS_MAX = 12;
+const FIXES_BUENOS_RETENCION_MS = 10 * 60 * 1000;
+const FIX_BUENO_ACCURACY_MAX = 25; // metros
+
+export type FixTrackingConfiable = {
+  latitud: number;
+  longitud: number;
+  accuracy: number;
+  timestamp: number;
+};
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export type State = { enabled: boolean };
@@ -71,6 +86,8 @@ class BackgroundLocationService {
     timestamp: number;
   } | null = null;
 
+  private fixesRecientes: FixTrackingConfiable[] = [];
+
   private constructor() {}
 
   static getInstance(): BackgroundLocationService {
@@ -82,6 +99,31 @@ class BackgroundLocationService {
 
   getUltimoFixTracking(): { latitud: number; longitud: number; accuracy: number; timestamp: number } | null {
     return this.ultimoFixTracking;
+  }
+
+  /**
+   * Fixes recientes con calidad suficiente para acreditar presencia en un punto.
+   * Devuelve [] si no hay evidencia (falla segura).
+   */
+  getFixesRecientes(maxEdadMs: number, maxAccuracy: number): FixTrackingConfiable[] {
+    const ahora = Date.now();
+    return this.fixesRecientes.filter(
+      (f) => ahora - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy,
+    );
+  }
+
+  private registrarFixReciente(position: GeoPosition): void {
+    const { latitude, longitude, accuracy } = position.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const acc = accuracy ?? 999;
+    if (acc > FIX_BUENO_ACCURACY_MAX) return;
+
+    const ahora = Date.now();
+    const ts = position.timestamp ?? ahora;
+    this.fixesRecientes.push({ latitud: latitude, longitud: longitude, accuracy: acc, timestamp: ts });
+    if (this.fixesRecientes.length > FIXES_BUENOS_MAX) this.fixesRecientes.shift();
+    this.fixesRecientes = this.fixesRecientes.filter((f) => ahora - f.timestamp <= FIXES_BUENOS_RETENCION_MS);
   }
 
   /**
@@ -258,6 +300,8 @@ class BackgroundLocationService {
       accuracy: position.coords.accuracy ?? 999,
       timestamp: position.timestamp ?? ahora,
     };
+
+    this.registrarFixReciente(position);
 
     this.evaluateGpsState(position.coords.accuracy ?? 999);
 
