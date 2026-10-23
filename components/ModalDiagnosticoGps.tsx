@@ -41,7 +41,7 @@ const MAP_HEIGHT = 280;
 const motivoLabel: Record<string, string> = {
   fuera_de_rango: "Fuera de rango",
   precision_baja: "Precisión baja",
-  sin_senal: "Sin señal GPS",
+  sin_senal: "GPS sin lectura",
   red_no_gnss: "Red celular (sin GPS)",
 };
 
@@ -151,6 +151,17 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
   const motivo = data ? motivoLabel[data.motivo] || data.motivo : "";
   const tieneMapa = data && data.vendedorLat != null && data.vendedorLng != null;
 
+  // "sin_senal" es "0 lecturas GPS en la ventana de espera", no "sin cobertura".
+  // Se explica aquí para no mandar al vendedor a revisar la red.
+  const detalle = useMemo(() => {
+    if (!data || data.motivo !== "sin_senal") return "";
+    const segundos = Math.round((data.tiempoMs ?? 0) / 1000) || 6;
+    return (
+      `El GPS no entregó lecturas en ${segundos} s. ` +
+      "Habitualmente no es falta de cobertura: sal a cielo abierto y espera 1-2 min."
+    );
+  }, [data]);
+
   console.log("[ModalDiagnosticoGps] tieneMapa:", tieneMapa, "vendedorLat:", data?.vendedorLat, "vendedorLng:", data?.vendedorLng);
   console.log("[ModalDiagnosticoGps] HTML length:", html?.length ?? 0);
 
@@ -165,6 +176,12 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
               <Icon name="close" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
+
+          {detalle !== "" && (
+            <View style={styles.detailBox}>
+              <Text style={styles.detailText}>{detalle}</Text>
+            </View>
+          )}
 
           {tieneMapa && (
             <View style={{ height: MAP_HEIGHT, width: SCREEN_WIDTH, backgroundColor: '#f0f0f0' }}>
@@ -254,6 +271,12 @@ const styles = StyleSheet.create({
   },
   headerTitle: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold" },
   closeBtn: { padding: SPACING.xs },
+  detailBox: {
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+  },
+  detailText: { ...TYPOGRAPHY.caption, color: COLORS.textPrimary },
   webview: { height: MAP_HEIGHT, width: SCREEN_WIDTH },
   noMap: { justifyContent: "center", alignItems: "center", backgroundColor: COLORS.surface },
   noMapText: { ...TYPOGRAPHY.caption, marginTop: SPACING.s },

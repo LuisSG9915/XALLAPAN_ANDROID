@@ -601,7 +601,7 @@ class BackgroundLocationService {
         if (sinceLastFix > maxFixAgeMs) {
           console.warn(TAG, `Sin fixes durante ${Math.round(sinceLastFix / 1000)}s, re-suscribiendo watchPosition...`);
           await this.startWatch(gen);
-          this.updateNotificationText(`Sin señal GPS ${Math.round(sinceLastFix / 1000)}s - reconectando...`);
+          this.updateNotificationText(`GPS sin lecturas ${Math.round(sinceLastFix / 1000)}s - reconectando...`);
         }
 
         console.log(TAG, "[TrackingUpload] Disparo periódico del watchdog", {
