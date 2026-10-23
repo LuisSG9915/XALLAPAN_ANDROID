@@ -68,7 +68,6 @@ class BackgroundLocationService {
   // Evita que el Alert de notificaciones salte en cada reintento del servicio.
   private notificationAlertShown = false;
   private batteryOptimizationAlertShown = false;
-  private wakeLockRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private stallNotificationToggle = false;
   private stallContext: {
     routeKey: string;
@@ -828,21 +827,21 @@ class BackgroundLocationService {
   /**
    * Adquiere un WakeLock parcial para evitar que el dispositivo entre en
    * Doze profundo mientras se está haciendo tracking GPS.
+   *
+   * El lock nativo se sostiene SIN timeout mientras la ruta esté abierta y se
+   * libera en releaseWakeLock() (stop de la ruta) o cuando muere el proceso.
+   *
+   * A propósito NO se renueva desde JS: un setInterval no corre cuando el
+   * sistema duerme el proceso, que es exactamente el escenario a cubrir. Antes
+   * se hacía así (lock de 30 min + renovación a los 25) y en campo se veía como
+   * ráfagas con retraso de subida de 15+ minutos.
    */
   private async acquireWakeLock(): Promise<void> {
     if (Platform.OS !== "android") return;
     try {
       const { WakeLockModule } = NativeModules as any;
       await WakeLockModule.acquire();
-      if (!this.wakeLockRefreshTimer) {
-        this.wakeLockRefreshTimer = setInterval(() => {
-          if (!this.isTaskRunning) return;
-          WakeLockModule.acquire().catch((error: unknown) =>
-            console.warn(TAG, "No se pudo renovar WakeLock:", error),
-          );
-        }, 25 * 60 * 1000);
-      }
-      console.log(TAG, "WakeLock adquirido con renovación periódica");
+      console.log(TAG, "WakeLock parcial adquirido (indefinido hasta el stop de la ruta)");
     } catch (e) {
       console.warn(TAG, "No se pudo adquirir WakeLock:", e);
     }
@@ -853,10 +852,6 @@ class BackgroundLocationService {
    */
   private async releaseWakeLock(): Promise<void> {
     if (Platform.OS !== "android") return;
-    if (this.wakeLockRefreshTimer) {
-      clearInterval(this.wakeLockRefreshTimer);
-      this.wakeLockRefreshTimer = null;
-    }
     try {
       const { WakeLockModule } = NativeModules as any;
       await WakeLockModule.release();
