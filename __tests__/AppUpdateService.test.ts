@@ -36,7 +36,7 @@ jest.mock("react-native-device-info", () => ({
   __esModule: true,
   default: {
     getBuildNumber: jest.fn(() => "3"),
-    getVersion: jest.fn(() => "1.3.8"),
+    getVersion: jest.fn(() => "1.4"),
   },
 }));
 

@@ -1,4 +1,9 @@
 ************************************************
+cd android
+./gradlew.bat assembleRelease
+C:\Users\Administrador\.xallapan\android-build\outputs\apk\release\
+************************************************
+
 
 ABRIMOS EL EMULADOR
 
