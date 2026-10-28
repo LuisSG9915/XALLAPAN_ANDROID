@@ -369,3 +369,65 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(getFixesPersistidosMock).not.toHaveBeenCalled();
   });
 });
+
+describe("getBestLocation — protección contra saltos espurios (Caso real 373510)", () => {
+  beforeEach(() => {
+    (LocationService.getBestLocation as any).mockRestore?.();
+  });
+
+  it("no reemplaza un fix válido por un salto espurio a 419 m ni corta en falso fuera_de_rango", async () => {
+    const Geolocation = require("react-native-geolocation-service").default;
+    const now = Date.now();
+
+    // Fix #1: a ~38 m del cliente con ±18.28 m
+    const fix1 = {
+      coords: {
+        latitude: desplazarLat(38),
+        longitude: CLIENTE.lng,
+        accuracy: 18.28,
+      },
+      timestamp: now,
+    };
+
+    // Fix #2: salto espurio a 419 m en 3 segundos (salto a > 500 km/h)
+    const fix2 = {
+      coords: {
+        latitude: desplazarLat(419),
+        longitude: CLIENTE.lng,
+        accuracy: 11.9,
+      },
+      timestamp: now + 3000,
+    };
+
+    // Fix #3: confirmación en la posición real a los 4 segundos (concordante con fix1)
+    const fix3 = {
+      coords: {
+        latitude: desplazarLat(38.5),
+        longitude: CLIENTE.lng,
+        accuracy: 15.0,
+      },
+      timestamp: now + 4000,
+    };
+
+    (Geolocation.watchPosition as jest.Mock).mockImplementation((success: Function) => {
+      // Simular entrega de los tres fixes secuenciales
+      success(fix1);
+      success(fix2);
+      success(fix3);
+      return 1;
+    });
+
+    const res = await LocationService.getBestLocation(
+      5,
+      6000,
+      undefined,
+      (c) => c.accuracy! <= 50 && Math.abs(c.latitude - fix1.coords.latitude) < 0.0005,
+      (c) => c.accuracy! <= 50 && Math.abs(c.latitude - fix2.coords.latitude) < 0.0005,
+    );
+
+    // Debe conservar la posición real de ~38 m y no el salto espurio de 419 m
+    expect(res).toBeDefined();
+    expect(res?.latitude).toBeCloseTo(fix1.coords.latitude, 4);
+    expect(res?.latitude).not.toBeCloseTo(fix2.coords.latitude, 3);
+  });
+});

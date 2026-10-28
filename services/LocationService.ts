@@ -606,6 +606,8 @@ class LocationService {
     return new Promise((resolve) => {
       let mejor: LocationCoordinates | null = null;
       let segundoMejor: LocationCoordinates | null = null;
+      let ultimoFixRecibido: LocationCoordinates | null = null;
+      let fixDescartadoPorSalto: LocationCoordinates | null = null;
       let lecturasRecibidas = 0;
       let peorAccuracy = 0;
       let settled = false;
@@ -728,17 +730,93 @@ class LocationService {
             return;
           }
 
-          lecturasRecibidas++;
-          if (accuracy > peorAccuracy) {
-            peorAccuracy = accuracy;
-          }
-          if (!mejor || accuracy < (mejor.accuracy ?? 999)) {
-            segundoMejor = mejor;
+          // Detección de salto físicamente imposible (> 150 km/h) contra la lectura previa de la misma ráfaga
+          const VELOCIDAD_MAXIMA_RAFAGA_MPS = 41.7; // 150 km/h
+          let esSaltoImposible = false;
+          if (ultimoFixRecibido) {
+            const dtFix = Math.max((Date.now() - (ultimoFixRecibido.timestamp ?? inicio)) / 1000, 1);
+            if (dtFix <= 10) {
+              const distFix = calcularDistancia(
+                ultimoFixRecibido.latitude,
+                ultimoFixRecibido.longitude,
+                coords.latitude,
+                coords.longitude,
+              );
+              const velFix = distFix / dtFix;
+              if (velFix > VELOCIDAD_MAXIMA_RAFAGA_MPS) {
+                const dtReancla = fixDescartadoPorSalto
+                  ? Math.max((Date.now() - (fixDescartadoPorSalto.timestamp ?? inicio)) / 1000, 1)
+                  : 0;
+                const velReancla = fixDescartadoPorSalto
+                  ? calcularDistancia(
+                      fixDescartadoPorSalto.latitude,
+                      fixDescartadoPorSalto.longitude,
+                      coords.latitude,
+                      coords.longitude,
+                    ) / dtReancla
+                  : Infinity;
+
+                if (fixDescartadoPorSalto && dtReancla <= 10 && velReancla <= VELOCIDAD_MAXIMA_RAFAGA_MPS) {
+                  console.log(
+                    `[LocationService] Ráfaga reanclada tras salto: ${Math.round(velReancla * 3.6)} km/h entre dos fixes concordantes`,
+                  );
+                  const accAncla = fixDescartadoPorSalto.accuracy ?? 999;
+                  mejor = accAncla <= accuracy ? fixDescartadoPorSalto : coords;
+                  segundoMejor = accAncla <= accuracy ? coords : fixDescartadoPorSalto;
+                  lecturasRecibidas = 2;
+                  peorAccuracy = Math.max(peorAccuracy, accAncla, accuracy);
+                  fixDescartadoPorSalto = null;
+                  ultimoFixRecibido = coords;
+                  onProgreso?.(lecturasRecibidas, intentos, accuracy);
+                } else {
+                  console.log(
+                    `[LocationService] Fix GPS ignorado por salto imposible: ${Math.round(velFix * 3.6)} km/h (${Math.round(distFix)} m en ${dtFix.toFixed(1)} s)`,
+                  );
+                  fixDescartadoPorSalto = coords;
+                  esSaltoImposible = true;
+                  // El salto descartado NO mueve la base ni suma a lecturasRecibidas
+                  return;
+                }
+              } else {
+                lecturasRecibidas++;
+                if (accuracy > peorAccuracy) {
+                  peorAccuracy = accuracy;
+                }
+                ultimoFixRecibido = coords;
+                fixDescartadoPorSalto = null;
+                if (!mejor || accuracy < (mejor.accuracy ?? 999)) {
+                  segundoMejor = mejor;
+                  mejor = coords;
+                } else if (!segundoMejor || accuracy < (segundoMejor.accuracy ?? 999)) {
+                  segundoMejor = coords;
+                }
+                onProgreso?.(lecturasRecibidas, intentos, accuracy);
+              }
+            } else {
+              lecturasRecibidas++;
+              if (accuracy > peorAccuracy) {
+                peorAccuracy = accuracy;
+              }
+              ultimoFixRecibido = coords;
+              fixDescartadoPorSalto = null;
+              if (!mejor || accuracy < (mejor.accuracy ?? 999)) {
+                segundoMejor = mejor;
+                mejor = coords;
+              } else if (!segundoMejor || accuracy < (segundoMejor.accuracy ?? 999)) {
+                segundoMejor = coords;
+              }
+              onProgreso?.(lecturasRecibidas, intentos, accuracy);
+            }
+          } else {
+            lecturasRecibidas++;
+            if (accuracy > peorAccuracy) {
+              peorAccuracy = accuracy;
+            }
+            ultimoFixRecibido = coords;
+            fixDescartadoPorSalto = null;
             mejor = coords;
-          } else if (!segundoMejor || accuracy < (segundoMejor.accuracy ?? 999)) {
-            segundoMejor = coords;
+            onProgreso?.(lecturasRecibidas, intentos, accuracy);
           }
-          onProgreso?.(lecturasRecibidas, intentos, accuracy);
 
           const fixesCoherentes = (): boolean => {
             if (lecturasRecibidas < minFixes || !mejor || !segundoMejor) return false;
@@ -762,28 +840,38 @@ class LocationService {
           }
 
           // O si el llamador acepta este fix (p. ej. ya cae dentro del rango del cliente).
-          // Protección contra falsos positivos con fix cacheado: exigir ≥2 fixes.
-          // Con GNSS enganchado el segundo fix llega en ~1 s; coste mínimo, seguridad máxima.
-          if (lecturasRecibidas >= minFixes && condicionExito?.(coords)) {
+          // Protección contra falsos positivos con fix cacheado: exigir ≥2 fixes y coherencia.
+          if (
+            lecturasRecibidas >= minFixes &&
+            (condicionExito?.(coords) || (mejor && condicionExito?.(mejor))) &&
+            fixesCoherentes()
+          ) {
+            const elegido = mejor ?? coords;
             console.log(
               `[LocationService] Corte: condición de éxito, numFixes=${lecturasRecibidas}, ` +
-                `accuracy=${Math.round(accuracy)}m`,
+                `accuracy=${Math.round(elegido.accuracy ?? accuracy)}m`,
             );
-            aceptar(coords, "condición de éxito");
+            aceptar(elegido, "condición de éxito");
             return;
           }
 
           // O si el llamador determina que con este fix el resultado ya es
           // definitivamente negativo (fuera de rango imposible de revertir
           // aunque el GPS refinara): no tiene caso seguir esperando.
-          // Protección contra falsos negativos: SIEMPRE exigir ≥2 fixes.
-          // Un solo fix cacheado a 2.6 km no debe producir un fuera_de_rango firme.
-          if (lecturasRecibidas >= minFixes && condicionFracaso?.(coords)) {
+          // Protección contra falsos negativos: SIEMPRE exigir ≥2 fixes Y coherencia entre ellos.
+          // Un solo fix malo o un salto incoherente no debe producir un fuera_de_rango anticipado.
+          if (
+            lecturasRecibidas >= minFixes &&
+            !esSaltoImposible &&
+            condicionFracaso?.(mejor ?? coords) &&
+            fixesCoherentes()
+          ) {
+            const elegido = mejor ?? coords;
             console.log(
               `[LocationService] Corte: condición de fracaso, numFixes=${lecturasRecibidas}, ` +
-                `accuracy=${Math.round(accuracy)}m`,
+                `accuracy=${Math.round(elegido.accuracy ?? accuracy)}m`,
             );
-            aceptar(coords, "condición de fracaso");
+            aceptar(elegido, "condición de fracaso");
             return;
           }
         },

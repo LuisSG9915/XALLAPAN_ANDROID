@@ -426,6 +426,8 @@ describe("BackgroundLocationService — evidencia persistida", () => {
     jest.spyOn(console, "log").mockImplementation(() => undefined);
     service.fixesPersistidos = [];
     service.fixDescartadoPorSalto = null;
+    service.ultimoFixTracking = null;
+    service.saltoDescartadoUltimoTracking = null;
   });
 
   afterEach(() => {
@@ -511,5 +513,24 @@ describe("BackgroundLocationService — evidencia persistida", () => {
     } as any);
 
     expect(service.getFixesPersistidos(5 * 60_000, 25)).toEqual([]);
+  });
+
+  it("protege ultimoFixTracking contra un salto imposible a >150 km/h", async () => {
+    service.isTaskRunning = true;
+    const t0 = Date.now();
+    // Fix #1: posición normal
+    await service.onLocationFix(
+      pos(LAT, LNG, { accuracy: 12, timestamp: t0 - 5000 }),
+      service.generation,
+    );
+    expect(service.getUltimoFixTracking()?.latitud).toBeCloseTo(LAT, 5);
+
+    // Fix #2: salto imposible a 5.5 km de distancia en 3 segundos
+    await service.onLocationFix(
+      pos(LEJOS, LNG, { accuracy: 10, timestamp: t0 - 2000 }),
+      service.generation,
+    );
+    // Debe mantener Fix #1 y no haberse contaminado con Fix #2
+    expect(service.getUltimoFixTracking()?.latitud).toBeCloseTo(LAT, 5);
   });
 });

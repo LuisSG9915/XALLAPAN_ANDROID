@@ -160,6 +160,7 @@ export default function SalesScreen({ route }: { route?: any }) {
   const [productoModalOpen, setProductoModalOpen] = useState(false);
   const [visitaConfirmModalOpen, setVisitaConfirmModalOpen] = useState(false);
   const [clientePendienteVisita, setClientePendienteVisita] = useState<Cliente | null>(null);
+  const validacionVisitaCanceladaRef = useRef(false);
 
   const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1147,25 +1148,27 @@ export default function SalesScreen({ route }: { route?: any }) {
           setValidandoUbicacion(true);
           setProgresoGps(null);
           setProgresoValidacion(null);
-          const resultado = await LocationService.validarUbicacionConDiagnostico(
-            cliente.latitud!,
-            cliente.longitud!,
-            metrosPermitidos,
-            (intento, total, acc) => {
-              setProgresoGps(`±${Math.round(acc)} m`);
-              setProgresoValidacion({ intento, total, accuracy: acc });
-            },
-            {
-              id: cliente.id,
-              nombre: cliente.nombre,
-              lat: cliente.latitud,
-              lng: cliente.longitud,
-            },
-          );
-          setValidandoUbicacion(false);
-          setProgresoGps(null);
-          setProgresoValidacion(null);
-          return resultado;
+          try {
+            return await LocationService.validarUbicacionConDiagnostico(
+              cliente.latitud!,
+              cliente.longitud!,
+              metrosPermitidos,
+              (intento, total, acc) => {
+                setProgresoGps(`±${Math.round(acc)} m`);
+                setProgresoValidacion({ intento, total, accuracy: acc });
+              },
+              {
+                id: cliente.id,
+                nombre: cliente.nombre,
+                lat: cliente.latitud,
+                lng: cliente.longitud,
+              },
+            );
+          } finally {
+            setValidandoUbicacion(false);
+            setProgresoGps(null);
+            setProgresoValidacion(null);
+          }
         };
 
         const resultado = await ejecutarValidacion();
@@ -1229,9 +1232,14 @@ export default function SalesScreen({ route }: { route?: any }) {
       setClienteParaVisitar(cliente);
       setTipoVisitaSeleccionado(null);
       setTipoVisitaModalOpen(true);
+    } catch (error) {
+      console.error("[Sales] Error en handleVisitarCliente:", error);
+      Alert.alert("Error", "No se pudo iniciar la visita. Intenta nuevamente.");
     } finally {
       visitandoRef.current = false;
+      setValidandoUbicacion(false);
       setProgresoGps(null);
+      setProgresoValidacion(null);
     }
   };
 
@@ -1351,6 +1359,17 @@ export default function SalesScreen({ route }: { route?: any }) {
   };
 
   const handleConfirmarVisita = async (desdeaIniciarVisita: boolean) => {
+    try {
+      await handleConfirmarVisitaImpl(desdeaIniciarVisita);
+    } catch (error) {
+      console.error("[Sales] Error en handleConfirmarVisita:", error);
+      setValidandoUbicacion(false);
+      setProgresoValidacion(null);
+      Alert.alert("Error", "No se pudo iniciar la visita. Intenta nuevamente.");
+    }
+  };
+
+  const handleConfirmarVisitaImpl = async (desdeaIniciarVisita: boolean) => {
     console.log("[Sales] handleConfirmarVisita iniciado. desdeaIniciarVisita:", desdeaIniciarVisita);
     console.log("[Sales] Estado validandoUbicacion al inicio:", validandoUbicacion);
 
@@ -1361,6 +1380,7 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
     console.log({ clientePendienteVisita });
     if (!clientePendienteVisita) return;
+    validacionVisitaCanceladaRef.current = false;
 
     if (desdeaIniciarVisita) {
       console.log("[Sales] Iniciando validación de ubicación...");
@@ -1375,26 +1395,32 @@ export default function SalesScreen({ route }: { route?: any }) {
         const ejecutarValidacion = async () => {
           setValidandoUbicacion(true);
           setProgresoValidacion(null);
-          const r = await LocationService.validarUbicacionConDiagnostico(
-            clientePendienteVisita.latitud!,
-            clientePendienteVisita.longitud!,
-            metrosPermitidos,
-            (intento, total, acc) => {
-              setProgresoValidacion({ intento, total, accuracy: acc });
-            },
-            {
-              id: clientePendienteVisita.id,
-              nombre: clientePendienteVisita.nombre,
-              lat: clientePendienteVisita.latitud,
-              lng: clientePendienteVisita.longitud,
-            },
-          );
-          setValidandoUbicacion(false);
-          setProgresoValidacion(null);
-          return r;
+          try {
+            return await LocationService.validarUbicacionConDiagnostico(
+              clientePendienteVisita.latitud!,
+              clientePendienteVisita.longitud!,
+              metrosPermitidos,
+              (intento, total, acc) => {
+                setProgresoValidacion({ intento, total, accuracy: acc });
+              },
+              {
+                id: clientePendienteVisita.id,
+                nombre: clientePendienteVisita.nombre,
+                lat: clientePendienteVisita.latitud,
+                lng: clientePendienteVisita.longitud,
+              },
+            );
+          } finally {
+            setValidandoUbicacion(false);
+            setProgresoValidacion(null);
+          }
         };
 
         const resultado = await ejecutarValidacion();
+        if (validacionVisitaCanceladaRef.current) {
+          console.log("[Sales] Validación de ubicación cancelada por el usuario");
+          return;
+        }
         if (!resultado.valido) {
           setVisitaConfirmModalOpen(false);
           if (resultado.motivo === "sin_permiso") {
@@ -1733,7 +1759,14 @@ export default function SalesScreen({ route }: { route?: any }) {
             setReubicandoCliente(true);
             try {
               console.log("[Sales] Obteniendo ubicación GPS para reubicación...");
-              const ubicacion = await LocationService.getBestLocation(5, 10000, undefined, undefined, undefined, 3);
+              const ubicacion = await LocationService.getBestLocation(
+                5,
+                10000,
+                undefined,
+                (coords) => (coords.accuracy ?? 999) <= 25,
+                undefined,
+                3,
+              );
 
               if (!ubicacion) {
                 void registrarReubicacionFallida("reubic_sin_gps", {
@@ -3585,6 +3618,12 @@ export default function SalesScreen({ route }: { route?: any }) {
           animationType="fade"
           transparent
           onDismiss={() => {
+            validacionVisitaCanceladaRef.current = true;
+            setValidandoUbicacion(false);
+            setVisitaConfirmModalOpen(false);
+          }}
+          onRequestClose={() => {
+            validacionVisitaCanceladaRef.current = true;
             setValidandoUbicacion(false);
             setVisitaConfirmModalOpen(false);
           }}
@@ -3645,6 +3684,18 @@ export default function SalesScreen({ route }: { route?: any }) {
                               ? "Señal aceptable, espera un momento..."
                               : "Mejorando precisión..."}
                         </Text>
+
+                        <TouchableOpacity
+                          style={styles.gpsCancelarBtn}
+                          onPress={() => {
+                            validacionVisitaCanceladaRef.current = true;
+                            setValidandoUbicacion(false);
+                            setProgresoValidacion(null);
+                            setVisitaConfirmModalOpen(false);
+                          }}
+                        >
+                          <Text style={styles.gpsCancelarTexto}>Cancelar</Text>
+                        </TouchableOpacity>
                       </>
                     );
                   })()}
@@ -4576,6 +4627,19 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: "center",
     fontStyle: "italic",
+  },
+  gpsCancelarBtn: {
+    marginTop: SPACING.m,
+    paddingVertical: SPACING.s,
+    paddingHorizontal: SPACING.l,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  gpsCancelarTexto: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: "600",
   },
   headerButtons: {
     flexDirection: "row",

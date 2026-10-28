@@ -822,7 +822,14 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             setReubicandoCliente(true);
             try {
               console.log("[Cumplimiento] Obteniendo ubicación GPS para reubicación...");
-              const ubicacion = await LocationService.getBestLocation(5, 10000, undefined, undefined, undefined, 3);
+              const ubicacion = await LocationService.getBestLocation(
+                5,
+                10000,
+                undefined,
+                (coords) => (coords.accuracy ?? 999) <= 25,
+                undefined,
+                3,
+              );
 
               if (!ubicacion) {
                 void registrarReubicacionFallida("reubic_sin_gps", {

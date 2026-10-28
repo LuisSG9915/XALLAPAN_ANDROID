@@ -119,6 +119,12 @@ class BackgroundLocationService {
     accuracy: number;
     timestamp: number;
   } | null = null;
+  private saltoDescartadoUltimoTracking: {
+    latitud: number;
+    longitud: number;
+    accuracy: number;
+    timestamp: number;
+  } | null = null;
 
   private fixesRecientes: FixTrackingConfiable[] = [];
   // Solo fixes que quedaron escritos en la bitácora (ver FIXES_PERSISTIDOS_MAX).
@@ -414,12 +420,51 @@ class BackgroundLocationService {
 
     const ahora = Date.now();
     this.lastFixAt = ahora;
-    this.ultimoFixTracking = {
+
+    const tsFix = position.timestamp ?? ahora;
+    const candidatoTracking = {
       latitud: position.coords.latitude,
       longitud: position.coords.longitude,
       accuracy: position.coords.accuracy ?? 999,
-      timestamp: position.timestamp ?? ahora,
+      timestamp: tsFix,
     };
+
+    // Proteger ultimoFixTracking contra saltos físicamente imposibles (> 150 km/h)
+    // para evitar que un fix espurio durante una ráfaga anule el contraste de velocidad.
+    let actualizarUltimoTracking = true;
+    if (this.ultimoFixTracking && ahora - this.ultimoFixTracking.timestamp <= 60000) {
+      const dt = Math.max((tsFix - this.ultimoFixTracking.timestamp) / 1000, 1);
+      const dist = distanciaMetros(
+        this.ultimoFixTracking.latitud,
+        this.ultimoFixTracking.longitud,
+        position.coords.latitude,
+        position.coords.longitude,
+      );
+      const vel = dist / dt;
+      if (vel > VELOCIDAD_MAX_PLAUSIBLE_MPS) {
+        const descartado = this.saltoDescartadoUltimoTracking;
+        const dtReancla = descartado ? Math.max((tsFix - descartado.timestamp) / 1000, 1) : 0;
+        const velReancla = descartado
+          ? distanciaMetros(descartado.latitud, descartado.longitud, position.coords.latitude, position.coords.longitude) / dtReancla
+          : Infinity;
+
+        if (descartado && tsFix - descartado.timestamp <= REANCLAJE_VENTANA_MS && velReancla <= VELOCIDAD_MAX_PLAUSIBLE_MPS) {
+          this.saltoDescartadoUltimoTracking = null;
+          actualizarUltimoTracking = true;
+        } else {
+          this.saltoDescartadoUltimoTracking = candidatoTracking;
+          actualizarUltimoTracking = false;
+        }
+      } else {
+        this.saltoDescartadoUltimoTracking = null;
+      }
+    } else {
+      this.saltoDescartadoUltimoTracking = null;
+    }
+
+    if (actualizarUltimoTracking) {
+      this.ultimoFixTracking = candidatoTracking;
+    }
 
     this.registrarFixReciente(position);
 
