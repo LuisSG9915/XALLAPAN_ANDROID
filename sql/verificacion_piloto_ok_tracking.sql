@@ -1,7 +1,7 @@
 -- =============================================================================
 -- VERIFICACIÓN DEL PILOTO `ok_tracking` — por sucursal
 --
--- Uso: ajustar @sucursal (por defecto 38) y @dias, y ejecutar como UN SOLO lote.
+-- Uso: ajustar @sucursal (por defecto 38) y @desde, y ejecutar como UN SOLO lote.
 --      No insertar GO en medio: usa variables y #temporales.
 --
 -- Qué responde, en orden:
@@ -26,8 +26,30 @@
 -- =============================================================================
 
 DECLARE @sucursal INT = 38;
-DECLARE @dias INT = 7;
-DECLARE @desde DATETIME = DATEADD(DAY, -@dias, GETDATE());
+
+-- Opcional: limitar a UN vendedor. 0 = toda la sucursal.
+-- Durante el piloto conviene poner el id del vendedor que ya tiene el build
+-- nuevo: el resto de la sucursal sigue en la versión anterior y sus registros
+-- no deben mezclarse con los del piloto.
+DECLARE @idUsuario INT = 0;
+
+-- Filtro por build del teléfono. '' = cualquier versión. Se compara por
+-- PREFIJO para tolerar sufijos (1.5, 1.5.1).
+-- '1.5' = build con la enmienda I2 (`fuera_de_rango` corroborado por tracking).
+-- '1.4' = build anterior: úsalo para comparar antes/después.
+-- Los equipos viejos no pueden generar `ok_tracking`: si se mezclan, el
+-- porcentaje del piloto sale artificialmente bajo.
+DECLARE @versionApp VARCHAR(20) = '1.5';
+
+-- Corte del piloto: build con `ok_tracking` instalado en el teléfono de prueba
+-- el 2026-10-23 a las 11:52 (hora local del dispositivo).
+-- Solo se cuenta lo validado DESPUÉS de esa hora: los datos anteriores son de
+-- una versión que no tenía la función y ensuciarían los porcentajes.
+DECLARE @desde DATETIME = '2026-10-23 11:52:00';
+
+-- Para volver a una ventana móvil (p. ej. últimos 7 días) comenta la línea de
+-- arriba y usa esta:
+-- DECLARE @desde DATETIME = DATEADD(DAY, -7, GETDATE());
 
 -- -----------------------------------------------------------------------------
 -- 0) Materialización de los `ok_tracking` de la sucursal
@@ -42,7 +64,9 @@ INTO #okt
 FROM dbo.BitacoraValidacionUbicacionMovil b
 WHERE b.sucursal = @sucursal
   AND b.motivo = 'ok_tracking'
-  AND b.fecha >= @desde;
+  AND b.fecha >= @desde
+  AND (@idUsuario = 0 OR b.idUsuario = @idUsuario)
+  AND (@versionApp = '' OR b.versionApp LIKE @versionApp + '%');
 
 -- Filtrar coordenadas inválidas ANTES de usar geography::Point
 IF OBJECT_ID('tempdb..#okt_valido') IS NOT NULL DROP TABLE #okt_valido;
@@ -120,6 +144,8 @@ FROM (
     SELECT 'C7 · motivos desconocidos o truncados',
            (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
              WHERE sucursal = @sucursal AND fecha >= @desde
+               AND (@idUsuario = 0 OR idUsuario = @idUsuario)
+               AND (@versionApp = '' OR versionApp LIKE @versionApp + '%')
                AND motivo NOT IN ('ok','ok_cache','ok_tracking','sin_permiso',
                                   'sin_senal','precision_baja','fuera_de_rango','red_no_gnss')), 0
 
@@ -127,6 +153,8 @@ FROM (
     SELECT 'C8 · motivo de éxito con valido = 0, o de fallo con valido = 1',
            (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
              WHERE sucursal = @sucursal AND fecha >= @desde
+               AND (@idUsuario = 0 OR idUsuario = @idUsuario)
+               AND (@versionApp = '' OR versionApp LIKE @versionApp + '%')
                AND ( (motivo IN ('ok','ok_cache','ok_tracking') AND valido = 0)
                   OR (motivo IN ('sin_permiso','sin_senal','precision_baja',
                                  'fuera_de_rango','red_no_gnss') AND valido = 1) )), 0
@@ -135,6 +163,8 @@ FROM (
     SELECT 'C9 · fallos de GPS sin accuracy registrada',
            (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
              WHERE sucursal = @sucursal AND fecha >= @desde
+               AND (@idUsuario = 0 OR idUsuario = @idUsuario)
+               AND (@versionApp = '' OR versionApp LIKE @versionApp + '%')
                AND motivo IN ('precision_baja','sin_senal','red_no_gnss')
                AND accuracy IS NULL), 0
 ) x
@@ -157,6 +187,8 @@ SELECT CAST(fecha AS DATE) AS dia,
 FROM dbo.BitacoraValidacionUbicacionMovil
 WHERE sucursal = @sucursal
   AND fecha >= @desde
+  AND (@idUsuario = 0 OR idUsuario = @idUsuario)
+  AND (@versionApp = '' OR versionApp LIKE @versionApp + '%')
 GROUP BY CAST(fecha AS DATE)
 ORDER BY dia;
 
@@ -174,6 +206,8 @@ SELECT TOP 10
 FROM dbo.BitacoraValidacionUbicacionMovil
 WHERE sucursal = @sucursal
   AND fecha >= @desde
+  AND (@idUsuario = 0 OR idUsuario = @idUsuario)
+  AND (@versionApp = '' OR versionApp LIKE @versionApp + '%')
 GROUP BY CAST(fecha AS DATE), idUsuario, idCliente
 HAVING COUNT(*) >= 3
 ORDER BY intentos DESC, dia DESC;
@@ -209,5 +243,6 @@ SELECT CAST(fechaRegistro AS DATE) AS dia,
 FROM tempreubicacionesmovil
 WHERE sucursal = @sucursal
   AND fechaRegistro >= @desde
+  AND (@idUsuario = 0 OR usuario = @idUsuario)
 GROUP BY CAST(fechaRegistro AS DATE)
 ORDER BY dia;

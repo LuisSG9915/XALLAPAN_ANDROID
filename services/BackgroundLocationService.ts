@@ -28,6 +28,41 @@ const FIXES_BUENOS_MAX = 12;
 const FIXES_BUENOS_RETENCION_MS = 10 * 60 * 1000;
 const FIX_BUENO_ACCURACY_MAX = 25; // metros
 
+// Historial de fixes que SÍ llegaron a la bitácora (persistidos). Es la única
+// evidencia que puede acreditar una venta `ok_tracking`: si un fix no está en
+// el servidor, no debe servir para aprobar nada.
+// La razón es el detector de incoherencias: cuando una validación fuerza su
+// ráfaga, comparte la suscripción nativa y el mismo fix contaminado llega
+// también al callback de fondo (caso 373510: la lectura de 419 m se copió a
+// `ultimoFixTracking` y el candado terminó comparando el fix consigo mismo).
+const FIXES_PERSISTIDOS_MAX = 12;
+
+// Reglas de admisión de evidencia (ver docs/PLAN_OK_TRACKING.md §14):
+//
+//  R1 — Proveedor: un fix de red/fusionado puede declarar ±12 m y estar 400 m
+//       fuera del cliente (caso 373510: accuracy 11.9 m, distancia 419 m).
+//       Solo el GNSS crudo acredita presencia; `fused` se acepta únicamente
+//       cuando la precisión es realista Y trae velocidad (el fused sin
+//       velocidad suele ser una media ponderada con red).
+//
+//  R2 — Salto: entre dos fixes consecutivos no se puede recorrer más de
+//       150 km/h. Un salto así se descarta y NO mueve la base; si llegan dos
+//       fixes seguidos que concuerdan entre sí (equipo que vuelve de un hueco
+//       o de suspensión), la cadena se reancla en el punto nuevo.
+const VELOCIDAD_MAX_PLAUSIBLE_MPS = 41.7; // 150 km/h
+const VELOCIDAD_MIN_DT_SEG = 5;
+const REANCLAJE_VENTANA_MS = 3 * 60 * 1000;
+
+const RADIO_TIERRA_M = 6371000;
+const distanciaMetros = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * RADIO_TIERRA_M * Math.asin(Math.min(1, Math.sqrt(a)));
+};
+
 export type FixTrackingConfiable = {
   latitud: number;
   longitud: number;
@@ -86,6 +121,11 @@ class BackgroundLocationService {
   } | null = null;
 
   private fixesRecientes: FixTrackingConfiable[] = [];
+  // Solo fixes que quedaron escritos en la bitácora (ver FIXES_PERSISTIDOS_MAX).
+  private fixesPersistidos: FixTrackingConfiable[] = [];
+  // Último fix descartado por salto imposible: si el siguiente concuerda con
+  // él, el movimiento era real y se reancla la cadena (ver R2).
+  private fixDescartadoPorSalto: FixTrackingConfiable | null = null;
 
   private constructor() {}
 
@@ -123,6 +163,87 @@ class BackgroundLocationService {
     this.fixesRecientes.push({ latitud: latitude, longitud: longitude, accuracy: acc, timestamp: ts });
     if (this.fixesRecientes.length > FIXES_BUENOS_MAX) this.fixesRecientes.shift();
     this.fixesRecientes = this.fixesRecientes.filter((f) => ahora - f.timestamp <= FIXES_BUENOS_RETENCION_MS);
+  }
+
+  /**
+   * Fixes que efectivamente se persistieron en la bitácora. A diferencia de
+   * `getFixesRecientes`, esta lista NO incluye la ráfaga que dispara una
+   * validación: solo lo que el servidor podrá ver al auditar la venta.
+   */
+  getFixesPersistidos(maxEdadMs: number, maxAccuracy: number): FixTrackingConfiable[] {
+    const ahora = Date.now();
+    return this.fixesPersistidos.filter(
+      (f) => ahora - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy,
+    );
+  }
+
+  private registrarFixPersistido(position: GeoPosition): void {
+    const { latitude, longitude, accuracy } = position.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const acc = accuracy ?? 999;
+    if (acc > FIX_BUENO_ACCURACY_MAX) return;
+
+    // R1: proveedor confiable.
+    const proveedor = (position.provider ?? "").toLowerCase();
+    const proveedorConfiable =
+      proveedor === "" || // plataformas que no reportan proveedor
+      proveedor === "gps" ||
+      (proveedor === "fused" && acc <= 20 && Number.isFinite(position.coords.speed));
+    if (!proveedorConfiable) {
+      console.log(TAG, `Fix de tracking descartado por proveedor '${proveedor}' (acc=${Math.round(acc)} m)`);
+      return;
+    }
+
+    const ahora = Date.now();
+    const ts = position.timestamp ?? ahora;
+    const candidato: FixTrackingConfiable = {
+      latitud: latitude,
+      longitud: longitude,
+      accuracy: acc,
+      timestamp: ts,
+    };
+
+    // R2: salto físicamente imposible contra la base vigente.
+    const ultima = this.fixesPersistidos[this.fixesPersistidos.length - 1];
+    const base = ultima && ahora - ultima.timestamp <= FIXES_BUENOS_RETENCION_MS ? ultima : null;
+    if (base) {
+      const dt = Math.max((ts - base.timestamp) / 1000, VELOCIDAD_MIN_DT_SEG);
+      const velocidad = distanciaMetros(base.latitud, base.longitud, latitude, longitude) / dt;
+      if (velocidad > VELOCIDAD_MAX_PLAUSIBLE_MPS) {
+        const descartado = this.fixDescartadoPorSalto;
+        const dtReancla = descartado
+          ? Math.max((ts - descartado.timestamp) / 1000, VELOCIDAD_MIN_DT_SEG)
+          : 0;
+        const velocidadReancla = descartado
+          ? distanciaMetros(descartado.latitud, descartado.longitud, latitude, longitude) / dtReancla
+          : Infinity;
+
+        // Dos fixes seguidos que concuerdan entre sí: el movimiento es real.
+        if (descartado && ts - descartado.timestamp <= REANCLAJE_VENTANA_MS && velocidadReancla <= VELOCIDAD_MAX_PLAUSIBLE_MPS) {
+          this.fixesPersistidos = [descartado, candidato];
+          this.fixDescartadoPorSalto = null;
+          console.log(
+            TAG,
+            `Cadena de tracking reanclada: ${Math.round(velocidadReancla * 3.6)} km/h entre dos fixes concordantes`,
+          );
+          return;
+        }
+
+        this.fixDescartadoPorSalto = candidato;
+        console.log(
+          TAG,
+          `Fix de tracking descartado por salto: ${Math.round(velocidad * 3.6)} km/h ` +
+            `(${Math.round(distanciaMetros(base.latitud, base.longitud, latitude, longitude))} m en ${Math.round(dt)} s)`,
+        );
+        return;
+      }
+    }
+
+    this.fixDescartadoPorSalto = null;
+    this.fixesPersistidos.push(candidato);
+    if (this.fixesPersistidos.length > FIXES_PERSISTIDOS_MAX) this.fixesPersistidos.shift();
+    this.fixesPersistidos = this.fixesPersistidos.filter((f) => ahora - f.timestamp <= FIXES_BUENOS_RETENCION_MS);
   }
 
   /**
@@ -330,6 +451,7 @@ class BackgroundLocationService {
         return;
       }
 
+      this.registrarFixPersistido(position);
       this.lastCaptureAt = ahora;
       let stallResult: StallEvaluationResult | null = null;
       if (this.isTaskRunning && generation === this.generation) {

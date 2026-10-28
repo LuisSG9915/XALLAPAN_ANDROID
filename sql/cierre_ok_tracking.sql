@@ -27,6 +27,11 @@
 DECLARE @dias INT = 30;
 DECLARE @desde DATETIME = DATEADD(DAY, -@dias, GETDATE());
 
+-- Filtro por build. '' = todos los equipos. Para medir SOLO el release poner
+-- el build nuevo (p. ej. '1.4'): los teléfonos sin actualizar no pueden
+-- generar `ok_tracking` y distorsionan el porcentaje.
+DECLARE @versionApp VARCHAR(20) = '';
+
 -- -----------------------------------------------------------------------------
 -- 1) Fallos perdidos: intentos fallidos por GPS sin visita el mismo dia.
 --    Se incluye 'ok_tracking' en salvados para que la cifra sea comparable
@@ -42,6 +47,7 @@ INTO #perdidas_cierre
 FROM dbo.BitacoraValidacionUbicacionMovil f
 WHERE f.motivo IN ('precision_baja', 'sin_senal', 'red_no_gnss')
   AND f.fecha >= @desde
+  AND (@versionApp = '' OR f.versionApp LIKE @versionApp + '%')
   AND f.idCliente IS NOT NULL
   AND NOT EXISTS (
     SELECT 1
@@ -120,13 +126,23 @@ OUTER APPLY (
 ) vt;
 
 -- -----------------------------------------------------------------------------
+-- 2b) Validaciones de la ventana, filtradas por build
+-- -----------------------------------------------------------------------------
+IF OBJECT_ID('tempdb..#val') IS NOT NULL DROP TABLE #val;
+
+SELECT motivo, valido
+INTO #val
+FROM dbo.BitacoraValidacionUbicacionMovil
+WHERE fecha >= @desde
+  AND (@versionApp = '' OR versionApp LIKE @versionApp + '%');
+
+-- -----------------------------------------------------------------------------
 -- 3A) Distribución de motivos en la ventana
 -- -----------------------------------------------------------------------------
 SELECT motivo,
        COUNT(*) AS casos,
        CAST(100.0 * COUNT(*) / SUM(COUNT(*)) OVER () AS DECIMAL(5, 1)) AS pct
-FROM dbo.BitacoraValidacionUbicacionMovil
-WHERE fecha >= @desde
+FROM #val
 GROUP BY motivo
 ORDER BY casos DESC;
 
@@ -136,15 +152,11 @@ ORDER BY casos DESC;
 -- -----------------------------------------------------------------------------
 SELECT
     (SELECT COUNT(*) FROM #perdidas_cierre) AS visitas_perdidas,
-    (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
-      WHERE motivo = 'ok_tracking' AND fecha >= @desde) AS ok_tracking,
-    (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
-      WHERE motivo IN ('ok', 'ok_cache') AND fecha >= @desde) AS ok_y_cache,
-    (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
-      WHERE motivo IN ('precision_baja', 'sin_senal', 'red_no_gnss', 'fuera_de_rango')
-        AND fecha >= @desde) AS fallos_gps,
-    (SELECT COUNT(*) FROM dbo.BitacoraValidacionUbicacionMovil
-      WHERE fecha >= @desde) AS validaciones_totales;
+    (SELECT COUNT(*) FROM #val WHERE motivo = 'ok_tracking') AS ok_tracking,
+    (SELECT COUNT(*) FROM #val WHERE motivo IN ('ok', 'ok_cache')) AS ok_y_cache,
+    (SELECT COUNT(*) FROM #val
+      WHERE motivo IN ('precision_baja', 'sin_senal', 'red_no_gnss', 'fuera_de_rango')) AS fallos_gps,
+    (SELECT COUNT(*) FROM #val) AS validaciones_totales;
 
 -- -----------------------------------------------------------------------------
 -- 3C) Reparto de los fallos perdidos

@@ -27,6 +27,7 @@ jest.mock("../services/BackgroundLocationService", () => ({
   __esModule: true,
   default: {
     getFixesRecientes: jest.fn(() => []),
+    getFixesPersistidos: jest.fn(() => []),
     getUltimoFixTracking: jest.fn(() => null),
   },
 }));
@@ -47,6 +48,7 @@ type FixTracking = {
 
 const service = LocationService as any;
 const getFixesRecientesMock = BackgroundLocationService.getFixesRecientes as jest.Mock;
+const getFixesPersistidosMock = BackgroundLocationService.getFixesPersistidos as jest.Mock;
 
 const CLIENTE = { lat: 19.4397012, lng: -96.7532193 };
 const PERMITIDO = 100;
@@ -87,7 +89,7 @@ beforeEach(() => {
   };
   fixes = [];
 
-  getFixesRecientesMock.mockImplementation((maxEdadMs: number, maxAccuracy: number) =>
+  getFixesPersistidosMock.mockImplementation((maxEdadMs: number, maxAccuracy: number) =>
     fixes.filter((f) => Date.now() - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy),
   );
 
@@ -136,11 +138,17 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.motivo).toBe("precision_baja");
   });
 
-  it("T3: veta la aprobación si un fix bueno y reciente ubica al vendedor lejos", async () => {
+  it("T3: veta la aprobación si DOS fixes buenos y recientes ubican al vendedor lejos (R3)", async () => {
     fixes = [
       { ...EVIDENCIA_REAL, timestamp: Date.now() - 174_000 },
       {
         latitud: desplazarLat(250),
+        longitud: CLIENTE.lng,
+        accuracy: 10,
+        timestamp: Date.now() - 60_000,
+      },
+      {
+        latitud: desplazarLat(270),
         longitud: CLIENTE.lng,
         accuracy: 10,
         timestamp: Date.now() - 30_000,
@@ -153,7 +161,10 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.motivo).toBe("precision_baja");
   });
 
-  it("T4: fuera_de_rango nunca se convierte en aprobación (I2)", async () => {
+  it("T4: fuera_de_rango contradicho por evidencia persistida se aprueba como ok_tracking (I2 enmendada)", async () => {
+    // Caso 373510: la lectura declara 419 m con ±11.9 m mientras el tracking
+    // del mismo minuto marca 38 m del cliente. Antes esto bloqueaba la venta
+    // sin salida; ahora se aprueba con la evidencia que ya está en el servidor.
     liveLocation = {
       latitude: desplazarLat(134),
       longitude: CLIENTE.lng,
@@ -171,10 +182,101 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
 
     const r = await validar();
 
+    expect(r.valido).toBe(true);
+    expect(r.motivo).toBe("ok_tracking");
+    expect(r.distancia).toBeCloseTo(20, 0);
+    expect(r.ubicacion).toEqual(
+      expect.objectContaining({ latitude: desplazarLat(20), longitude: CLIENTE.lng }),
+    );
+    expect(r.numFixes).toBe(0);
+    expect(getFixesPersistidosMock).toHaveBeenCalled();
+  });
+
+  it("T4b: fuera_de_rango SIN evidencia persistida sigue bloqueando (I2)", async () => {
+    liveLocation = {
+      latitude: desplazarLat(134),
+      longitude: CLIENTE.lng,
+      accuracy: 6,
+      timestamp: Date.now(),
+    };
+    fixes = [];
+
+    const r = await validar();
+
     expect(r.valido).toBe(false);
     expect(r.motivo).toBe("fuera_de_rango");
-    // No se consulta el tracking: la lectura en vivo ya es confiable.
-    expect(getFixesRecientesMock).not.toHaveBeenCalled();
+  });
+
+  it("T4c: dos fixes de alejamiento vetan la evidencia positiva (R3)", async () => {
+    liveLocation = {
+      latitude: desplazarLat(134),
+      longitude: CLIENTE.lng,
+      accuracy: 6,
+      timestamp: Date.now(),
+    };
+    fixes = [
+      { latitud: desplazarLat(15), longitud: CLIENTE.lng, accuracy: 10, timestamp: Date.now() - 150_000 },
+      { latitud: desplazarLat(300), longitud: CLIENTE.lng, accuracy: 12, timestamp: Date.now() - 40_000 },
+      { latitud: desplazarLat(320), longitud: CLIENTE.lng, accuracy: 12, timestamp: Date.now() - 20_000 },
+    ];
+
+    const r = await validar();
+
+    expect(r.valido).toBe(false);
+    expect(r.motivo).toBe("fuera_de_rango");
+  });
+
+  it("T4f: un solo fix de alejamiento NO veta (R3 — asimetría aprobar/vetar)", async () => {
+    // Un fix de red a 300 m no debe tumbar una visita que sí tiene evidencia
+    // dentro del rango: vetar exige dos fixes de acuerdo.
+    liveLocation = {
+      latitude: desplazarLat(134),
+      longitude: CLIENTE.lng,
+      accuracy: 6,
+      timestamp: Date.now(),
+    };
+    fixes = [
+      { latitud: desplazarLat(15), longitud: CLIENTE.lng, accuracy: 10, timestamp: Date.now() - 150_000 },
+      { latitud: desplazarLat(300), longitud: CLIENTE.lng, accuracy: 12, timestamp: Date.now() - 20_000 },
+    ];
+
+    const r = await validar();
+
+    expect(r.valido).toBe(true);
+    expect(r.motivo).toBe("ok_tracking");
+  });
+
+  it("T4d: evidencia de más de 5 min no aprueba un fuera_de_rango", async () => {
+    liveLocation = {
+      latitude: desplazarLat(134),
+      longitude: CLIENTE.lng,
+      accuracy: 6,
+      timestamp: Date.now(),
+    };
+    fixes = [{ ...EVIDENCIA_REAL, timestamp: Date.now() - 6 * 60 * 1000 }];
+
+    const r = await validar();
+
+    expect(r.valido).toBe(false);
+    expect(r.motivo).toBe("fuera_de_rango");
+  });
+
+  it("T4e: con el rollback global deshabilitado, fuera_de_rango no se aprueba", async () => {
+    service.okTrackingHabilitadoOverride = false;
+    liveLocation = {
+      latitude: desplazarLat(134),
+      longitude: CLIENTE.lng,
+      accuracy: 6,
+      timestamp: Date.now(),
+    };
+    fixes = [
+      { latitud: desplazarLat(20), longitud: CLIENTE.lng, accuracy: 10, timestamp: Date.now() - 60_000 },
+    ];
+
+    const r = await validar();
+
+    expect(r.valido).toBe(false);
+    expect(r.motivo).toBe("fuera_de_rango");
   });
 
   it("T5: con el rollback deshabilitado se conserva el comportamiento anterior", async () => {
@@ -200,7 +302,7 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
   });
 
   it("T7: si el tracking falla no propaga la excepción (I7)", async () => {
-    getFixesRecientesMock.mockImplementation(() => {
+    getFixesPersistidosMock.mockImplementation(() => {
       throw new Error("tracking caído");
     });
 
@@ -231,7 +333,7 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
 
     expect(r.valido).toBe(false);
     expect(r.motivo).toBe("sin_permiso");
-    expect(getFixesRecientesMock).not.toHaveBeenCalled();
+    expect(getFixesPersistidosMock).not.toHaveBeenCalled();
   });
 
   it("T10: sin lectura en vivo pero con evidencia de tracking aprueba por Punto A", async () => {
@@ -264,6 +366,6 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.valido).toBe(true);
     expect(r.motivo).toBe("ok");
     expect(r.distancia).toBeCloseTo(40, 0);
-    expect(getFixesRecientesMock).not.toHaveBeenCalled();
+    expect(getFixesPersistidosMock).not.toHaveBeenCalled();
   });
 });

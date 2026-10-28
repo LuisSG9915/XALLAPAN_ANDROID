@@ -60,7 +60,7 @@ Cada invariante tiene su verificación en la sección 5. Si una implementación 
 | # | Invariante | Dónde vive hoy |
 |---|---|---|
 | I1 | Una venta **nunca** se aprueba sin evidencia de presencia: o el fix en vivo cae dentro del rango, o hay evidencia de tracking con calidad y antigüedad acotadas. | `validarUbicacionCliente` |
-| I2 | `fuera_de_rango` **nunca** se convierte en aprobación, ni con evidencia de tracking. | `services/LocationService.ts:934-942` |
+| I2 | `fuera_de_rango` **solo** se convierte en `ok_tracking` si hay un fix **persistido** (visible en el servidor) dentro del rango, con `accuracy ≤ 25 m`, antigüedad `≤ 5 min` y sin veto de 2 min. Sin evidencia sigue bloqueando. **Enmendada el 2026-10-27** (ver §13). | `services/LocationService.ts` bloque 2.9 |
 | I3 | `sin_permiso` **nunca** se aprueba. | `services/LocationService.ts:800-803` |
 | I4 | El candado de reubicación (±25 m **y** ≥3 fixes) queda **igual**. | `CumplimientoScreen.tsx:833`, `SalesScreen.tsx:1744` |
 | I5 | `ok_tracking` exige ≥1 fix con `accuracy ≤ 25 m` y antigüedad `≤ 5 min`, y ese fix debe caer **dentro** del rango (sin buffer de accuracy). | nuevo |
@@ -68,6 +68,7 @@ Cada invariante tiene su verificación en la sección 5. Si una implementación 
 | I7 | Sin evidencia (buffer vacío, servicio caído, error), el comportamiento es **idéntico al actual**. | nuevo |
 | I8 | El bypass tras reubicación (`clienteReubicadoRecientemente`, `TTL_VALIDACION_CACHE_MS`) queda igual. | `services/ReubicacionService.ts:121-138` |
 | I9 | `TTL_VALIDACION_CACHE_MS`, `PRECISION_ABSURDA`, `PRECISION_MAXIMA_ACEPTABLE`, `BUFFER_MAXIMO` y `estaDentroDeRango` quedan igual. | `services/LocationService.ts:42-75` |
+| I10 | La evidencia de tracking sale **solo** de `getFixesPersistidos()` (fixes que ya están en la bitácora del servidor). Nunca de la ráfaga que dispara la validación: esa ráfaga comparte la suscripción nativa y contamina `ultimoFixTracking` con el mismo fix malo que se juzga (caso 373510). | `BackgroundLocationService.ts` |
 
 **Nota sobre el riesgo de fraude:** con I5 + I6, para aprobar por tracking el vendedor tuvo que estar a menos de `metrosPermitidos` del cliente en los últimos 5 minutos **y no haber sido visto lejos en los últimos 2**. No permite vender desde otro lado.
 
@@ -207,14 +208,16 @@ export type MotivoValidacion =
 // techo metálico, mercado). En ese momento la lectura en vivo devuelve un fix
 // de red y bloquea una venta legítima, aunque el tracking de ruta sí tenga
 // evidencia de dónde estuvo el vendedor segundos antes.
-// SOLO se usa cuando la lectura falló POR FALTA DE GPS. Nunca sobre
-// `fuera_de_rango` ni sobre `sin_permiso`.
+// La evidencia sale de getFixesPersistidos(): fixes que ya están en la
+// bitácora. La ráfaga de la propia validación no cuenta (ver I10).
 export const HABILITAR_OK_TRACKING = true; // rollback: poner false
 export const TRACKING_EVIDENCIA_VENTANA_MS = 5 * 60 * 1000;
 export const TRACKING_EVIDENCIA_ACCURACY_MAX = 25; // metros
 export const TRACKING_VETO_VENTANA_MS = 2 * 60 * 1000;
 export const TRACKING_VETO_ACCURACY_MAX = 30; // metros
 export const TRACKING_VETO_MARGEN_M = 30; // metros
+// `fuera_de_rango` contradicho por evidencia persistida (enmienda I2).
+export const HABILITAR_OK_TRACKING_FUERA_DE_RANGO = true; // rollback: poner false
 ```
 
 ### 4.3 Método privado de corroboración
@@ -369,7 +372,7 @@ if (accuracy > PRECISION_MAXIMA_ACEPTABLE) {
 
 **Lo que NO se toca:**
 
-- El `return` de `fuera_de_rango` (línea ~934-942). Ahí no se llama a la corroboración. **I2.**
+- El `return` de `fuera_de_rango`. **Ya NO se deja intacto**: desde la enmienda I2 (§13) se corroboración antes de bloquear, con evidencia persistida.
 - El contraste de incoherencia de la sección 2.5 (líneas ~894-926). Se deja tal cual en esta fase.
 - El chequeo de permiso (línea ~800). **I3.**
 
@@ -394,7 +397,11 @@ Crear `__tests__/LocationService.test.ts`. Modelo de mocks: `__tests__/Backgroun
 | T1 | Fix en vivo `accuracy 2066`, tracking con fix a 17.5 m / ±18.6 m / hace 174 s, permitido 100 | `motivo === "ok_tracking"`, `valido === true` |
 | T2 | Igual que T1 pero el mejor fix de tracking está a 120 m | `motivo === "precision_baja"`, `valido === false` |
 | T3 | Igual que T1 pero además hay un fix bueno (±10 m) a 250 m hace 30 s | **`motivo === "precision_baja"`**, `valido === false` (veto, I6) |
-| T4 | Fix en vivo bueno (±6 m) a 134 m con permitido 100 (caso real `fuera_de_rango`) y tracking con evidencia a 20 m | **`motivo === "fuera_de_rango"`** (I2) |
+| T4 | Fix en vivo bueno (±6 m) a 134 m con permitido 100 y tracking con evidencia persistida a 20 m | **`motivo === "ok_tracking"`** (I2 enmendada) |
+| T4b | Igual que T4 pero sin evidencia | `fuera_de_rango` (I2 sigue vigente sin evidencia) |
+| T4c | Igual que T4 con un fix de 300 m hace 20 s | `fuera_de_rango` (I6, veto manda) |
+| T4d | Igual que T4 con evidencia de hace 6 min | `fuera_de_rango` (I5, antigüedad) |
+| T4e | Igual que T4 con `HABILITAR_OK_TRACKING = false` | `fuera_de_rango` (rollback) |
 | T5 | `HABILITAR_OK_TRACKING = false` con el escenario de T1 | `precision_baja` (rollback funciona) |
 | T6 | `getFixesRecientes` devuelve `[]` | comportamiento idéntico al actual |
 | T7 | `getFixesRecientes` lanza excepción | no propaga; cae al motivo actual (I7) |
@@ -690,3 +697,95 @@ Con los datos reales del caso 357053, el test T1 debe construirse así:
 - Resultado esperado: `ok_tracking` con `distancia ≈ 17.5 m`
 
 Ese test es la prueba de que el cambio resuelve el problema real y no una hipótesis.
+
+---
+
+## 13. Enmienda I2 — `fuera_de_rango` corroborado por tracking (2026-10-27)
+
+### El caso que la motivó (bitácora real, validación 373510)
+
+| hora | fuente | distancia al cliente | accuracy declarada |
+|---|---|---|---|
+| 16:17:08 | tracking (persistido) | **38.7 m** | ±18.3 m |
+| 16:17:11 | lectura de la validación | **419.4 m** | ±11.9 m |
+| 16:20:12 | validación siguiente (ok) | 23.6 m | ±18.5 m |
+
+El vendedor estaba en la puerta. La lectura de la validación salió 442 m fuera de donde el propio tracking tenía el teléfono **3 segundos antes**, con un accuracy declarado de ±11.9 m (error real: 37× lo declarado). Antes de esta enmienda, I2 bloqueaba la venta sin salida: el modal "Fuera de rango" solo tiene la X y el candado de reubicación (±25 m y 3 fixes) tampoco se puede cumplir con ese receptor.
+
+### Por qué el contraste existente (bloque 2.5) no lo atrapó
+
+El bloque 2.5 compara la lectura contra `getUltimoFixTracking()`. Pero la suscripción nativa es **una sola y compartida**: la ráfaga que dispara la validación llega también al callback de fondo y sobreescribe `ultimoFixTracking` con el mismo fix malo. El candado termina comparando el fix consigo mismo (`distancia ≈ 0` → velocidad ≈ 0 → no dispara). Evidencia: el fix de 419 m **no** aparece en `BitacoraTrackingGpsMovil` (el throttle de 24 s lo descartó) mientras que el de 16:17:08 sí.
+
+### Qué cambió
+
+1. `BackgroundLocationService` mantiene `fixesPersistidos`: solo los fixes que **realmente se escribieron en la bitácora** (después del throttle, junto a `lastCaptureAt`). Nuevo `getFixesPersistidos(maxEdadMs, maxAccuracy)`.
+2. `corroborarPresenciaConTracking` consume `getFixesPersistidos()` en vez de `getFixesRecientes()` (evidencia y veto). **I10.**
+3. Nuevo bloque 2.9 en `validarUbicacionCliente`, **antes** del contraste 2.5: si la lectura está fuera de rango, hay corroboración persistida y no hay veto, la venta se acredita como `ok_tracking`. Bandera `HABILITAR_OK_TRACKING_FUERA_DE_RANGO` (rollback: `false`).
+4. Versión de la app: **1.5** (`versionCode 4`), luego 1.6 con R1-R3, para poder separar este build en la bitácora (`versionApp`).
+
+### Lo que NO cambia
+
+- Sin evidencia persistida, `fuera_de_rango` sigue bloqueando (T4b).
+- El veto de 2 min sigue mandando sobre la evidencia positiva (T4c).
+- La evidencia caduca a los 5 min (T4d).
+- El candado de reubicación (±25 m y ≥3 fixes) queda intacto. **I4.**
+- `sin_permiso` nunca se aprueba. **I3.**
+
+### Cómo se mide
+
+`sql/cierre_ok_tracking.sql` con `@versionApp = '1.5'`: la columna `ok_tracking` de 3B debe subir respecto a 1.4 y `fuera_de_rango` bajar en la misma proporción. `sql/verificacion_piloto_ok_tracking.sql` R4 audita cada fila `ok_tracking` contra el tracking del servidor: toda aprobación tiene que tener un fix persistido a ≤ rango del cliente.
+
+## 14. Admisión de evidencia — R1, R2, R3 (2026-10-27, build 1.6)
+
+El 2.9 enmienda *cuándo* se usa la evidencia; esta sección regula *qué cuenta como evidencia*. Antes de estos cambios, `registrarFixPersistido` solo filtraba por `accuracy <= 25 m`, así que una sola fila podía aprobar una venta y una sola fila podía impedirla.
+
+### R1 — Proveedor confiable
+
+Un fix de `network` puede declarar ±11.9 m y estar 419 m fuera: es exactamente la firma del caso 373510. Solo el GNSS crudo acredita presencia.
+
+| proveedor | se acepta |
+|---|---|
+| `gps` | sí |
+| `fused` | solo si `accuracy <= 20` **y** trae `speed` (el fused sin velocidad suele ser una media ponderada con red) |
+| `network`, `passive` | no |
+| desconocido (`""`) | sí (plataformas que no reportan proveedor; no romper iOS) |
+
+### R2 — Salto físicamente imposible
+
+Entre dos fixes consecutivos no se puede recorrer más de **150 km/h** (41.7 m/s, con piso de 5 s de `dt`). Un salto así se descarta y **no mueve la base**: si el fix malo pasara a ser "el último confiable", el siguiente se compararía contra él y la cadena quedaría contaminada.
+
+Recuperación: si llegan **dos fixes seguidos que concuerdan entre sí** (velocidad entre ellos ≤ 150 km/h, dentro de 3 min), el movimiento era real —equipo que vuelve de un hueco o de suspensión— y la cadena se reancla en el punto nuevo.
+
+Qué atrapa y qué no:
+
+| caso | salto | velocidad | resultado |
+|---|---|---|---|
+| 357053 10:57:51 | 4,384 m en 60 s | 263 km/h | descartado |
+| salto de red típico | 2,000 m en 30 s | 240 km/h | descartado |
+| 373510 | 380 m en 60 s | 22.8 km/h | pasa (es caminar) |
+
+**Límite conocido:** un fix de red con ±12 m a 400 m es geométricamente indistinguible de un movimiento real. R2 no lo atrapa; lo atrapa R1.
+
+### R3 — Asimetría aprobar/vetar
+
+Aprobar basta con un fix bueno (no perder ventas); **vetar exige dos** (`TRACKING_VETO_FIXES_MIN = 2`). Un solo punto malo ya no puede tumbar una visita que sí tiene evidencia dentro del rango.
+
+### Invariantes nuevas
+
+- **I11.** Solo un fix con proveedor confiable (R1) puede entrar a `fixesPersistidos`.
+- **I12.** Un fix que implica un salto > 150 km/h no entra ni se convierte en base de comparación.
+- **I13.** El veto requiere al menos dos fixes de acuerdo; la aprobación sigue requiriendo uno.
+
+### Tests
+
+| test | qué fija |
+|---|---|
+| `R1` ×4 | red, pasiva, gps y fused (con y sin velocidad) |
+| `R2` ×3 | salto descartado, base intacta tras el descarte, reanclaje con dos fixes concordantes |
+| `T3` | dos fixes lejanos vetan la evidencia vieja |
+| `T4c` | veto con dos fixes manda sobre la evidencia positiva |
+| `T4f` | un solo fix lejano **no** veta (R3) |
+
+### Cómo se mide
+
+`sql/medicion_ok_tracking_por_version.sql` (ya apunta a `@versionNueva = '1.6'` y `@versionPrevia = '1.5'`): la salida 3b no debería mostrar `CONTRADICHO` en el build nuevo, y la salida 4 audita que cada `ok_tracking` tenga evidencia con `accuracy <= 25` e `distancia <= permitido`.

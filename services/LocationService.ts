@@ -63,14 +63,27 @@ export const TTL_VALIDACION_CACHE_MS = 3 * 60 * 1000; // 3 minutos
 // techo metálico, mercado). En ese momento la lectura en vivo devuelve un fix
 // de red y bloquea una venta legítima, aunque el tracking de ruta sí tenga
 // evidencia de dónde estuvo el vendedor segundos antes.
-// SOLO se usa cuando la lectura falló POR FALTA DE GPS. Nunca sobre
-// `fuera_de_rango` ni sobre `sin_permiso`.
+//
+// La evidencia sale SIEMPRE de `getFixesPersistidos()`: fixes que ya están en
+// la bitácora del servidor. Nunca de la ráfaga que dispara la propia
+// validación, porque esa ráfaga contamina `ultimoFixTracking` con el mismo
+// fix malo que se está juzgando (caso 373510).
 export const HABILITAR_OK_TRACKING = true; // rollback: poner false
 export const TRACKING_EVIDENCIA_VENTANA_MS = 5 * 60 * 1000;
 export const TRACKING_EVIDENCIA_ACCURACY_MAX = 25; // metros
 export const TRACKING_VETO_VENTANA_MS = 2 * 60 * 1000;
 export const TRACKING_VETO_ACCURACY_MAX = 30; // metros
 export const TRACKING_VETO_MARGEN_M = 30; // metros
+// R3 — asimetría deliberada: aprobar basta con un fix bueno (no queremos
+// perder ventas), pero vetar exige DOS fixes de acuerdo. Un solo punto malo
+// (p. ej. un fix de red a 400 m) no debe tumbar una visita real que sí tiene
+// evidencia dentro del rango.
+export const TRACKING_VETO_FIXES_MIN = 2;
+
+// Lectura fuera de rango con accuracy "buena" pero contradicha por el
+// tracking (fix de red que declara ±12 m y está 400 m fuera). Se aprueba con
+// evidencia persistida, no con la lectura. Rollback: poner false.
+export const HABILITAR_OK_TRACKING_FUERA_DE_RANGO = true; // rollback: poner false
 
 /**
  * Regla ÚNICA de rango, compartida por la validación real y por las pantallas
@@ -809,26 +822,34 @@ class LocationService {
 
     try {
       const BGService = require("./BackgroundLocationService").default;
-      if (typeof BGService?.getFixesRecientes !== "function") return null;
+      // Solo fixes persistidos: la ráfaga de esta misma validación no cuenta
+      // como evidencia (se contamina con el fix que se está evaluando).
+      if (typeof BGService?.getFixesPersistidos !== "function") return null;
 
       // Veto: evidencia reciente y buena de que el vendedor ya se fue.
-      // Manda sobre la evidencia positiva de hace minutos.
+      // Manda sobre la evidencia positiva de hace minutos, pero exige
+      // TRACKING_VETO_FIXES_MIN fixes de acuerdo (R3): un solo fix malo no
+      // puede tumbar una visita real.
       const recientesBuenos: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
-        BGService.getFixesRecientes(TRACKING_VETO_VENTANA_MS, TRACKING_VETO_ACCURACY_MAX) ?? [];
+        BGService.getFixesPersistidos(TRACKING_VETO_VENTANA_MS, TRACKING_VETO_ACCURACY_MAX) ?? [];
 
+      let vetos = 0;
       for (const f of recientesBuenos) {
         const dist = calcularDistancia(f.latitud, f.longitud, clienteLat, clienteLng);
         if (dist > metrosPermitidos + TRACKING_VETO_MARGEN_M) {
-          console.log(
-            `[LocationService] ok_tracking vetado: fix reciente a ${Math.round(dist)} m ` +
-              `(permitido ${metrosPermitidos} m, accuracy ±${Math.round(f.accuracy)} m)`,
-          );
-          return null;
+          vetos += 1;
+          if (vetos >= TRACKING_VETO_FIXES_MIN) {
+            console.log(
+              `[LocationService] ok_tracking vetado: ${vetos} fixes recientes a ${Math.round(dist)} m ` +
+                `(permitido ${metrosPermitidos} m, accuracy ±${Math.round(f.accuracy)} m)`,
+            );
+            return null;
+          }
         }
       }
 
       const evidencia: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
-        BGService.getFixesRecientes(TRACKING_EVIDENCIA_VENTANA_MS, TRACKING_EVIDENCIA_ACCURACY_MAX) ?? [];
+        BGService.getFixesPersistidos(TRACKING_EVIDENCIA_VENTANA_MS, TRACKING_EVIDENCIA_ACCURACY_MAX) ?? [];
 
       let mejor: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number } | null = null;
 
@@ -911,7 +932,13 @@ class LocationService {
    *  2. Si parece estar fuera de rango pero el accuracy es peor que
    *     PRECISION_MAXIMA_ACEPTABLE, no se puede afirmar que esté fuera: se pide
    *     reintentar (precision_baja).
-   *  3. Si el accuracy es confiable y aun así está fuera, se marca fuera_de_rango.
+   *  2.5. Antes de bloquear se contrasta con los fixes YA PERSISTIDOS del
+   *     tracking: si en los últimos 5 min hay uno dentro del rango del cliente,
+   *     la venta se acredita como `ok_tracking`. Un fix de red puede declarar
+   *     ±12 m y estar 400 m fuera (caso 373510: 419 m mientras el tracking del
+   *     mismo minuto marcaba 38 m).
+   *  3. Si el accuracy es confiable, el tracking no respalda y aun así está
+   *     fuera, se marca fuera_de_rango.
    *
    *  Velocidad: se corta la escucha en cuanto el veredicto es definitivo —
    *  tanto al acertar (dentro de rango) como al fallar sin remedio (aun
@@ -1022,6 +1049,21 @@ class LocationService {
           `accuracy=±${Math.round(accuracy)} m`,
       );
       return { valido: false, motivo, distancia, accuracy, metrosPermitidos, ubicacion, ...diag };
+    }
+
+    // 2.9) Fuera de rango con accuracy "buena". Un fix de red puede declarar
+    //      ±12 m y estar 400 m fuera (caso 373510: 419 m con ±11.9 m mientras
+    //      el tracking del mismo minuto marcaba 38 m del cliente). Antes de
+    //      bloquear la venta se contrasta con evidencia persistida.
+    if (HABILITAR_OK_TRACKING_FUERA_DE_RANGO) {
+      const corr = this.corroborarPresenciaConTracking(clienteLat, clienteLng, metrosPermitidos);
+      if (corr) {
+        console.log(
+          `[LocationService] Fuera de rango contradicho por tracking: lectura a ${Math.round(distancia)} m, ` +
+            `evidencia a ${Math.round(corr.distancia)} m del cliente`,
+        );
+        return this.construirResultadoOkTracking(clienteLat, clienteLng, metrosPermitidos, corr);
+      }
     }
 
     // 2.5) Contraste con tracking de fondo: si la velocidad implícita entre el

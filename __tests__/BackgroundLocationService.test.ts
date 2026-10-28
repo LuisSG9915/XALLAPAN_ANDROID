@@ -393,3 +393,123 @@ describe("BackgroundLocationService tracking upload", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Reglas de admisión de evidencia (R1 proveedor, R2 salto imposible).
+// Solo los fixes que pasan estas reglas pueden acreditar una venta como
+// `ok_tracking`; ver docs/PLAN_OK_TRACKING.md §14.
+// ---------------------------------------------------------------------------
+describe("BackgroundLocationService — evidencia persistida", () => {
+  const LAT = 19.55;
+  const LNG = -96.95;
+  // 0.05° de latitud ≈ 5.5 km
+  const LEJOS = LAT + 0.05;
+
+  const pos = (
+    latitude: number,
+    longitud: number,
+    opts: { accuracy?: number; timestamp?: number; provider?: string; speed?: number | null } = {},
+  ) =>
+    ({
+      coords: {
+        latitude,
+        longitude: longitud,
+        accuracy: opts.accuracy ?? 10,
+        speed: opts.speed ?? null,
+      },
+      timestamp: opts.timestamp ?? Date.now(),
+      provider: opts.provider,
+    }) as any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+    service.fixesPersistidos = [];
+    service.fixDescartadoPorSalto = null;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("R1: descarta un fix de red aunque declare ±12 m (caso 373510)", () => {
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 12, provider: "network" }));
+
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toEqual([]);
+  });
+
+  it("R1: descarta un fix pasivo", () => {
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 8, provider: "passive" }));
+
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toEqual([]);
+  });
+
+  it("R1: acepta GNSS crudo", () => {
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 12, provider: "gps" }));
+
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+  });
+
+  it("R1: acepta `fused` solo con precisión realista y velocidad disponible", () => {
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 15, provider: "fused", speed: 3 }));
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+
+    service.fixesPersistidos = [];
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 22, provider: "fused", speed: 3 }));
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(0);
+
+    service.fixesPersistidos = [];
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 15, provider: "fused", speed: null }));
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(0);
+  });
+
+  it("R2: descarta un salto imposible (5.5 km en 30 s = 660 km/h)", () => {
+    const t0 = Date.now();
+    service.registrarFixPersistido(pos(LAT, LNG, { timestamp: t0 - 60_000, provider: "gps" }));
+    service.registrarFixPersistido(pos(LEJOS, LNG, { timestamp: t0 - 30_000, provider: "gps" }));
+
+    const buffer = service.getFixesPersistidos(5 * 60_000, 25);
+    expect(buffer).toHaveLength(1);
+    expect(buffer[0].latitud).toBeCloseTo(LAT, 5);
+  });
+
+  it("R2: el salto descartado no mueve la base (el fix siguiente se acepta)", () => {
+    const t0 = Date.now();
+    service.registrarFixPersistido(pos(LAT, LNG, { timestamp: t0 - 90_000, provider: "gps" }));
+    service.registrarFixPersistido(pos(LEJOS, LNG, { timestamp: t0 - 60_000, provider: "gps" }));
+    service.registrarFixPersistido(pos(LAT + 0.0001, LNG, { timestamp: t0 - 30_000, provider: "gps" }));
+
+    const buffer = service.getFixesPersistidos(5 * 60_000, 25);
+    expect(buffer).toHaveLength(2);
+    for (const f of buffer) {
+      expect(f.latitud).toBeLessThan(LAT + 0.001);
+    }
+  });
+
+  it("R2: dos fixes concordantes entre sí reanclan la cadena tras un salto", () => {
+    const t0 = Date.now();
+    service.registrarFixPersistido(pos(LAT, LNG, { timestamp: t0 - 120_000, provider: "gps" }));
+    // Salto: 660 km/h contra la base → descartado, queda como candidato de reanclaje.
+    service.registrarFixPersistido(pos(LEJOS, LNG, { timestamp: t0 - 90_000, provider: "gps" }));
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+
+    // El siguiente concuerda con el descartado (11 m en 30 s) → movimiento real.
+    service.registrarFixPersistido(pos(LEJOS + 0.0001, LNG, { timestamp: t0 - 60_000, provider: "gps" }));
+
+    const buffer = service.getFixesPersistidos(5 * 60_000, 25);
+    expect(buffer).toHaveLength(2);
+    for (const f of buffer) {
+      expect(f.latitud).toBeGreaterThan(LEJOS - 0.001);
+    }
+  });
+
+  it("no persiste fixes simulados ni sin coordenadas válidas", () => {
+    service.registrarFixPersistido({
+      coords: { latitude: Number.NaN, longitude: LNG, accuracy: 8 },
+      timestamp: Date.now(),
+      provider: "gps",
+    } as any);
+
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toEqual([]);
+  });
+});
