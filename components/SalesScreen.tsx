@@ -23,6 +23,7 @@ import GpsBitacoraService from "../services/GpsBitacoraService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import ReubicacionService from "../services/ReubicacionService";
+import { registrarReubicacionFallida } from "../services/ReubicacionBitacora";
 import { APP_NAME, COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
 import IntercambioEnvaseModal from "./IntercambioEnvaseModal";
 import PrestamoEnvaseModal from "./PrestamoEnvaseModal";
@@ -1709,6 +1710,11 @@ export default function SalesScreen({ route }: { route?: any }) {
     }
 
     if (!usuarioPermisoReubicacion) {
+      void registrarReubicacionFallida("reubic_sin_permiso", {
+        idCliente: clienteAUbicar.id,
+        clienteLatitud: clienteAUbicar.latitud ?? null,
+        clienteLongitud: clienteAUbicar.longitud ?? null,
+      });
       Alert.alert(
         "Sin permiso de reubicación",
         "No tienes permiso para realizar una reubicación, o ya utilizaste tu permiso.",
@@ -1730,6 +1736,12 @@ export default function SalesScreen({ route }: { route?: any }) {
               const ubicacion = await LocationService.getBestLocation(5, 10000, undefined, undefined, undefined, 3);
 
               if (!ubicacion) {
+                void registrarReubicacionFallida("reubic_sin_gps", {
+                  idCliente: clienteAUbicar.id,
+                  clienteLatitud: clienteAUbicar.latitud ?? null,
+                  clienteLongitud: clienteAUbicar.longitud ?? null,
+                  diagnostico: LocationService.getUltimoDiagnosticoGps(),
+                });
                 Alert.alert("Error GPS", "No se pudo obtener tu ubicación. Verifica que el GPS esté activado y estés a cielo abierto.");
                 setReubicandoCliente(false);
                 return;
@@ -1742,6 +1754,13 @@ export default function SalesScreen({ route }: { route?: any }) {
               console.log("[Sales] Ubicación obtenida:", ubicacion, "Diagnóstico:", diagnostico);
 
               if (accuracy > 25 || numFixes < 3) {
+                void registrarReubicacionFallida("reubic_precision", {
+                  idCliente: clienteAUbicar.id,
+                  clienteLatitud: clienteAUbicar.latitud ?? null,
+                  clienteLongitud: clienteAUbicar.longitud ?? null,
+                  ubicacion,
+                  diagnostico,
+                });
                 Alert.alert(
                   "Precisión GPS insuficiente",
                   `No se puede reubicar el cliente con la precisión actual:\n\n` +
@@ -1843,12 +1862,25 @@ export default function SalesScreen({ route }: { route?: any }) {
 
                 console.log("[Sales] ✅ Cliente reubicado exitosamente");
               } else {
+                void registrarReubicacionFallida("reubic_rechazo", {
+                  idCliente: clienteAUbicar.id,
+                  clienteLatitud: clienteAUbicar.latitud ?? null,
+                  clienteLongitud: clienteAUbicar.longitud ?? null,
+                  ubicacion,
+                  diagnostico,
+                });
                 Alert.alert(
                   "Error",
                   "No se pudo registrar la reubicación. Es posible que el cliente ya haya sido reubicado.",
                 );
               }
             } catch (error) {
+              void registrarReubicacionFallida("reubic_error", {
+                idCliente: clienteAUbicar.id,
+                clienteLatitud: clienteAUbicar.latitud ?? null,
+                clienteLongitud: clienteAUbicar.longitud ?? null,
+                diagnostico: LocationService.getUltimoDiagnosticoGps(),
+              });
               console.error("[Sales] Error al reubicar cliente:", error);
               Alert.alert("Error", "Ocurrió un error al intentar reubicar el cliente.");
             } finally {
