@@ -1571,7 +1571,14 @@ class FullSyncService {
       ? (this.realm.objectForPrimaryKey("Usuario", idUsuario) as any)
       : null;
     const usuarioSesion = await AuthService.restoreSession();
-    const rutaPedido = Number(usuarioSync?.ruta ?? usuarioSesion?.ruta ?? 0);
+    const rutaPedido = Number(
+      usuarioSync?.ruta ??
+        usuarioSesion?.ruta ??
+        usuarioSesion?.sucursal_origen ??
+        usuarioSesion?.sucursal ??
+        sucursal ??
+        0,
+    );
     const pedidosIncrementalSince =
       rutaPedido > 0
         ? this.getLastSyncedArForRoute(rutaPedido) ??

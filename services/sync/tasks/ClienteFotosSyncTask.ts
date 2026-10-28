@@ -21,7 +21,19 @@ export class ClienteFotosSyncTask extends SyncTask {
     try {
       ClienteFotosService.setRealm(this.realm);
       const user = await AuthService.restoreSession();
-      const ruta = Number(user?.ruta ?? user?.idRuta ?? 0);
+      const usuarioSync = this.idUsuario
+        ? (this.realm.objectForPrimaryKey("Usuario", this.idUsuario) as any)
+        : null;
+      const ruta =
+        Number(this.sucursal) ||
+        Number(
+          usuarioSync?.ruta ?? user?.sucursal_origen ?? user?.sucursal ?? 0,
+        );
+      if (!ruta) {
+        console.warn(
+          "[ClienteFoto] No se pudo resolver la ruta del usuario; se omite la descarga de fotos.",
+        );
+      }
       console.log("[ClienteFoto] Descarga full por ruta:", { ruta });
       const count = await ClienteFotosService.downloadFull(0, ruta);
       return {
