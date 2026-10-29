@@ -16,6 +16,8 @@ import { canRequestPackageInstalls, installApk, openInstallSettings } from "./Ap
 import { APP_NAME } from "../theme/theme";
 
 const API_BASE_URL = "https://api.cbinformatica.net:9031";
+const GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/LuisSG9915/XALLAPAN_ANDROID/releases/latest";
+const GITHUB_MANIFEST_ASSET = "update.json";
 const APPLICATION_ID = "com.awesomeproject";
 const CHANNEL_ID = "actualizaciones-app";
 const NOTIFIED_VERSION_KEY = "@xallapan/actualizacion_version_notificada";
@@ -242,27 +244,7 @@ class AppUpdateService {
     this.setState({ phase: "checking", networkType: network?.type ?? null, error: null });
 
     try {
-      const query = new URLSearchParams({
-        plataforma: "android",
-        applicationId: APPLICATION_ID,
-        versionCode: String(DeviceInfo.getBuildNumber()),
-      });
-      const response = await fetchWithTimeout(
-        `${API_BASE_URL}/api/AppUpdates/check?${query.toString()}`,
-        { headers: { accept: "application/json" } },
-        10000,
-      );
-
-      if (response.status === 204) {
-        await this.registrarVersionInstaladaSiCorresponde();
-        await AsyncStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
-        await this.limpiarEstadoActualizado();
-        return null;
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const payload = await response.json();
-      const actualizacion = this.normalizarActualizacion(payload);
+      const actualizacion = await this.consultarUltimoRelease();
       await AsyncStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
 
       if (!actualizacion || actualizacion.versionCode <= Number(DeviceInfo.getBuildNumber())) {
@@ -563,6 +545,60 @@ class AppUpdateService {
       await unlink(currentPath).catch(() => undefined);
     }
     this.setState({ phase: "idle", update: null, progress: 0, blocking: false, localPath: null, error: null });
+  }
+
+  private async consultarUltimoRelease(): Promise<AppUpdate | null> {
+    const response = await fetchWithTimeout(
+      GITHUB_LATEST_RELEASE_URL,
+      { headers: { accept: "application/vnd.github+json" } },
+      10000,
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const release = await response.json();
+    return this.actualizacionDesdeRelease(release);
+  }
+
+  private async actualizacionDesdeRelease(release: any): Promise<AppUpdate | null> {
+    if (!release || typeof release !== "object") return null;
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const apk = assets.find((asset: any) => String(asset?.name ?? "").toLowerCase().endsWith(".apk"));
+    if (!apk?.browser_download_url) return null;
+
+    let manifest: any = null;
+    const manifestAsset = assets.find((asset: any) => asset?.name === GITHUB_MANIFEST_ASSET);
+    if (manifestAsset?.browser_download_url) {
+      manifest = await fetchWithTimeout(
+        manifestAsset.browser_download_url,
+        { headers: { accept: "application/json" } },
+        8000,
+      )
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+    }
+
+    const tagInfo = this.parsearTagRelease(String(release.tag_name ?? ""));
+    return this.normalizarActualizacion({
+      plataforma: "android",
+      ...(manifest ?? {}),
+      id: release.id,
+      versionCode: manifest?.versionCode ?? manifest?.VersionCode ?? tagInfo.versionCode,
+      versionApp: manifest?.versionApp ?? manifest?.VersionApp ?? tagInfo.versionApp,
+      downloadUrl: apk.browser_download_url,
+      tamanoBytes: manifest?.tamanoBytes ?? manifest?.TamanoBytes ?? apk.size ?? null,
+      notas: manifest?.notas ?? manifest?.Notas ?? release.body ?? null,
+      fechaDespliegueUtc: manifest?.fechaDespliegueUtc ?? release.published_at ?? null,
+    });
+  }
+
+  private parsearTagRelease(tag: string): { versionCode: number; versionApp: string } {
+    const limpio = tag.trim().replace(/^v/i, "");
+    const [versionApp, build] = limpio.split("+");
+    let versionCode = Number.parseInt(build ?? "", 10);
+    if (!Number.isFinite(versionCode) || versionCode <= 0) {
+      versionCode = Number.parseInt(versionApp, 10);
+    }
+    return { versionCode, versionApp };
   }
 
   private normalizarActualizacion(row: any): AppUpdate | null {

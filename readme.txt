@@ -50,3 +50,20 @@ open "/Users/luis/Documents/desarrollo/XALLAPAN_ANDROID/android/app/build/output
 
 
 adb shell pm enable com.awesomeproject
+
+************************************************
+PUBLICAR VERSION NUEVA (GitHub Releases)
+
+Sin setup: usa la credencial de GitHub que ya tiene git guardada.
+
+Cada release:
+  1. Subir versionCode/versionName en android/app/build.gradle
+  2. release-apk.bat "notas del release"   (notas opcionales)
+
+El script compila, genera update.json (sha256/tamano/flags) y crea
+o actualiza el release v{versionName}+{versionCode} con el APK.
+La app lo detecta sola al abrirse o en su sondeo de 15 minutos.
+
+Para que una version NO obligue actualizar al entrar, editar el
+release en GitHub y cambiar en update.json: "obligatoria":false
+************************************************
