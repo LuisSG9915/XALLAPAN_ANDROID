@@ -58,9 +58,16 @@ const esPedidoFinalizado = (estatus: number): boolean =>
   [
     ESTATUS_PEDIDO.ENTREGADO,
     ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
-    ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
     ESTATUS_PEDIDO.CANCELADO,
   ].includes(Number(estatus));
+
+// Estatus "pendientes": el pedido sigue atendible y debe mostrarse en agenda
+// aunque su fechaEntrega sea de otro día. PROGRAMADO se mantiene filtrando por
+// fecha (aún no es un compromiso de entrega).
+const ESTATUS_PEDIDOS_PENDIENTES = [
+  ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
+  ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA,
+];
 
 interface Visita {
   id: string;
@@ -80,6 +87,7 @@ interface VisitaConCliente extends Visita {
   metros?: number; // Distancia máxima permitida en metros
   domicilio?: string;
   pedidoFolios?: number[];
+  fechaEntregaPedido?: Date;
 }
 
 interface ClienteLite {
@@ -204,11 +212,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
         pedidosPorRuta.forEach((pedido) => {
           const folio = Number(pedido.folio);
+          const estatus = Number(pedido.estatus);
           if (
             !Number.isFinite(folio) ||
             folio <= 0 ||
-            !esMismaFecha(pedido.fechaEntrega, fecha) ||
-            esPedidoFinalizado(Number(pedido.estatus)) ||
+            esPedidoFinalizado(estatus) ||
+            (!ESTATUS_PEDIDOS_PENDIENTES.includes(estatus) &&
+              !esMismaFecha(pedido.fechaEntrega, fecha)) ||
             pedidosPorFolio.has(folio)
           ) {
             return;
@@ -277,20 +287,13 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           })),
         });
 
-        const clientesAgendados = new Set(
-          visitasDelDia
-            .filter((visita: any) => Number(visita.tipo) !== 99)
-            .map((visita: any) => Number(visita.idCliente)),
-        );
-        const pedidosSinAgenda = pedidosDelDia.filter(
-          (pedido) => !clientesAgendados.has(Number(pedido.cliente)),
-        );
+        // Los pedidos de clientes agendados también generan su propia tarjeta
         const foliosConVisita = new Set(
           visitasDelDia
             .filter((visita: any) => Number(visita.tipo) === 99)
             .map((visita: any) => Number(visita.idOriginal)),
         );
-        const pedidosSinVisita = pedidosSinAgenda.filter(
+        const pedidosSinVisita = pedidosDelDia.filter(
           (pedido) => !foliosConVisita.has(Number(pedido.folio)),
         );
         const gruposPedidosCentral = new Map<
@@ -298,14 +301,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           { visita?: any; pedidos: Pedido[]; folios: Set<number> }
         >();
         const pedidoPorFolio = new Map<number, Pedido>(
-          pedidosSinAgenda.map((pedido) => [Number(pedido.folio), pedido]),
+          pedidosDelDia.map((pedido) => [Number(pedido.folio), pedido]),
         );
 
         visitasDelDia
-          .filter(
-            (visita: any) =>
-              Number(visita.tipo) === 99 && !clientesAgendados.has(Number(visita.idCliente)),
-          )
+          .filter((visita: any) => Number(visita.tipo) === 99)
           .forEach((visita: any) => {
             const idCliente = Number(visita.idCliente);
             if (!Number.isFinite(idCliente) || idCliente <= 0) return;
@@ -380,6 +380,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
               tipo: 99,
               visitado: grupo.pedidos.length > 0 ? 0 : Number(visitaBase?.visitado ?? 0),
               pedidoFolios: folios,
+              fechaEntregaPedido: fechaEntrega ?? undefined,
               nombreCliente:
                 pedidoPrincipal?.clienteNombre || (cliente?.nombre ? String(cliente.nombre) : undefined),
               latitud: cliente?.latitud != null ? Number(cliente.latitud) : undefined,
@@ -577,8 +578,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
       );
       if (!ubicacionValida) return;
     } else {
-      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
-      return;
+      // Cliente sin coordenadas: permitir el registro como en venta.
+      // Las coordenadas se capturan en la venta/entrega y el servidor las
+      // actualiza automáticamente en el arrastre (sp_MovilesVentasMovilErp).
+      console.log(`[Cumplimiento] Cliente ${visita.idCliente} sin ubicación, permitiendo registro de visita`);
     }
 
     // Abrir modal para seleccionar tipo de visita
@@ -702,8 +705,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
     cargarDatos(fechaSeleccionada, currentSucursal);
   };
 
-  const obtenerRangoHorario = (visita: Visita) => {
-    if (Number(visita.tipo) === 99) return "Pedido de hoy";
+  const obtenerRangoHorario = (visita: VisitaConCliente) => {
+    if (Number(visita.tipo) === 99) {
+      const fechaPedido = visita.fechaEntregaPedido ?? visita.fecha;
+      return esFechaDeHoy(fechaPedido) ? "Pedido de hoy" : "Pedido pendiente";
+    }
 
     const horaInicio = 8 + visita.orden * 0.5;
     const horaFin = horaInicio + 0.05;
@@ -1009,11 +1015,8 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           );
           if (!ubicacionValida) return;
         } else {
-          Alert.alert(
-            "Cliente sin ubicación",
-            "El cliente no tiene ubicación registrada. No se puede registrar la visita.",
-          );
-          return;
+          // Cliente sin coordenadas: permitir el registro como en venta
+          console.log(`[Cumplimiento] Cliente ${cliente.id} sin ubicación, permitiendo registro de visita manual`);
         }
       }
 
@@ -1256,7 +1259,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
             </View>
           </View>
           <View style={styles.botonesContainer}>
-            {usuarioPermisoReubicacion && !esPedidoCentral && (
+            {usuarioPermisoReubicacion && (
               <TouchableOpacity
                 style={[styles.reubicarBtnModal, reubicandoCliente && styles.reubicarBtnModalDisabled]}
                 onPress={() =>

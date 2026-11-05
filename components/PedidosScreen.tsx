@@ -45,7 +45,9 @@ const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
 };
 
 const debeMostrarEnRuta = (pedido: Pedido): boolean =>
-  Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA || esFechaDeHoy(pedido.fechaEntrega);
+  Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA ||
+  Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ||
+  esFechaDeHoy(pedido.fechaEntrega);
 
 const formatearMoneda = (valor?: number): string =>
   `$${Number(valor ?? 0).toLocaleString("es-MX", {

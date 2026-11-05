@@ -458,6 +458,19 @@ class PedidoNotificacionService {
           continue;
         }
 
+        // Restaurar la visita fuera de agenda para cualquier pedido abierto:
+        // tras borrar datos de la app, el full sync regresa los renglones del
+        // pedido pero las visitas tipo-99 (locales) se perdían porque solo se
+        // creaban cuando el pedido llegaba en CONFIRMADO.
+        const ESTATUS_CERRADOS = [
+          ESTATUS_PEDIDO.ENTREGADO,
+          ESTATUS_PEDIDO.ENTREGADO_PARCIAL,
+          ESTATUS_PEDIDO.CANCELADO,
+        ];
+        if (!ESTATUS_CERRADOS.includes(Number(pedido.estatus))) {
+          await this.registrarVisitaFueraAgenda(pedido);
+        }
+
         // Solo notificar pedidos confirmados, aun no notificados ni cerrados
         const ESTATUS_FINALES_NOTIF = [
           ESTATUS_PEDIDO.ENTREGADO,
@@ -483,8 +496,6 @@ class PedidoNotificacionService {
           );
           continue;
         }
-
-        await this.registrarVisitaFueraAgenda(pedido);
 
         // Marcar como notificado para evitar duplicados en futuras sincronizaciones
         this.marcarPedidoNotificado(folio);

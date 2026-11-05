@@ -21,7 +21,7 @@ import PedidosService, {
 } from "../services/PedidosService";
 import FullSyncService from "../services/FullSyncService";
 import AuthService from "../services/AuthService";
-import LocationService from "../services/LocationService";
+import LocationService, { LocationCoordinates } from "../services/LocationService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import DetalleVisitasService from "../services/DetalleVisitasService";
 import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
@@ -105,6 +105,11 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   } | null>(null);
   const [diagnosticoGps, setDiagnosticoGps] = useState<DiagnosticoGpsData | null>(null);
   const [gpsValidado, setGpsValidado] = useState(false);
+  // GPS del vendedor para guardarlo en la venta generada por la entrega.
+  // Se llena al validar ubicación (resultado.ubicacion) o por pre-fetch cuando
+  // el cliente no tiene coordenadas (igual que el flujo de venta).
+  const gpsVentaRef = useRef<LocationCoordinates | null>(null);
+  const gpsVentaPromiseRef = useRef<Promise<LocationCoordinates | null> | null>(null);
   const [clienteNombre, setClienteNombre] = useState<string>("");
   const [clienteDireccion, setClienteDireccion] = useState<string>("");
   const [observaciones, setObservaciones] = useState<string>("");
@@ -578,7 +583,22 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       !Number.isFinite(clienteLng) ||
       (clienteLat === 0 && clienteLng === 0)
     ) {
-      Alert.alert("Cliente sin ubicación", "El cliente no tiene registrada su ubicación geográfica.");
+      // Cliente sin coordenadas: permitir la atención como en venta.
+      // Pre-fetch del GPS del vendedor para guardarlo en la venta generada;
+      // el servidor actualiza las coordenadas del cliente en el arrastre.
+      console.log("[PedidoDetalle] Cliente sin ubicación, permitiendo atención sin validación GPS");
+      setValidandoGPS(true);
+      try {
+        const gpsPromise = LocationService.getCurrentLocation();
+        gpsVentaPromiseRef.current = gpsPromise;
+        void gpsPromise.then((coords) => {
+          if (coords) gpsVentaRef.current = coords;
+        });
+        const iniciado = await iniciarAtencion();
+        if (iniciado) setGpsValidado(true);
+      } finally {
+        setValidandoGPS(false);
+      }
       return;
     }
 
@@ -608,6 +628,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       );
 
       if (resultado.valido) {
+        if (resultado.ubicacion) gpsVentaRef.current = resultado.ubicacion;
         const iniciado = await iniciarAtencion();
         if (iniciado) setGpsValidado(true);
         return;
@@ -823,6 +844,21 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     ).join(" | ");
     const fechaVenta = FullSyncService.getMexicoNow();
 
+    // GPS del vendedor para la venta (igual que el flujo de venta): usa el fix
+    // cacheado en validarGPS o el pre-fetch; como fallback intenta una lectura
+    // acotada a 4 s para no detener la entrega.
+    let coordsVenta = gpsVentaRef.current;
+    if (!coordsVenta) {
+      try {
+        coordsVenta = await Promise.race([
+          gpsVentaPromiseRef.current ?? LocationService.getCurrentLocation(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+      } catch {
+        coordsVenta = null;
+      }
+    }
+
     await FullSyncService.createLocalVentas(
       entregas.map((entrega, index) => ({
         id: idMovil + index,
@@ -842,8 +878,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         vendedor,
         folioFactura: false,
         facturacionMovil: false,
-        latitud: null,
-        longitud: null,
+        latitud: coordsVenta?.latitude ?? null,
+        longitud: coordsVenta?.longitude ?? null,
         observacion: observacionVenta,
         idPedido: pedidoCerrado.idPedido ?? pedidoCerrado.folio,
         idLista: entrega.idLista,
