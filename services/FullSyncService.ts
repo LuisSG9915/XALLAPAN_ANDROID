@@ -8,6 +8,7 @@ import GpsBitacoraService from "./GpsBitacoraService";
 import ReubicacionService from "./ReubicacionService";
 import AuthService from "./AuthService";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { normalizarObservaciones } from "./pedidoObservaciones";
 import ClienteFotosService, {
   formatClienteFotosFechaInicial,
 } from "./ClienteFotosService";
@@ -691,7 +692,7 @@ class FullSyncService {
               estatus: Number(row.estatus ?? 0),
               estatusDescripcion: null,
               fueraAgenda: row.fueraAgenda ?? row.fuera_agenda ?? null,
-              observaciones: row.observaciones ?? null,
+              observaciones: normalizarObservaciones(row.observaciones),
               no_venta: row.noVenta ?? row.no_venta ?? null,
               tieneDiferencia: false,
               causaNoAtencion: null,
@@ -774,7 +775,10 @@ class FullSyncService {
                 pedido.obserNoAtencion;
               pedido.fueraAgenda =
                 row.fueraAgenda ?? row.fuera_agenda ?? pedido.fueraAgenda;
-              pedido.observaciones = row.observaciones ?? pedido.observaciones;
+              pedido.observaciones =
+                row.observaciones == null
+                  ? pedido.observaciones
+                  : normalizarObservaciones(row.observaciones);
               pedido.no_venta = row.noVenta ?? row.no_venta ?? pedido.no_venta;
               pedido.precio = row.precio ?? pedido.precio;
               if (!preservarLocal) {
@@ -1640,6 +1644,21 @@ class FullSyncService {
               lastSuccessfulSync?.fechaFinal instanceof Date
                 ? lastSuccessfulSync.fechaFinal
                 : ClienteFotosService.getLastLogDate();
+            // Sin descarga full previa el cursor cae a 1900 y el incremental
+            // traería el catálogo completo (~150 MB) en segundo plano.
+            // En ese caso se omite: la carga inicial solo se hace en el login.
+            if (since.getFullYear() <= 1900) {
+              console.warn(
+                "[Incremental] ClienteFotos omitido: sin descarga full previa (solo login/manual)."
+              );
+              return {
+                tabla: tableName,
+                endpoint: "incremental-sin-full-previa",
+                registrosLeidos: 0,
+                registrosGuardados: 0,
+                registrosActualizados: 0,
+              };
+            }
             const url = `${
               this.apiBaseUrl
             }/api/MovilesVentas/sp_MovilesClientesFotos?fechaInicial=${encodeURIComponent(
@@ -3642,6 +3661,23 @@ class FullSyncService {
         error: error?.message || "Error desconocido",
       };
     }
+  }
+
+  /**
+   * Descarga el catálogo FULL de fotografías de clientes (~150 MB).
+   * Endpoint pesado excluido de la sincronización completa: solo se invoca
+   * desde el login o desde el botón de descarga manual del inicio.
+   * El estado del último intento queda persistido en ClienteFotosService
+   * (downloadFull -> setFullDownloadStatus) para mostrar el aviso en Home.
+   */
+  async descargarFotosClientesFull(
+    sucursal: number = 1,
+    idUsuario: number = 1
+  ): Promise<{ success: boolean; error?: string }> {
+    console.log(
+      "[FullSync] Descarga full de fotos de clientes (solo login/manual)..."
+    );
+    return this.syncTable("ClienteFoto", sucursal, undefined, idUsuario);
   }
 
   private updateSyncStatus(entity: string, success: boolean): void {

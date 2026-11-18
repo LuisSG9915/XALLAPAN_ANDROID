@@ -6,6 +6,7 @@ import {
   PedidoBitacoraUploadSyncTask,
   PedidoEstadoUploadSyncTask,
 } from "./sync/tasks/PedidoBitacoraUploadSyncTask";
+import { normalizarObservaciones } from "./pedidoObservaciones";
 
 // Generación de id_movil corto e irrepetible para pedidos/ventas locales.
 // Estructura: MOVIL_ID_BASE + (segundos desde EPOCH * 1000) + sucursal
@@ -293,7 +294,7 @@ class PedidosService {
               estatus: estatusFinal,
               estatusDescripcion: this.getEstatusDescripcion(estatusFinal),
               fueraAgenda: row.fueraAgenda,
-              observaciones: row.observaciones,
+              observaciones: normalizarObservaciones(row.observaciones),
               no_venta: row.noVenta,
               tieneDiferencia,
               causaNoAtencion: causaNoAtencionFinal,
@@ -544,7 +545,7 @@ class PedidosService {
       const renglonExistente = realm.objectForPrimaryKey("Pedido", id) as any;
       const ahora = new Date();
       const productoNombre = producto.productoNombre || this.getProductoById(idProducto)?.descripcion || `Producto #${idProducto}`;
-      const observacionesBase = String(primerRenglon.observaciones ?? "").trim();
+      const observacionesBase = normalizarObservaciones(primerRenglon.observaciones) ?? "";
       const observaciones = observacionesBase.includes(PRODUCTO_AGREGADO_OBSERVACION)
         ? observacionesBase
         : [observacionesBase, PRODUCTO_AGREGADO_OBSERVACION].filter(Boolean).join(" ");
@@ -662,7 +663,7 @@ class PedidosService {
               estatus,
               estatusDescripcion: this.getEstatusDescripcion(estatus),
               fueraAgenda: row.fueraAgenda ?? row.fuera_agenda ?? null,
-              observaciones: row.observaciones ?? null,
+              observaciones: normalizarObservaciones(row.observaciones),
               no_venta: row.noVenta ?? row.no_venta ?? null,
               tieneDiferencia: false,
               causaNoAtencion: row.causaNoAtencion ?? row.causa_no_atencion ?? null,
@@ -704,7 +705,7 @@ class PedidosService {
         if (row.numeroProductos !== undefined) pedido.numeroProductos = Number(row.numeroProductos);
         if (row.cantPedido !== undefined) pedido.cantPedido = Number(row.cantPedido) || 0;
         if (row.listaPrecio !== undefined) pedido.listaPrecio = row.listaPrecio;
-        if (row.observaciones !== undefined) pedido.observaciones = row.observaciones;
+        if (row.observaciones !== undefined) pedido.observaciones = normalizarObservaciones(row.observaciones);
         if (row.noVenta !== undefined) pedido.no_venta = row.noVenta;
         if (row.fueraAgenda !== undefined) pedido.fueraAgenda = row.fueraAgenda;
         if (row.nombreCliente !== undefined) pedido.clienteNombre = row.nombreCliente;
@@ -1173,7 +1174,7 @@ class PedidosService {
               idProducto: renglon.idProducto ?? null,
               cantPedido: renglon.cantPedido ?? null,
               precio: renglon.precio ?? null,
-              observaciones: renglon.observaciones ?? null,
+              observaciones: normalizarObservaciones(renglon.observaciones),
               listaPrecio: renglon.listaPrecio ?? null,
               fechaEntrega: renglon.fechaEntrega ?? null,
               estatus: data.estatus,

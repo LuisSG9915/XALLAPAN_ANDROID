@@ -18,6 +18,7 @@ import { Icon } from "react-native-elements";
 import FullSyncService from "../services/FullSyncService";
 import VisitaSyncService from "../services/VisitaSyncService";
 import PedidosService from "../services/PedidosService";
+import { normalizarObservaciones } from "../services/pedidoObservaciones";
 import AuthService from "../services/AuthService";
 import ClienteFotosService, { ClienteFoto } from "../services/ClienteFotosService";
 import { COLORS, SPACING, SHADOWS, BORDER_RADIUS, TYPOGRAPHY } from "../theme/theme";
@@ -795,7 +796,7 @@ export default function DataViewScreen() {
           {item.fechaEntrega && <Text style={styles.cardText}>Entrega: {new Date(item.fechaEntrega).toLocaleDateString()}</Text>}
           <Text style={styles.cardText}>Fuera de agenda: {item.fueraAgenda ? "Sí" : "No"}</Text>
           <Text style={styles.cardText}>Modificado local: {item.modificadoLocal ? "Sí" : "No"}</Text>
-          {item.observaciones && <Text style={styles.cardText}>Obs: {item.observaciones}</Text>}
+          {normalizarObservaciones(item.observaciones) && <Text style={styles.cardText}>Obs: {item.observaciones}</Text>}
           {item.obserNoAtencion && <Text style={[styles.cardText, { color: COLORS.error }]}>Causa no atención: {item.obserNoAtencion}</Text>}
         </View>
       </View>

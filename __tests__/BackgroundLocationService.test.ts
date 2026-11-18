@@ -428,6 +428,10 @@ describe("BackgroundLocationService — evidencia persistida", () => {
     service.fixDescartadoPorSalto = null;
     service.ultimoFixTracking = null;
     service.saltoDescartadoUltimoTracking = null;
+    service.isTaskRunning = false;
+    service.captureInFlight = false;
+    service.lastCaptureAt = 0;
+    service.lastCaptureAccuracy = 999;
   });
 
   afterEach(() => {
@@ -452,17 +456,24 @@ describe("BackgroundLocationService — evidencia persistida", () => {
     expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
   });
 
-  it("R1: acepta `fused` solo con precisión realista y velocidad disponible", () => {
-    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 15, provider: "fused", speed: 3 }));
+  it("R1: acepta `fused` con el umbral general de precisión (≤25 m)", () => {
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 15, provider: "fused" }));
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+
+    // Caso 400517: el fix a 50.6 m del cliente con ±24.2 m era descartado por
+    // la regla vieja (fused <= 20); ahora entra al umbral general.
+    service.fixesPersistidos = [];
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 24.2, provider: "fused" }));
     expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
 
     service.fixesPersistidos = [];
-    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 22, provider: "fused", speed: 3 }));
+    service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 26, provider: "fused" }));
     expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(0);
+  });
 
-    service.fixesPersistidos = [];
+  it("R1: `fused` sin velocidad también se acepta (en Android speed siempre llega como número)", () => {
     service.registrarFixPersistido(pos(LAT, LNG, { accuracy: 15, provider: "fused", speed: null }));
-    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(0);
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
   });
 
   it("R2: descarta un salto imposible (5.5 km en 30 s = 660 km/h)", () => {
@@ -532,5 +543,76 @@ describe("BackgroundLocationService — evidencia persistida", () => {
     );
     // Debe mantener Fix #1 y no haberse contaminado con Fix #2
     expect(service.getUltimoFixTracking()?.latitud).toBeCloseTo(LAT, 5);
+  });
+
+  it("mejora la ventana cuando llega un fix con calidad de evidencia tras uno impreciso", async () => {
+    // Caso 400517: las capturas de 36/52.8 m de cada minuto bloqueaban por
+    // throttle los fixes mucho más precisos de las validaciones (6.9/17.6 m).
+    // Ahora un fix ≤25 m actualiza la ventana escrita con un fix >25 m.
+    registrarCapturaTracking.mockResolvedValue(true);
+    service.isTaskRunning = true;
+
+    const t0 = Date.now();
+    await service.onLocationFix(
+      pos(LAT, LNG, { accuracy: 52, timestamp: t0 }),
+      service.generation,
+    );
+    await flushPromises();
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(0);
+
+    await service.onLocationFix(
+      pos(LAT + 0.0001, LNG, { accuracy: 8, timestamp: t0 + 15_000 }),
+      service.generation,
+    );
+    await flushPromises();
+
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(2);
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+  });
+
+  it("no reescribe la ventana si la captura previa ya calificaba como evidencia", async () => {
+    registrarCapturaTracking.mockResolvedValue(true);
+    service.isTaskRunning = true;
+
+    const t0 = Date.now();
+    await service.onLocationFix(
+      pos(LAT, LNG, { accuracy: 20, timestamp: t0 }),
+      service.generation,
+    );
+    await flushPromises();
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
+
+    // El fix mejor queda fuera por el throttle normal: no duplicar escrituras.
+    await service.onLocationFix(
+      pos(LAT + 0.0001, LNG, { accuracy: 8, timestamp: t0 + 15_000 }),
+      service.generation,
+    );
+    await flushPromises();
+
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
+    expect(service.getFixesPersistidos(5 * 60_000, 25)).toHaveLength(1);
+  });
+
+  it("un fix espurio (salto imposible) no puede mejorar la ventana", async () => {
+    registrarCapturaTracking.mockResolvedValue(true);
+    service.isTaskRunning = true;
+
+    const t0 = Date.now();
+    await service.onLocationFix(
+      pos(LAT, LNG, { accuracy: 52, timestamp: t0 }),
+      service.generation,
+    );
+    await flushPromises();
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
+
+    // 5.5 km en 15 s = >150 km/h: el espurio se descarta y no reescribe nada.
+    await service.onLocationFix(
+      pos(LEJOS, LNG, { accuracy: 8, timestamp: t0 + 15_000 }),
+      service.generation,
+    );
+    await flushPromises();
+
+    expect(registrarCapturaTracking).toHaveBeenCalledTimes(1);
   });
 });

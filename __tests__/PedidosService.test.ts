@@ -52,6 +52,7 @@ import PedidosService, {
   esProductoAgregado,
   PRODUCTO_AGREGADO_OBSERVACION,
 } from "../services/PedidosService";
+import { normalizarObservaciones } from "../services/pedidoObservaciones";
 
 const crearPedido = (overrides: Record<string, unknown> = {}) => ({
   id: "42-7",
@@ -129,6 +130,17 @@ describe("reglas de pedidos", () => {
   it("identifica la observación de un producto agregado", () => {
     expect(esProductoAgregado({ observaciones: `Nota ${PRODUCTO_AGREGADO_OBSERVACION}` })).toBe(true);
     expect(esProductoAgregado({ observaciones: "Nota normal" })).toBe(false);
+  });
+
+  it("trata el punto de central como observación vacía", () => {
+    expect(normalizarObservaciones(".")).toBeNull();
+    expect(normalizarObservaciones(" . ")).toBeNull();
+    expect(normalizarObservaciones("")).toBeNull();
+    expect(normalizarObservaciones("   ")).toBeNull();
+    expect(normalizarObservaciones(null)).toBeNull();
+    expect(normalizarObservaciones(undefined)).toBeNull();
+    expect(normalizarObservaciones("Entregar por la tarde")).toBe("Entregar por la tarde");
+    expect(normalizarObservaciones("  Nota con espacios  ")).toBe("Nota con espacios");
   });
 });
 

@@ -64,21 +64,24 @@ export const TTL_VALIDACION_CACHE_MS = 3 * 60 * 1000; // 3 minutos
 // de red y bloquea una venta legítima, aunque el tracking de ruta sí tenga
 // evidencia de dónde estuvo el vendedor segundos antes.
 //
-// La evidencia sale SIEMPRE de `getFixesPersistidos()`: fixes que ya están en
-// la bitácora del servidor. Nunca de la ráfaga que dispara la propia
-// validación, porque esa ráfaga contamina `ultimoFixTracking` con el mismo
-// fix malo que se está juzgando (caso 373510).
+// La evidencia sale SIEMPRE de `getFixesPersistidos()`: fixes que quedaron
+// escritos en la bitácora local Realm (el envío al servidor es asíncrono).
+// Nunca de la ráfaga que dispara la propia validación, porque esa ráfaga
+// contamina `ultimoFixTracking` con el mismo fix malo que se está juzgando
+// (caso 373510).
 export const HABILITAR_OK_TRACKING = true; // rollback: poner false
 export const TRACKING_EVIDENCIA_VENTANA_MS = 5 * 60 * 1000;
 export const TRACKING_EVIDENCIA_ACCURACY_MAX = 25; // metros
 export const TRACKING_VETO_VENTANA_MS = 2 * 60 * 1000;
 export const TRACKING_VETO_ACCURACY_MAX = 30; // metros
 export const TRACKING_VETO_MARGEN_M = 30; // metros
-// R3 — asimetría deliberada: aprobar basta con un fix bueno (no queremos
-// perder ventas), pero vetar exige DOS fixes de acuerdo. Un solo punto malo
-// (p. ej. un fix de red a 400 m) no debe tumbar una visita real que sí tiene
-// evidencia dentro del rango.
-export const TRACKING_VETO_FIXES_MIN = 2;
+// R3 — veto con UN solo fix: los fixes persistidos ya pasaron R1 (proveedor
+// confiable, ≤25 m) y R2 (sin saltos imposibles), así que un punto lejano
+// reciente significa que el vendedor realmente se retiró del cliente
+// (caso 400517: estuvo a 50 m del cliente a las 11:28 e intentó validar a las
+// 11:29 ya a 550 m). Decisión de negocio: no aprobar una visita cerrada
+// después de irse; el historial positivo no revive una visita abandonada.
+export const TRACKING_VETO_FIXES_MIN = 1;
 
 // Lectura fuera de rango con accuracy "buena" pero contradicha por el
 // tracking (fix de red que declara ±12 m y está 400 m fuera). Se aprueba con
@@ -615,7 +618,13 @@ class LocationService {
       let watchdog: ReturnType<typeof setInterval> | null = null;
       let appStateSub: { remove: () => void } | null = null;
       const inicio = Date.now();
-      const EDAD_MAXIMA_FIX_MS = 3000;
+      // Edad máxima tolerada de un fix respecto al reloj local. El reloj del
+      // sistema puede ir adelantado varios segundos respecto al reloj GNSS
+      // (casos `sin_senal` con tracking bueno simultáneo en la bitácora,
+      // p. ej. 392478/385312): con 3 s se descartaban lecturas válidas y la
+      // ráfaga moría en timeout. Con 10 s + la guarda de ventana, solo se
+      // rechazan fixes realmente rancios (cache previo a esta lectura).
+      const EDAD_MAXIMA_FIX_MS = 10000;
 
       const aceptar = (coords: LocationCoordinates | null, motivo: string) => {
         if (settled) return;
@@ -700,8 +709,13 @@ class LocationService {
             provider: position.provider,
           };
 
-          const edadFix = Date.now() - (position.timestamp ?? Date.now());
-          if (edadFix > EDAD_MAXIMA_FIX_MS) {
+          const tsFix = position.timestamp ?? Date.now();
+          const edadFix = Date.now() - tsFix;
+          // Se acepta el fix si su edad aparente es acotada O si fue capturado
+          // dentro de esta ventana de lectura (5 s de colchón por el desfase
+          // reloj-sistema vs reloj-GNSS). Solo se rechaza un fix que además de
+          // viejo no pertenece a esta ventana (última ubicación cacheada).
+          if (edadFix > EDAD_MAXIMA_FIX_MS && tsFix < inicio - 5000) {
             console.log(
               `[LocationService] Fix descartado por antigüedad: ${edadFix} ms (máx ${EDAD_MAXIMA_FIX_MS} ms)`,
             );
@@ -734,7 +748,9 @@ class LocationService {
           const VELOCIDAD_MAXIMA_RAFAGA_MPS = 41.7; // 150 km/h
           let esSaltoImposible = false;
           if (ultimoFixRecibido) {
-            const dtFix = Math.max((Date.now() - (ultimoFixRecibido.timestamp ?? inicio)) / 1000, 1);
+            // Ambos timestamps vienen del reloj GNSS: compararlos evita el
+            // desfase reloj-sistema vs reloj-GNSS en la velocidad implícita.
+            const dtFix = Math.max((tsFix - (ultimoFixRecibido.timestamp ?? inicio)) / 1000, 1);
             if (dtFix <= 10) {
               const distFix = calcularDistancia(
                 ultimoFixRecibido.latitude,
@@ -745,7 +761,7 @@ class LocationService {
               const velFix = distFix / dtFix;
               if (velFix > VELOCIDAD_MAXIMA_RAFAGA_MPS) {
                 const dtReancla = fixDescartadoPorSalto
-                  ? Math.max((Date.now() - (fixDescartadoPorSalto.timestamp ?? inicio)) / 1000, 1)
+                  ? Math.max((tsFix - (fixDescartadoPorSalto.timestamp ?? inicio)) / 1000, 1)
                   : 0;
                 const velReancla = fixDescartadoPorSalto
                   ? calcularDistancia(
@@ -905,7 +921,7 @@ class LocationService {
     clienteLat: number,
     clienteLng: number,
     metrosPermitidos: number,
-  ): { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number } | null {
+  ): { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number; receivedAt?: number } | null {
     if (!HABILITAR_OK_TRACKING || this.okTrackingHabilitadoOverride === false) return null;
 
     try {
@@ -915,9 +931,8 @@ class LocationService {
       if (typeof BGService?.getFixesPersistidos !== "function") return null;
 
       // Veto: evidencia reciente y buena de que el vendedor ya se fue.
-      // Manda sobre la evidencia positiva de hace minutos, pero exige
-      // TRACKING_VETO_FIXES_MIN fixes de acuerdo (R3): un solo fix malo no
-      // puede tumbar una visita real.
+      // Manda sobre la evidencia positiva de hace minutos: un solo fix
+      // persistido fuera del rango basta para bloquear (R3, Veto = 1).
       const recientesBuenos: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
         BGService.getFixesPersistidos(TRACKING_VETO_VENTANA_MS, TRACKING_VETO_ACCURACY_MAX) ?? [];
 
@@ -936,10 +951,10 @@ class LocationService {
         }
       }
 
-      const evidencia: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number }> =
+      const evidencia: Array<{ latitud: number; longitud: number; accuracy: number; timestamp: number; receivedAt?: number }> =
         BGService.getFixesPersistidos(TRACKING_EVIDENCIA_VENTANA_MS, TRACKING_EVIDENCIA_ACCURACY_MAX) ?? [];
 
-      let mejor: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number } | null = null;
+      let mejor: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number; receivedAt?: number } | null = null;
 
       for (const f of evidencia) {
         const dist = calcularDistancia(f.latitud, f.longitud, clienteLat, clienteLng);
@@ -952,6 +967,7 @@ class LocationService {
             latitud: f.latitud,
             longitud: f.longitud,
             timestamp: f.timestamp,
+            receivedAt: f.receivedAt,
           };
         }
       }
@@ -960,7 +976,7 @@ class LocationService {
 
       console.log(
         `[LocationService] Evidencia de tracking: ${Math.round(mejor.distancia)} m del cliente, ` +
-          `hace ${Math.round((Date.now() - mejor.timestamp) / 1000)} s (±${Math.round(mejor.accuracy)} m)`,
+          `hace ${Math.round((Date.now() - (mejor.receivedAt ?? mejor.timestamp)) / 1000)} s (±${Math.round(mejor.accuracy)} m)`,
       );
       return mejor;
     } catch (e) {
@@ -973,7 +989,7 @@ class LocationService {
     clienteLat: number,
     clienteLng: number,
     metrosPermitidos: number,
-    corr: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number },
+    corr: { distancia: number; accuracy: number; latitud: number; longitud: number; timestamp: number; receivedAt?: number },
   ): ValidacionUbicacionResultado {
     // Se guarda en caché igual que un `ok`: si el vendedor revalida en <3 min,
     // la segunda llamada resuelve al instante como `ok_cache`.
@@ -989,7 +1005,7 @@ class LocationService {
     console.log(
       `[LocationService] Validación VÁLIDA por tracking (ok_tracking): ` +
         `${Math.round(corr.distancia)} m del cliente, evidencia de hace ` +
-        `${Math.round((Date.now() - corr.timestamp) / 1000)} s`,
+        `${Math.round((Date.now() - (corr.receivedAt ?? corr.timestamp)) / 1000)} s`,
     );
 
     return {
@@ -1162,13 +1178,15 @@ class LocationService {
       const BGService = require("./BackgroundLocationService").default;
       const ultimoTracking = BGService.getUltimoFixTracking();
       if (ultimoTracking) {
-        const edadTracking = (Date.now() - ultimoTracking.timestamp) / 1000;
+        // Ambos timestamps vienen del reloj GNSS: compararlos evita que un
+        // reloj de sistema desfasado influya en la velocidad implícita.
+        const edadTracking = ((ubicacion.timestamp ?? Date.now()) - ultimoTracking.timestamp) / 1000;
         if (edadTracking > 0 && edadTracking <= 30 && ultimoTracking.accuracy <= 50) {
           const distTracking = calcularDistancia(
             ubicacion.latitude, ubicacion.longitude,
             ultimoTracking.latitud, ultimoTracking.longitud,
           );
-          const velocidad = distTracking / edadTracking;
+          const velocidad = distTracking / Math.max(edadTracking, 1);
           if (velocidad > 40) {
             console.warn(
               `[LocationService] Fix de validación incoherente con tracking: ` +

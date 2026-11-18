@@ -32,12 +32,10 @@ const getImageUri = (foto: ClienteFoto, miniature = true): string | null => {
       : foto.mimeType || "image/jpeg";
     return `data:${mimeType};base64,${base64}`;
   }
-  if (foto.fotoMiniatura)
-    return foto.fotoMiniatura.startsWith("file:")
-      ? foto.fotoMiniatura
-      : `file://${foto.fotoMiniatura}`;
-  if (foto.foto)
-    return foto.foto.startsWith("file:") ? foto.foto : `file://${foto.foto}`;
+  const path = miniature
+    ? foto.fotoMiniatura || foto.foto
+    : foto.foto || foto.fotoMiniatura;
+  if (path) return path.startsWith("file:") ? path : `file://${path}`;
   return null;
 };
 

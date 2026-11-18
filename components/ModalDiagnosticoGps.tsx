@@ -11,6 +11,14 @@ import {
 import { WebView } from "react-native-webview";
 import { Icon } from "react-native-elements";
 import { COLORS, SPACING, BORDER_RADIUS, TYPOGRAPHY, SHADOWS } from "../theme/theme";
+import BackgroundLocationService from "../services/BackgroundLocationService";
+
+export type PuntoTrackingMapa = {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  timestamp?: number;
+};
 
 export type DiagnosticoGpsData = {
   motivo: string;
@@ -26,6 +34,9 @@ export type DiagnosticoGpsData = {
   clienteLat: number;
   clienteLng: number;
   clienteNombre?: string;
+  // Opcional: si no se pasa, el modal lee los fixes persistidos recientes del
+  // servicio de tracking (últimos 5 min) para dibujar el recorrido.
+  puntosTracking?: PuntoTrackingMapa[];
 };
 
 type Props = {
@@ -46,13 +57,36 @@ const motivoLabel: Record<string, string> = {
 };
 
 export default function ModalDiagnosticoGps({ visible, data, onClose, onReintentar }: Props) {
-  const html = useMemo(() => {
-    if (!data || data.vendedorLat == null || data.vendedorLng == null) return "";
+  // Puntos del tracking reciente para dibujar el recorrido de los últimos
+  // minutos: distingue "estuvo y se fue" de "fix erróneo" (caso 400517).
+  const puntosTracking = useMemo<PuntoTrackingMapa[]>(() => {
+    if (!data) return [];
+    if (Array.isArray(data.puntosTracking)) return data.puntosTracking;
+    try {
+      const fixes = BackgroundLocationService.getFixesPersistidos(5 * 60 * 1000, 100) ?? [];
+      return [...fixes]
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .map((f) => ({ lat: f.latitud, lng: f.longitud, accuracy: f.accuracy, timestamp: f.timestamp }));
+    } catch {
+      return [];
+    }
+  }, [data]);
 
-    const centerLat = (data.vendedorLat + data.clienteLat) / 2;
-    const centerLng = (data.vendedorLng + data.clienteLng) / 2;
+  const html = useMemo(() => {
+    if (!data) return "";
+    const tieneVendedor = data.vendedorLat != null && data.vendedorLng != null;
+    if (!tieneVendedor && puntosTracking.length === 0) return "";
+
+    const ultimoPunto = puntosTracking.length > 0 ? puntosTracking[puntosTracking.length - 1] : null;
+    const centerLat = tieneVendedor
+      ? (data.vendedorLat! + data.clienteLat) / 2
+      : ((ultimoPunto?.lat ?? data.clienteLat) + data.clienteLat) / 2;
+    const centerLng = tieneVendedor
+      ? (data.vendedorLng! + data.clienteLng) / 2
+      : ((ultimoPunto?.lng ?? data.clienteLng) + data.clienteLng) / 2;
     const accuracy = data.accuracy ?? 50;
     const metrosPermitidos = data.metrosPermitidos ?? 80;
+    const puntosJson = JSON.stringify(puntosTracking);
 
     return `
 <!DOCTYPE html>
@@ -65,6 +99,16 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
   <style>
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; }
     #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+    .gps-legend {
+      background: rgba(255,255,255,0.92);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font: 11px/16px sans-serif;
+      color: #333;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .gps-legend .row { display: flex; align-items: center; margin: 1px 0; }
+    .gps-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
   </style>
 </head>
 <body>
@@ -74,20 +118,26 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
     try {
       var map = L.map('map', { zoomControl: false }).setView([${centerLat}, ${centerLng}], 16);
       console.log("[Mapa] Mapa creado");
-      
+
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: ''
       }).addTo(map);
       console.log("[Mapa] Tiles agregados");
 
+      var boundsMarkers = [L.marker([${data.clienteLat}, ${data.clienteLng}])];
+
+      ${tieneVendedor ? `
       L.circleMarker([${data.vendedorLat}, ${data.vendedorLng}], {
         color: '#fff', fillColor: '#2196F3', fillOpacity: 0.9, radius: 9, weight: 2
-      }).addTo(map).bindPopup('Tu ubicación');
+      }).addTo(map).bindPopup('Tu ubicación al validar');
 
       L.circle([${data.vendedorLat}, ${data.vendedorLng}], {
         radius: ${accuracy}, color: '#2196F3', fillColor: '#2196F3', fillOpacity: 0.1, weight: 1, dashArray: '4,4'
       }).addTo(map);
+
+      boundsMarkers.push(L.marker([${data.vendedorLat}, ${data.vendedorLng}]));
+      ` : ""}
 
       L.circleMarker([${data.clienteLat}, ${data.clienteLng}], {
         color: '#fff', fillColor: '#D32F2F', fillOpacity: 0.9, radius: 9, weight: 2
@@ -97,17 +147,46 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
         radius: ${metrosPermitidos}, color: '#64AD45', fillColor: '#64AD45', fillOpacity: 0.12, weight: 2
       }).addTo(map);
 
+      ${tieneVendedor ? `
       L.polyline([[${data.vendedorLat}, ${data.vendedorLng}], [${data.clienteLat}, ${data.clienteLng}]], {
         color: '#FF9800', weight: 2, opacity: 0.8, dashArray: '6,6'
       }).addTo(map);
+      ` : ""}
 
-      var group = L.featureGroup([
-        L.marker([${data.vendedorLat}, ${data.vendedorLng}]),
-        L.marker([${data.clienteLat}, ${data.clienteLng}])
-      ]);
+      var puntosTracking = ${puntosJson};
+      var trayectoria = [];
+      for (var i = 0; i < puntosTracking.length; i++) {
+        var p = puntosTracking[i];
+        trayectoria.push([p.lat, p.lng]);
+        var hora = p.timestamp ? new Date(p.timestamp).toLocaleTimeString() : '';
+        L.circleMarker([p.lat, p.lng], {
+          color: '#fff', fillColor: '#FF9800', fillOpacity: 0.9, radius: 4, weight: 1
+        }).addTo(map).bindPopup('Tracking ' + hora + (p.accuracy ? ' (±' + Math.round(p.accuracy) + ' m)' : ''));
+        boundsMarkers.push(L.marker([p.lat, p.lng]));
+      }
+      if (trayectoria.length > 0) {
+        ${tieneVendedor ? `trayectoria.push([${data.vendedorLat}, ${data.vendedorLng}]);` : ""}
+        L.polyline(trayectoria, {
+          color: '#FF9800', weight: 2, opacity: 0.6, dashArray: '2,6'
+        }).addTo(map);
+      }
+
+      var legend = L.control({ position: 'bottomleft' });
+      legend.onAdd = function () {
+        var div = L.DomUtil.create('div', 'gps-legend');
+        var rows = '';
+        ${tieneVendedor ? `rows += '<div class="row"><span class="dot" style="background:#2196F3"></span>Tu ubicación al validar</div>';` : ""}
+        rows += '<div class="row"><span class="dot" style="background:#D32F2F"></span>Cliente (círculo = rango)</div>';
+        ${puntosTracking.length > 0 ? `rows += '<div class="row"><span class="dot" style="background:#FF9800"></span>Tracking reciente</div>';` : ""}
+        div.innerHTML = rows;
+        return div;
+      };
+      legend.addTo(map);
+
+      var group = L.featureGroup(boundsMarkers);
       map.fitBounds(group.getBounds().pad(0.3), { maxZoom: 17 });
       console.log("[Mapa] Mapa renderizado completamente");
-      
+
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage("Mapa renderizado correctamente");
       }
@@ -121,7 +200,7 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
   </script>
 </body>
 </html>`;
-  }, [data]);
+  }, [data, puntosTracking]);
 
   const handleReportar = useCallback(async () => {
     if (!data) return;
@@ -149,7 +228,9 @@ export default function ModalDiagnosticoGps({ visible, data, onClose, onReintent
   }, [data]);
 
   const motivo = data ? motivoLabel[data.motivo] || data.motivo : "";
-  const tieneMapa = data && data.vendedorLat != null && data.vendedorLng != null;
+  const tieneMapa =
+    data != null &&
+    ((data.vendedorLat != null && data.vendedorLng != null) || puntosTracking.length > 0);
 
   // "sin_senal" es "0 lecturas GPS en la ventana de espera", no "sin cobertura".
   // Se explica aquí para no mandar al vendedor a revisar la red.

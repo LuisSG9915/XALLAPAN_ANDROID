@@ -28,9 +28,11 @@ const FIXES_BUENOS_MAX = 12;
 const FIXES_BUENOS_RETENCION_MS = 10 * 60 * 1000;
 const FIX_BUENO_ACCURACY_MAX = 25; // metros
 
-// Historial de fixes que SÍ llegaron a la bitácora (persistidos). Es la única
-// evidencia que puede acreditar una venta `ok_tracking`: si un fix no está en
-// el servidor, no debe servir para aprobar nada.
+// Historial de fixes que quedaron persistidos localmente en la bitácora Realm
+// (BitacoraTrackingGps); el envío al servidor es asíncrono y puede no estar
+// confirmado aún. Es la única evidencia que puede acreditar una venta
+// `ok_tracking`: un fix que ni siquiera quedó escrito en la bitácora local no
+// debe servir para aprobar nada.
 // La razón es el detector de incoherencias: cuando una validación fuerza su
 // ráfaga, comparte la suscripción nativa y el mismo fix contaminado llega
 // también al callback de fondo (caso 373510: la lectura de 419 m se copió a
@@ -39,11 +41,14 @@ const FIXES_PERSISTIDOS_MAX = 12;
 
 // Reglas de admisión de evidencia (ver docs/PLAN_OK_TRACKING.md §14):
 //
-//  R1 — Proveedor: un fix de red/fusionado puede declarar ±12 m y estar 400 m
-//       fuera del cliente (caso 373510: accuracy 11.9 m, distancia 419 m).
-//       Solo el GNSS crudo acredita presencia; `fused` se acepta únicamente
-//       cuando la precisión es realista Y trae velocidad (el fused sin
-//       velocidad suele ser una media ponderada con red).
+//  R1 — Proveedor: un fix de red puede declarar ±12 m y estar 400 m fuera del
+//       cliente (caso 373510: accuracy 11.9 m, distancia 419 m). Solo el GNSS
+//       acredita presencia. En Android, FusedLocationProviderClient SIEMPRE
+//       reporta provider="fused" (nunca "gps") y `speed` llega como número aun
+//       estando detenido, así que `fused` se acepta con el umbral general de
+//       precisión: la exigencia anterior (≤20 m + velocidad finita) descartaba
+//       el 74% de la evidencia válida en producción (caso 400517: fix a 50.6 m
+//       del cliente con ±24.2 m rechazado). `network` y `passive` se rechazan.
 //
 //  R2 — Salto: entre dos fixes consecutivos no se puede recorrer más de
 //       150 km/h. Un salto así se descarta y NO mueve la base; si llegan dos
@@ -67,7 +72,13 @@ export type FixTrackingConfiable = {
   latitud: number;
   longitud: number;
   accuracy: number;
+  // Reloj GNSS (position.timestamp): se usa para velocidades entre fixes.
   timestamp: number;
+  // Reloj local de recepción (Date.now()): se usa para ventanas de antigüedad,
+  // porque un reloj de sistema adelantado respecto al GNSS envejecía los fixes
+  // y vaciaba la evidencia (desfase documentado en casos `sin_senal` con
+  // tracking bueno simultáneo, p. ej. 392478).
+  receivedAt?: number;
 };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -80,6 +91,11 @@ class BackgroundLocationService {
   private intervalMs = 30000;
   private intervaloNativo = 15000;
   private readonly INTERVALO_ADQUISICION_MS = 5000;
+  // El motor GNSS se mantiene despierto a ≤15 s aunque la escritura sea cada
+  // 30/60 s: con el intervalo nativo de 60 s el chip dormía entre lecturas y
+  // entregaba precisiones estacionarias de 21-55 m justo en los puntos que la
+  // evidencia de tracking necesitaba (defecto del caso 400517).
+  private readonly INTERVALO_ENGANCHADO_MS = 15000;
   private readonly UMBRAL_ENGANCHE_ACCURACY = 30;
   private readonly FIXES_PARA_ENGANCHE = 2;
   private readonly FIXES_PARA_PERDER_ENGANCHE = 3;
@@ -94,6 +110,10 @@ class BackgroundLocationService {
   // Último fix efectivamente persistido (distinto de lastFixAt, que solo marca
   // actividad del proveedor para el watchdog).
   private lastCaptureAt = 0;
+  // Precisión de la última captura persistida: si quedó por encima del umbral
+  // de evidencia, un fix posterior más preciso puede actualizar la ventana
+  // (upgrade) en vez de quedar descartado por el throttle (caso 400517).
+  private lastCaptureAccuracy = 999;
   private lastTrackingUploadAttemptAt = 0;
   private trackingUploadInFlight: Promise<void> | null = null;
   // Token de generación: invalida callbacks/watchdogs de loops anteriores.
@@ -118,12 +138,14 @@ class BackgroundLocationService {
     longitud: number;
     accuracy: number;
     timestamp: number;
+    receivedAt?: number;
   } | null = null;
   private saltoDescartadoUltimoTracking: {
     latitud: number;
     longitud: number;
     accuracy: number;
     timestamp: number;
+    receivedAt?: number;
   } | null = null;
 
   private fixesRecientes: FixTrackingConfiable[] = [];
@@ -142,7 +164,7 @@ class BackgroundLocationService {
     return BackgroundLocationService.instance;
   }
 
-  getUltimoFixTracking(): { latitud: number; longitud: number; accuracy: number; timestamp: number } | null {
+  getUltimoFixTracking(): { latitud: number; longitud: number; accuracy: number; timestamp: number; receivedAt?: number } | null {
     return this.ultimoFixTracking;
   }
 
@@ -153,7 +175,7 @@ class BackgroundLocationService {
   getFixesRecientes(maxEdadMs: number, maxAccuracy: number): FixTrackingConfiable[] {
     const ahora = Date.now();
     return this.fixesRecientes.filter(
-      (f) => ahora - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy,
+      (f) => ahora - (f.receivedAt ?? f.timestamp) <= maxEdadMs && f.accuracy <= maxAccuracy,
     );
   }
 
@@ -166,20 +188,21 @@ class BackgroundLocationService {
 
     const ahora = Date.now();
     const ts = position.timestamp ?? ahora;
-    this.fixesRecientes.push({ latitud: latitude, longitud: longitude, accuracy: acc, timestamp: ts });
+    this.fixesRecientes.push({ latitud: latitude, longitud: longitude, accuracy: acc, timestamp: ts, receivedAt: ahora });
     if (this.fixesRecientes.length > FIXES_BUENOS_MAX) this.fixesRecientes.shift();
-    this.fixesRecientes = this.fixesRecientes.filter((f) => ahora - f.timestamp <= FIXES_BUENOS_RETENCION_MS);
+    this.fixesRecientes = this.fixesRecientes.filter((f) => ahora - (f.receivedAt ?? f.timestamp) <= FIXES_BUENOS_RETENCION_MS);
   }
 
   /**
-   * Fixes que efectivamente se persistieron en la bitácora. A diferencia de
-   * `getFixesRecientes`, esta lista NO incluye la ráfaga que dispara una
-   * validación: solo lo que el servidor podrá ver al auditar la venta.
+   * Fixes que quedaron persistidos localmente en la bitácora Realm (pendientes
+   * o ya enviados). A diferencia de `getFixesRecientes`, esta lista NO incluye
+   * la ráfaga que dispara una validación: solo lo que la bitácora local podrá
+   * mostrar al auditar la venta.
    */
   getFixesPersistidos(maxEdadMs: number, maxAccuracy: number): FixTrackingConfiable[] {
     const ahora = Date.now();
     return this.fixesPersistidos.filter(
-      (f) => ahora - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy,
+      (f) => ahora - (f.receivedAt ?? f.timestamp) <= maxEdadMs && f.accuracy <= maxAccuracy,
     );
   }
 
@@ -190,12 +213,12 @@ class BackgroundLocationService {
     const acc = accuracy ?? 999;
     if (acc > FIX_BUENO_ACCURACY_MAX) return;
 
-    // R1: proveedor confiable.
+    // R1: proveedor confiable (ver el bloque de reglas arriba).
     const proveedor = (position.provider ?? "").toLowerCase();
     const proveedorConfiable =
       proveedor === "" || // plataformas que no reportan proveedor
       proveedor === "gps" ||
-      (proveedor === "fused" && acc <= 20 && Number.isFinite(position.coords.speed));
+      (proveedor === "fused" && acc <= FIX_BUENO_ACCURACY_MAX);
     if (!proveedorConfiable) {
       console.log(TAG, `Fix de tracking descartado por proveedor '${proveedor}' (acc=${Math.round(acc)} m)`);
       return;
@@ -208,11 +231,12 @@ class BackgroundLocationService {
       longitud: longitude,
       accuracy: acc,
       timestamp: ts,
+      receivedAt: ahora,
     };
 
     // R2: salto físicamente imposible contra la base vigente.
     const ultima = this.fixesPersistidos[this.fixesPersistidos.length - 1];
-    const base = ultima && ahora - ultima.timestamp <= FIXES_BUENOS_RETENCION_MS ? ultima : null;
+    const base = ultima && ahora - (ultima.receivedAt ?? ultima.timestamp) <= FIXES_BUENOS_RETENCION_MS ? ultima : null;
     if (base) {
       const dt = Math.max((ts - base.timestamp) / 1000, VELOCIDAD_MIN_DT_SEG);
       const velocidad = distanciaMetros(base.latitud, base.longitud, latitude, longitude) / dt;
@@ -249,7 +273,7 @@ class BackgroundLocationService {
     this.fixDescartadoPorSalto = null;
     this.fixesPersistidos.push(candidato);
     if (this.fixesPersistidos.length > FIXES_PERSISTIDOS_MAX) this.fixesPersistidos.shift();
-    this.fixesPersistidos = this.fixesPersistidos.filter((f) => ahora - f.timestamp <= FIXES_BUENOS_RETENCION_MS);
+    this.fixesPersistidos = this.fixesPersistidos.filter((f) => ahora - (f.receivedAt ?? f.timestamp) <= FIXES_BUENOS_RETENCION_MS);
   }
 
   /**
@@ -357,7 +381,9 @@ class BackgroundLocationService {
   }
 
   private getNativeIntervalMs(): number {
-    return this.gpsEnganchado ? this.intervalMs : Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
+    return this.gpsEnganchado
+      ? Math.min(this.intervalMs, this.INTERVALO_ENGANCHADO_MS)
+      : Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
   }
 
   private async startWatch(generation: number): Promise<void> {
@@ -427,12 +453,13 @@ class BackgroundLocationService {
       longitud: position.coords.longitude,
       accuracy: position.coords.accuracy ?? 999,
       timestamp: tsFix,
+      receivedAt: ahora,
     };
 
     // Proteger ultimoFixTracking contra saltos físicamente imposibles (> 150 km/h)
     // para evitar que un fix espurio durante una ráfaga anule el contraste de velocidad.
     let actualizarUltimoTracking = true;
-    if (this.ultimoFixTracking && ahora - this.ultimoFixTracking.timestamp <= 60000) {
+    if (this.ultimoFixTracking && ahora - (this.ultimoFixTracking.receivedAt ?? this.ultimoFixTracking.timestamp) <= 60000) {
       const dt = Math.max((tsFix - this.ultimoFixTracking.timestamp) / 1000, 1);
       const dist = distanciaMetros(
         this.ultimoFixTracking.latitud,
@@ -471,13 +498,30 @@ class BackgroundLocationService {
     this.evaluateGpsState(position.coords.accuracy ?? 999);
 
     if (this.captureInFlight) return;
-    if (this.lastCaptureAt > 0 && ahora - this.lastCaptureAt < this.intervalMs * 0.8) {
+
+    // Upgrade de ventana: si la captura ya persistida en esta ventana tenía
+    // accuracy por encima del umbral de evidencia (no sirve para ok_tracking)
+    // y este fix sí califica, se escribe/actualiza el registro de la ventana
+    // en lugar de quedar descartado por el throttle (caso 400517: fixes de
+    // 6.9/17.6 m perdidos tras capturas de 36/52.8 m). No aplica cuando el
+    // fix fue descartado como salto imposible (actualizarUltimoTracking ===
+    // false): un espurio no puede mejorar la ventana.
+    const accFix = position.coords.accuracy ?? 999;
+    const esMejoraDeVentana =
+      this.lastCaptureAccuracy > FIX_BUENO_ACCURACY_MAX &&
+      accFix <= FIX_BUENO_ACCURACY_MAX &&
+      actualizarUltimoTracking;
+    if (
+      this.lastCaptureAt > 0 &&
+      ahora - this.lastCaptureAt < this.intervalMs * 0.8 &&
+      !esMejoraDeVentana
+    ) {
       return;
     }
 
     this.captureInFlight = true;
     const { latitude, longitude, accuracy } = position.coords;
-    console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}`);
+    console.log(TAG, `Fix GPS recibido (gen=${generation}): lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${accuracy}, enganchado=${this.gpsEnganchado}${esMejoraDeVentana ? " (mejora de ventana)" : ""}`);
 
     try {
       const conCobertura = await this.getNetworkConnected();
@@ -498,6 +542,7 @@ class BackgroundLocationService {
 
       this.registrarFixPersistido(position);
       this.lastCaptureAt = ahora;
+      this.lastCaptureAccuracy = accuracy ?? 999;
       let stallResult: StallEvaluationResult | null = null;
       if (this.isTaskRunning && generation === this.generation) {
         void this.uploadTrackingPendientes(generation, "gps-fix");
@@ -558,9 +603,10 @@ class BackgroundLocationService {
       this.consecutiveGoodFixes++;
       if (!this.gpsEnganchado && this.consecutiveGoodFixes >= this.FIXES_PARA_ENGANCHE) {
         this.gpsEnganchado = true;
-        if (this.intervaloNativo !== this.intervalMs) {
-          this.intervaloNativo = this.intervalMs;
-          console.log(TAG, `GNSS enganchado (${acc}m), usando intervalo configurado ${this.intervaloNativo}ms`);
+        const objetivo = this.getNativeIntervalMs();
+        if (this.intervaloNativo !== objetivo) {
+          this.intervaloNativo = objetivo;
+          console.log(TAG, `GNSS enganchado (${acc}m), intervalo nativo ${this.intervaloNativo}ms (escritura cada ${this.intervalMs}ms)`);
           void this.startWatch(this.generation);
         }
       }
@@ -569,9 +615,9 @@ class BackgroundLocationService {
       this.consecutiveBadFixes++;
       if (this.gpsEnganchado && this.consecutiveBadFixes >= this.FIXES_PARA_PERDER_ENGANCHE) {
         this.gpsEnganchado = false;
-        const intervaloAdquisicion = Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
-        if (this.intervaloNativo !== intervaloAdquisicion) {
-          this.intervaloNativo = intervaloAdquisicion;
+        const objetivo = this.getNativeIntervalMs();
+        if (this.intervaloNativo !== objetivo) {
+          this.intervaloNativo = objetivo;
           console.log(TAG, `GNSS perdido (${acc}m), subiendo a intervalo ${this.intervaloNativo}ms`);
           void this.startWatch(this.generation);
         }
@@ -744,10 +790,11 @@ class BackgroundLocationService {
       console.log(TAG, `Tarea FGS iniciada (gen=${gen}), intervalo=${this.intervalMs}ms`);
 
       // Arrancar en modo adquisición para calentar el GNSS desde frío
-      this.intervaloNativo = Math.min(this.intervalMs, this.INTERVALO_ADQUISICION_MS);
       this.gpsEnganchado = false;
+      this.intervaloNativo = this.getNativeIntervalMs();
       this.captureInFlight = false;
       this.lastCaptureAt = 0;
+      this.lastCaptureAccuracy = 999;
       this.consecutiveGoodFixes = 0;
       this.consecutiveBadFixes = 0;
 

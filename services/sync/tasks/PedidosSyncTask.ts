@@ -4,6 +4,7 @@ import Realm from "realm";
 import { SyncTask, SyncTaskResult } from "../SyncTask";
 import PedidoNotificacionService from "../../PedidoNotificacionService";
 import AuthService from "../../AuthService";
+import { normalizarObservaciones } from "../../pedidoObservaciones";
 
 const ESTATUS_PEDIDO_EN_ATENCION = 5;
 const ESTATUS_PEDIDO_EN_CAPTURA = 10;
@@ -169,7 +170,7 @@ export class PedidosSyncTask extends SyncTask {
               estatus: estatusFinal,
               estatusDescripcion: this.getEstatusDescripcion(estatusFinal),
               fueraAgenda: row.fueraAgenda,
-              observaciones: row.observaciones,
+              observaciones: normalizarObservaciones(row.observaciones),
               no_venta: row.noVenta,
               tieneDiferencia,
               causaNoAtencion: causaNoAtencionFinal,

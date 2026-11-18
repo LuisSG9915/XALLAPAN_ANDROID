@@ -68,6 +68,9 @@ import NetworkUsagePanel from "./components/NetworkUsagePanel";
 import NetworkUsageService from "./services/NetworkUsageService";
 import SucursalBadge from "./components/SucursalBadge";
 import ManualSyncScreen from "./components/ManualSyncScreen";
+import ClienteFotosService, {
+  ClienteFotosFullDownloadStatus,
+} from "./services/ClienteFotosService";
 
 declare const global: any;
 
@@ -545,6 +548,40 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
   const cierreRutaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [networkUsageEnabled, setNetworkUsageEnabled] = useState(false);
   const lastTapRef = useRef<number>(0);
+  const [fotosDownloadStatus, setFotosDownloadStatus] =
+    useState<ClienteFotosFullDownloadStatus>({ estado: "idle" });
+
+  useEffect(() => {
+    return ClienteFotosService.subscribeFullDownload(setFotosDownloadStatus);
+  }, []);
+
+  const handleDescargarFotos = useCallback(async () => {
+    const user = currentUser ?? (await AuthService.restoreSession());
+    const sucursal = user?.sucursal_origen || user?.sucursal || 1;
+    const idUsuario = user?.id || 0;
+    try {
+      const result = await FullSyncService.descargarFotosClientesFull(
+        sucursal,
+        idUsuario,
+      );
+      if (result.success) {
+        Alert.alert(
+          "Fotografías de clientes",
+          "Las fotografías se descargaron correctamente.",
+        );
+      } else {
+        Alert.alert(
+          "Fotografías de clientes",
+          `No se pudieron descargar las fotografías.\n\n${result.error || "Error desconocido"}`,
+        );
+      }
+    } catch (error: any) {
+      Alert.alert(
+        "Fotografías de clientes",
+        error?.message || "No se pudieron descargar las fotografías.",
+      );
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     return () => {
@@ -1208,6 +1245,41 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Sync Button */}
         <View style={styles.syncContainer}>
+          {(fotosDownloadStatus.estado === "downloading" ||
+            fotosDownloadStatus.estado === "error") && (
+            <View
+              style={[
+                styles.fotosBanner,
+                fotosDownloadStatus.estado === "error" && styles.fotosBannerError,
+              ]}
+            >
+              {fotosDownloadStatus.estado === "downloading" ? (
+                <>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.fotosBannerText}>
+                    Descargando fotografías de clientes
+                    {fotosDownloadStatus.progreso != null
+                      ? `... ${fotosDownloadStatus.progreso}%`
+                      : "..."}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Icon name="photo-library" type="material" size={20} color="#fff" />
+                  <Text style={[styles.fotosBannerText, { flex: 1 }]}>
+                    No se han cargado las fotografías correctamente.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.fotosBannerButton}
+                    onPress={handleDescargarFotos}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.fotosBannerButtonText}>Descargar</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
           <TouchableOpacity
             style={[styles.syncButton, syncing && styles.syncButtonDisabled]}
             onPress={handleFullSync}
@@ -1271,7 +1343,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.6.1</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.6.2</Text>
         </View>
       </ScrollView>
 
@@ -1422,6 +1494,35 @@ const styles = StyleSheet.create({
   syncButtonDisabled: {
     opacity: 0.7,
     backgroundColor: COLORS.muted,
+  },
+  fotosBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.m,
+    padding: SPACING.m,
+    marginBottom: SPACING.m,
+    gap: SPACING.s,
+    ...SHADOWS.small,
+  },
+  fotosBannerError: {
+    backgroundColor: COLORS.warning,
+  },
+  fotosBannerText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  fotosBannerButton: {
+    backgroundColor: "#fff",
+    borderRadius: BORDER_RADIUS.s,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+  },
+  fotosBannerButtonText: {
+    color: COLORS.warning,
+    fontWeight: "bold",
+    fontSize: 12,
   },
   syncButtonText: {
     color: "#fff",

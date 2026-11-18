@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import RNFS from "react-native-fs";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
@@ -8,10 +9,42 @@ import { fetchWithTimeout } from "./fetchWithTimeout";
 import FotoUploadSettingsService from "./FotoUploadSettingsService";
 
 const API_BASE_URL = "https://api.cbinformatica.net:9031";
+const FULL_DOWNLOAD_STATE_KEY = "@xallapan/fotos/full_download_state";
+
+export type ClienteFotosFullDownloadStatus = {
+  estado: "idle" | "downloading" | "success" | "error";
+  error?: string | null;
+  fecha?: string | null;
+  progreso?: number | null;
+};
 const MAX_FOTOS = 5;
 const ESTADOS_PENDIENTES = ["pendiente", "error"];
 const FOTO_REQUEST_TIMEOUT_MS = 20_000;
+// La descarga full pesa ~150 MB: va directo a disco con RNFS (a velocidad
+// de red real) y se parsea por chunks para no cargar todo en memoria.
+const FOTO_FULL_DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+const FOTO_FULL_UPSERT_BATCH = 25;
+const FOTO_FULL_PROGRESS_INTERVAL_MS = 2000;
+const FOTO_FULL_READ_TIMEOUT_MS = 120_000;
+const FOTO_FULL_CONNECTION_TIMEOUT_MS = 30_000;
 const FOTO_MAX_DIMENSION = 1280;
+
+const isJsonWhitespace = (code: number): boolean =>
+  code === 32 || code === 9 || code === 10 || code === 13;
+
+/**
+ * RNFS.read con encoding "ascii" devuelve una cadena binaria (un char por
+ * byte). Los campos de texto libre con UTF-8 (p. ej. etiqueta) quedan como
+ * mojibake latin1; esta función los reinterpreta como UTF-8.
+ */
+const repairLatin1Utf8 = (value: string): string => {
+  if (!/[^\x00-\x7F]/.test(value)) return value;
+  try {
+    return decodeURIComponent(escape(value));
+  } catch {
+    return value;
+  }
+};
 const FOTO_JPEG_QUALITY: PhotoQuality = 0.5;
 const FOTO_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -59,9 +92,72 @@ export type ClienteFoto = {
 
 class ClienteFotosService {
   private realm: Realm | null = null;
+  private fullDownloadListeners = new Set<
+    (status: ClienteFotosFullDownloadStatus) => void
+  >();
+  private fullDownloadInFlight = false;
 
   setRealm(realm: Realm): void {
     this.realm = realm;
+  }
+
+  /**
+   * Estado persistido de la última descarga full de fotografías.
+   * Si la app se cerró a mitad de la descarga, el estado quedó en
+   * "downloading": se reporta como error para ofrecer el reintento manual.
+   */
+  async getFullDownloadStatus(): Promise<ClienteFotosFullDownloadStatus> {
+    try {
+      const stored = await AsyncStorage.getItem(FULL_DOWNLOAD_STATE_KEY);
+      if (!stored) return { estado: "idle" };
+      const parsed = JSON.parse(stored) as ClienteFotosFullDownloadStatus;
+      if (parsed.estado === "downloading" && !this.fullDownloadInFlight) {
+        return {
+          ...parsed,
+          estado: "error",
+          error: "La descarga de fotografías se interrumpió.",
+        };
+      }
+      return parsed;
+    } catch (error) {
+      console.warn("[ClienteFotos] No se pudo leer el estado de descarga:", error);
+      return { estado: "idle" };
+    }
+  }
+
+  subscribeFullDownload(
+    listener: (status: ClienteFotosFullDownloadStatus) => void
+  ): () => void {
+    this.fullDownloadListeners.add(listener);
+    void this.getFullDownloadStatus().then(listener);
+    return () => {
+      this.fullDownloadListeners.delete(listener);
+    };
+  }
+
+  private async setFullDownloadStatus(
+    estado: ClienteFotosFullDownloadStatus["estado"],
+    error?: string,
+    progreso: number | null = null
+  ): Promise<void> {
+    const status: ClienteFotosFullDownloadStatus = {
+      estado,
+      error: error ?? null,
+      fecha: new Date().toISOString(),
+      progreso,
+    };
+    try {
+      await AsyncStorage.setItem(FULL_DOWNLOAD_STATE_KEY, JSON.stringify(status));
+    } catch (storageError) {
+      console.warn("[ClienteFotos] No se pudo guardar el estado de descarga:", storageError);
+    }
+    this.fullDownloadListeners.forEach((listener) => {
+      try {
+        listener(status);
+      } catch (listenerError) {
+        console.warn("[ClienteFotos] Error en listener de estado:", listenerError);
+      }
+    });
   }
 
   getFotos(idCliente: number): ClienteFoto[] {
@@ -201,16 +297,261 @@ class ClienteFotosService {
     return foto;
   }
 
+  private lastFullDownloadProgressAt = 0;
+
+  private reportFullDownloadProgress(progreso: number): void {
+    const now = Date.now();
+    if (now - this.lastFullDownloadProgressAt < FOTO_FULL_PROGRESS_INTERVAL_MS) return;
+    this.lastFullDownloadProgressAt = now;
+    void this.setFullDownloadStatus("downloading", undefined, progreso);
+  }
+
   async downloadFull(idCliente = 0, ruta = 0): Promise<number> {
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotosFull?idCliente=${idCliente}&ruta=${ruta}`,
-      { headers: { accept: "application/json" } },
-      FOTO_REQUEST_TIMEOUT_MS
-    );
-    if (!response.ok)
-      throw new Error(`HTTP ${response.status} al descargar fotos`);
-    const rows = await response.json();
-    return this.upsertRemoteRows(Array.isArray(rows) ? rows : []);
+    this.fullDownloadInFlight = true;
+    this.lastFullDownloadProgressAt = 0;
+    await this.setFullDownloadStatus("downloading", undefined, 0);
+    let tempPath: string | null = null;
+    try {
+      const url = `${API_BASE_URL}/api/MovilesVentas/sp_MovilesClientesFotosFull?idCliente=${idCliente}&ruta=${ruta}`;
+      // HEAD best-effort para conocer el tamaño total y mostrar % real; si
+      // el API no lo reporta, el progreso queda indeterminado.
+      let expectedBytes = 0;
+      try {
+        const head = await fetchWithTimeout(
+          url,
+          { method: "HEAD" },
+          FOTO_REQUEST_TIMEOUT_MS
+        );
+        const len = Number(head.headers.get("content-length"));
+        if (head.ok && Number.isFinite(len) && len > 0) expectedBytes = len;
+      } catch {
+        expectedBytes = 0;
+      }
+      await this.setFullDownloadStatus(
+        "downloading",
+        undefined,
+        expectedBytes > 0 ? 0 : null
+      );
+      tempPath = `${RNFS.CachesDirectoryPath}/cliente-fotos-full-${Date.now()}.json`;
+      const { promise } = RNFS.downloadFile({
+        fromUrl: url,
+        toFile: tempPath,
+        headers: { accept: "application/json" },
+        connectionTimeout: FOTO_FULL_CONNECTION_TIMEOUT_MS,
+        readTimeout: FOTO_FULL_READ_TIMEOUT_MS,
+        progressInterval: 1000,
+        progress: (res) => {
+          const total = expectedBytes > 0 ? expectedBytes : res.contentLength;
+          if (total > 0) {
+            const progreso = Math.min(
+              89,
+              Math.round((res.bytesWritten / total) * 90)
+            );
+            this.reportFullDownloadProgress(progreso);
+          }
+        },
+      });
+      const result = await promise;
+      if (result.statusCode < 200 || result.statusCode >= 300)
+        throw new Error(`HTTP ${result.statusCode} al descargar fotos`);
+      const count = await this.parseRemoteRowsFile(tempPath);
+      await this.setFullDownloadStatus("success", undefined, 100);
+      return count;
+    } catch (error) {
+      await this.setFullDownloadStatus(
+        "error",
+        error instanceof Error ? error.message : "Error desconocido"
+      );
+      throw error;
+    } finally {
+      if (tempPath) RNFS.unlink(tempPath).catch(() => undefined);
+      this.fullDownloadInFlight = false;
+    }
+  }
+
+  /**
+   * Parsea el JSON descargado a disco por chunks: extrae cada objeto del
+   * arreglo superior y lo vuelca a Realm en lotes, sin cargar los ~150 MB
+   * completos en memoria (evita OOM y el JSON.parse monolítico).
+   */
+  private async parseRemoteRowsFile(filePath: string): Promise<number> {
+    const info = await RNFS.stat(filePath);
+    const fileSize = Number(info?.size) || 0;
+    if (fileSize <= 0) {
+      throw new Error("La descarga de fotografías llegó vacía.");
+    }
+
+    type ScanState = "inicio" | "entre" | "objeto";
+    let state: ScanState = "inicio";
+    let pending = "";
+    let scanOffset = 0;
+    let depth = 0;
+    let inString = false;
+    let objectStart = -1;
+    let sawArrayEnd = false;
+    let batch: any[] = [];
+    let count = 0;
+    let position = 0;
+
+    const upsertBatch = async () => {
+      if (batch.length === 0) return;
+      const rows = batch;
+      batch = [];
+      // Las fotos base64 se escriben como archivos en disco (decode nativo);
+      // Realm solo guarda la ruta. Evita cargar ~150 MB de strings en la BD.
+      await Promise.all(rows.map((row) => this.persistRemoteFotoFiles(row)));
+      count += this.upsertRemoteRows(rows);
+      await new Promise<void>((resolve) => setImmediate(() => resolve()));
+    };
+
+    while (position < fileSize) {
+      const length = Math.min(FOTO_FULL_DOWNLOAD_CHUNK_BYTES, fileSize - position);
+      // "ascii": cadena binaria byte-a-char; evita el utf8.decode (el decode
+      // más costoso en JS puro). El JSON/base64 es ASCII puro, así que la
+      // estructura nunca se afecta; solo campos de texto libre pueden venir
+      // como latin1 y se reparan por fila más abajo.
+      const chunk = await RNFS.read(filePath, length, position, "ascii");
+      position += length;
+      this.reportFullDownloadProgress(
+        90 + Math.min(9, Math.round((position / fileSize) * 10))
+      );
+      pending += chunk;
+
+      let index = scanOffset;
+      while (index < pending.length) {
+        const code = pending.charCodeAt(index);
+        if (state === "inicio") {
+          if (code === 91) state = "entre"; // [
+          else if (!isJsonWhitespace(code) && code !== 0xfeff) {
+            throw new Error("La respuesta de fotografías no es una lista JSON.");
+          }
+          index += 1;
+        } else if (state === "entre") {
+          if (code === 123) { // {
+            state = "objeto";
+            depth = 1;
+            inString = false;
+            objectStart = index;
+          } else if (code === 93) { // ]
+            sawArrayEnd = true;
+          } else if (code !== 44 && !isJsonWhitespace(code) && code !== 0xfeff) { // ,
+            throw new Error("La respuesta de fotografías tiene formato inesperado.");
+          }
+          index += 1;
+        } else if (!inString) {
+          if (code === 34) { // "
+            inString = true;
+          } else if (code === 123) { // {
+            depth += 1;
+          } else if (code === 125) { // }
+            depth -= 1;
+            if (depth === 0) {
+              try {
+                const row = JSON.parse(pending.slice(objectStart, index + 1));
+                if (row && typeof row === "object" && !Array.isArray(row)) {
+                  if (typeof row.etiqueta === "string") {
+                    row.etiqueta = repairLatin1Utf8(row.etiqueta);
+                  }
+                  batch.push(row);
+                }
+              } catch (parseError) {
+                console.warn(
+                  "[ClienteFotos] Se omitió una fila con JSON inválido:",
+                  parseError
+                );
+              }
+              state = "entre";
+              objectStart = -1;
+              if (batch.length >= FOTO_FULL_UPSERT_BATCH) await upsertBatch();
+            }
+          }
+          index += 1;
+        } else {
+          // Dentro de un string: saltar directo a la siguiente comilla no
+          // escapada (los base64 no contienen " ni \). Una comilla está
+          // escapada si va precedida de un número impar de backslashes.
+          const nextQuote = pending.indexOf('"', index);
+          if (nextQuote === -1) {
+            index = pending.length;
+          } else {
+            let backslashes = 0;
+            let k = nextQuote - 1;
+            while (k >= 0 && pending.charCodeAt(k) === 92) {
+              backslashes += 1;
+              k -= 1;
+            }
+            index = nextQuote + 1;
+            if (backslashes % 2 === 0) inString = false;
+          }
+        }
+      }
+
+      if (state === "objeto") {
+        pending = pending.slice(objectStart);
+        scanOffset = pending.length;
+        objectStart = 0;
+      } else {
+        pending = "";
+        scanOffset = 0;
+      }
+    }
+
+    if (state === "objeto" || state === "inicio" || !sawArrayEnd) {
+      throw new Error("La descarga de fotografías llegó incompleta.");
+    }
+    await upsertBatch();
+    return count;
+  }
+
+  /**
+   * Escribe las fotos base64 de una fila remota como archivos JPEG/PNG en
+   * disco (RNFS decodifica base64 de forma nativa) y deja en la fila las
+   * rutas locales (__localFoto/__localMini) para que upsertRemoteRows las
+   * guarde en lugar de los strings base64.
+   */
+  private async persistRemoteFotoFiles(row: any): Promise<void> {
+    const hasFoto = typeof row.fotoBase64 === "string" && row.fotoBase64.length > 0;
+    const hasMini =
+      typeof row.fotoMiniaturaBase64 === "string" && row.fotoMiniaturaBase64.length > 0;
+    if (!hasFoto && !hasMini) return;
+
+    const idServidor = row.id == null ? null : Number(row.id);
+    const idCliente = Number(row.idCliente) || 0;
+    const dir = `${RNFS.DocumentDirectoryPath}/cliente-fotos-remote/${idCliente}`;
+    const base = `srv_${idServidor ?? "x"}`;
+    const ext = (mime: unknown) =>
+      mime && /png/i.test(String(mime)) ? ".png" : ".jpg";
+
+    await RNFS.mkdir(dir).catch(() => undefined);
+
+    const jobs: Promise<void>[] = [];
+    if (hasFoto) {
+      const filePath = `${dir}/${base}${ext(row.fotoMimeType)}`;
+      jobs.push(
+        RNFS.writeFile(filePath, row.fotoBase64, "base64")
+          .then(() => {
+            row.__localFoto = filePath;
+          })
+          .catch((error) =>
+            console.warn("[ClienteFotos] No se pudo guardar foto remota:", error)
+          )
+      );
+      row.fotoBase64 = null;
+    }
+    if (hasMini) {
+      const filePath = `${dir}/${base}_mini${ext(row.fotoMiniaturaMimeType)}`;
+      jobs.push(
+        RNFS.writeFile(filePath, row.fotoMiniaturaBase64, "base64")
+          .then(() => {
+            row.__localMini = filePath;
+          })
+          .catch((error) =>
+            console.warn("[ClienteFotos] No se pudo guardar miniatura remota:", error)
+          )
+      );
+      row.fotoMiniaturaBase64 = null;
+    }
+    await Promise.all(jobs);
   }
 
   async downloadIncremental(
@@ -228,7 +569,9 @@ class ClienteFotosService {
     if (!response.ok)
       throw new Error(`HTTP ${response.status} al descargar cambios de fotos`);
     const rows = await response.json();
-    return this.upsertRemoteRows(Array.isArray(rows) ? rows : []);
+    const list = Array.isArray(rows) ? rows : [];
+    await Promise.all(list.map((row) => this.persistRemoteFotoFiles(row)));
+    return this.upsertRemoteRows(list);
   }
 
   async syncPending(
@@ -409,8 +752,8 @@ class ClienteFotosService {
           idServidor,
           idMovil,
           idCliente: Number(row.idCliente),
-          foto: existing?.foto || null,
-          fotoMiniatura: existing?.fotoMiniatura || null,
+          foto: existing?.foto || row.__localFoto || null,
+          fotoMiniatura: existing?.fotoMiniatura || row.__localMini || null,
           fotoServidor: row.foto || existing?.fotoServidor || null,
           fotoMiniaturaServidor:
             row.fotoMiniatura || existing?.fotoMiniaturaServidor || null,

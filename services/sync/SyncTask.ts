@@ -91,6 +91,15 @@ export abstract class SyncTask {
   abstract getDependencies(): string[];
 
   /**
+   * Indica si la tarea solo debe ejecutarse en el login (o mediante una
+   * descarga manual explícita) y queda excluida de la sincronización completa.
+   * Sirve para endpoints muy pesados que no deben correr en cada sync.
+   */
+  isLoginOnly(): boolean {
+    return false;
+  }
+
+  /**
    * Ejecuta la sincronización específica de esta tabla
    */
   abstract execute(): Promise<SyncTaskResult>;

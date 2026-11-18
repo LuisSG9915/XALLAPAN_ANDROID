@@ -741,14 +741,25 @@ El 2.9 enmienda *cuándo* se usa la evidencia; esta sección regula *qué cuenta
 
 ### R1 — Proveedor confiable
 
-Un fix de `network` puede declarar ±11.9 m y estar 419 m fuera: es exactamente la firma del caso 373510. Solo el GNSS crudo acredita presencia.
+Un fix de `network` puede declarar ±11.9 m y estar 419 m fuera: es exactamente la firma del caso 373510. Solo el GNSS acredita presencia.
 
 | proveedor | se acepta |
 |---|---|
 | `gps` | sí |
-| `fused` | solo si `accuracy <= 20` **y** trae `speed` (el fused sin velocidad suele ser una media ponderada con red) |
+| `fused` | sí, con el umbral general `accuracy <= 25` (enmendado 2026-11-05, caso 400517) |
 | `network`, `passive` | no |
 | desconocido (`""`) | sí (plataformas que no reportan proveedor; no romper iOS) |
+
+**Enmienda 2026-11-05 (caso 400517):** la regla original exigía a `fused`
+`accuracy <= 20` **y** `speed` finito. En Android, `FusedLocationProviderClient`
+siempre reporta `provider="fused"` (nunca `"gps"`) y `speed` llega como número
+aun estando detenido, así que el único filtro efectivo era `accuracy <= 20` —
+2 m más estricto que el umbral de evidencia (25 m). En producción (1.6.0), **17
+de 23 validaciones fallidas con evidencia en rango (74%) tenían su mejor punto
+entre 20.1 y 24.7 m** y la regla lo descartaba en silencio (400517: fix a 50.6 m
+del cliente con ±24.2 m; 399679: 13.2 m con ±24.7 m; 385007: 3 puntos a 6.4 m
+con ±20.1 m). `fused` ahora usa el mismo umbral general; `network`/`passive`
+siguen rechazados.
 
 ### R2 — Salto físicamente imposible
 
@@ -766,25 +777,32 @@ Qué atrapa y qué no:
 
 **Límite conocido:** un fix de red con ±12 m a 400 m es geométricamente indistinguible de un movimiento real. R2 no lo atrapa; lo atrapa R1.
 
-### R3 — Asimetría aprobar/vetar
+### R3 — Veto con un solo fix (enmendado 2026-11-05)
 
-Aprobar basta con un fix bueno (no perder ventas); **vetar exige dos** (`TRACKING_VETO_FIXES_MIN = 2`). Un solo punto malo ya no puede tumbar una visita que sí tiene evidencia dentro del rango.
+Aprobar basta con un fix bueno (no perder ventas) y **vetar también basta con
+uno** (`TRACKING_VETO_FIXES_MIN = 1`, decisión de negocio): los fixes
+persistidos ya pasaron R1 (proveedor confiable, ≤25 m) y R2 (sin saltos
+imposibles), así que un punto lejano reciente significa que el vendedor
+realmente se retiró. Caso 400517: el vendedor estuvo a 50 m del cliente a las
+11:28, se movió 550 m e intentó validar a las 11:29 — el fix de las 11:29:14
+(477 m, ±8 m) veta y la visita queda bloqueada, aunque exista evidencia positiva
+minutos antes. El historial positivo **no revive** una visita abandonada.
 
 ### Invariantes nuevas
 
 - **I11.** Solo un fix con proveedor confiable (R1) puede entrar a `fixesPersistidos`.
 - **I12.** Un fix que implica un salto > 150 km/h no entra ni se convierte en base de comparación.
-- **I13.** El veto requiere al menos dos fixes de acuerdo; la aprobación sigue requiriendo uno.
+- **I13.** Un solo fix lejano reciente veta; la aprobación sigue requiriendo uno (enmendado 2026-11-05).
 
 ### Tests
 
 | test | qué fija |
 |---|---|
-| `R1` ×4 | red, pasiva, gps y fused (con y sin velocidad) |
+| `R1` ×4 | red, pasiva, gps y fused (umbral general 25 m) |
 | `R2` ×3 | salto descartado, base intacta tras el descarte, reanclaje con dos fixes concordantes |
-| `T3` | dos fixes lejanos vetan la evidencia vieja |
-| `T4c` | veto con dos fixes manda sobre la evidencia positiva |
-| `T4f` | un solo fix lejano **no** veta (R3) |
+| `T3` | un fix lejano reciente veta la evidencia vieja (Veto = 1) |
+| `T4c` | el veto manda sobre la evidencia positiva |
+| `T4f` | un solo fix lejano **sí** veta (R3, Veto = 1) |
 
 ### Cómo se mide
 

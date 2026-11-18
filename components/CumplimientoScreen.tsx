@@ -24,6 +24,7 @@ import LocationService, { LocationCoordinates, calcularDistancia } from "../serv
 import ReubicacionService from "../services/ReubicacionService";
 import { registrarReubicacionFallida } from "../services/ReubicacionBitacora";
 import ModalDiagnosticoGps, { DiagnosticoGpsData } from "./ModalDiagnosticoGps";
+import { integrarPedidosEnAgenda } from "./cumplimientoAgenda";
 
 const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
   if (!fechaEntrega) return false;
@@ -88,6 +89,7 @@ interface VisitaConCliente extends Visita {
   domicilio?: string;
   pedidoFolios?: number[];
   fechaEntregaPedido?: Date;
+  tienePedidoPendiente?: boolean; // Pedido de central pendiente (independiente del estado de la visita)
 }
 
 interface ClienteLite {
@@ -287,7 +289,7 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           })),
         });
 
-        // Los pedidos de clientes agendados también generan su propia tarjeta
+        // Agrupar los pedidos por cliente antes de integrarlos en la agenda.
         const foliosConVisita = new Set(
           visitasDelDia
             .filter((visita: any) => Number(visita.tipo) === 99)
@@ -402,10 +404,10 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
           })),
         });
 
-        const visitasParaRender = [
-          ...visitasDelDia.filter((visita: any) => Number(visita.tipo) !== 99),
-          ...visitasPedidosCentral,
-        ];
+        const visitasParaRender = integrarPedidosEnAgenda(
+          visitasDelDia.filter((visita: any) => Number(visita.tipo) !== 99),
+          visitasPedidosCentral,
+        );
 
         // Lookup síncrono de clientes desde Realm (sin promesas por cliente)
         const visitasConNombres = visitasParaRender.map((visita: any) => {
@@ -1180,11 +1182,11 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
 
   const renderVisita = ({ item, index }: { item: VisitaConCliente; index: number }) => {
     const esPedidoCentral = item.tipo === 99;
-    const foliosPedido = esPedidoCentral
-      ? item.pedidoFolios?.length
-        ? item.pedidoFolios
-        : [item.idOriginal]
-      : [];
+    const foliosPedido = item.pedidoFolios?.length
+      ? item.pedidoFolios
+      : esPedidoCentral
+        ? [item.idOriginal]
+        : [];
     const folio = foliosPedido[0] ?? null;
     const abrirPedido = () => {
       if (foliosPedido.length > 1) {
@@ -1321,11 +1323,19 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
                 )}
               </TouchableOpacity>
             )}
-            {esPedidoCentral && (
-              <TouchableOpacity style={styles.botonVerPedido} onPress={abrirPedido} activeOpacity={0.8}>
+            {foliosPedido.length > 0 && (
+              <TouchableOpacity
+                style={styles.botonVerPedido}
+                onPress={abrirPedido}
+                activeOpacity={0.8}
+                accessibilityLabel={
+                  foliosPedido.length > 1 ? `Ver ${foliosPedido.length} pedidos` : "Ir a pedido"
+                }
+                accessibilityHint="Abre el pedido de central asociado a este cliente"
+              >
                 <Icon name="arrow-forward" type="material" size={14} color="white" />
                 <Text style={styles.botonVisitadoTexto}>
-                  {foliosPedido.length > 1 ? ` (${foliosPedido.length})` : "IR A PEDIDO"}
+                  {foliosPedido.length > 1 ? `VER PEDIDOS (${foliosPedido.length})` : "IR A PEDIDO"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1365,15 +1375,16 @@ export default function CumplimientoScreen({ navigation }: { navigation: any }) 
   // Filtrar visitas según búsqueda y toggle de visitadas
   const visitasAgendadas = visitas.filter((v) => {
     const coincideBusqueda = coincideBusquedaCliente(v.nombreCliente, v.idCliente, v.domicilio);
-    const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
+    const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1 || v.tienePedidoPendiente === true;
     return coincideBusqueda && coincideEstado;
   });
 
-  // Visor de folios: pedidos de central (tipo 99)
+  // Visor de folios: pedidos de central (tipo 99) y visitas con pedidos integrados
   const visitasFolios = visitas.filter((v) => {
-    if (v.tipo !== 99) return false;
+    const tieneFolios = v.tipo === 99 || (v.pedidoFolios?.length ?? 0) > 0;
+    if (!tieneFolios) return false;
     const coincideBusqueda = coincideBusquedaCliente(v.nombreCliente, v.idCliente, v.domicilio);
-    const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1;
+    const coincideEstado = mostrarVisitadas ? true : v.visitado !== 1 || v.tienePedidoPendiente === true;
     return coincideBusqueda && coincideEstado;
   });
 

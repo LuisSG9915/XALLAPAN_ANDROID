@@ -44,6 +44,7 @@ type FixTracking = {
   longitud: number;
   accuracy: number;
   timestamp: number;
+  receivedAt?: number;
 };
 
 const service = LocationService as any;
@@ -90,7 +91,7 @@ beforeEach(() => {
   fixes = [];
 
   getFixesPersistidosMock.mockImplementation((maxEdadMs: number, maxAccuracy: number) =>
-    fixes.filter((f) => Date.now() - f.timestamp <= maxEdadMs && f.accuracy <= maxAccuracy),
+    fixes.filter((f) => Date.now() - (f.receivedAt ?? f.timestamp) <= maxEdadMs && f.accuracy <= maxAccuracy),
   );
 
   jest.spyOn(LocationService, "getBestLocation").mockImplementation(async () => {
@@ -138,17 +139,11 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.motivo).toBe("precision_baja");
   });
 
-  it("T3: veta la aprobación si DOS fixes buenos y recientes ubican al vendedor lejos (R3)", async () => {
+  it("T3: veta la aprobación si UN fix bueno y reciente ubica al vendedor lejos (R3 — Veto = 1)", async () => {
     fixes = [
       { ...EVIDENCIA_REAL, timestamp: Date.now() - 174_000 },
       {
         latitud: desplazarLat(250),
-        longitud: CLIENTE.lng,
-        accuracy: 10,
-        timestamp: Date.now() - 60_000,
-      },
-      {
-        latitud: desplazarLat(270),
         longitud: CLIENTE.lng,
         accuracy: 10,
         timestamp: Date.now() - 30_000,
@@ -207,7 +202,7 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.motivo).toBe("fuera_de_rango");
   });
 
-  it("T4c: dos fixes de alejamiento vetan la evidencia positiva (R3)", async () => {
+  it("T4c: el veto manda sobre la evidencia positiva (R3)", async () => {
     liveLocation = {
       latitude: desplazarLat(134),
       longitude: CLIENTE.lng,
@@ -226,24 +221,49 @@ describe("ok_tracking — corroboración con el tracking de ruta", () => {
     expect(r.motivo).toBe("fuera_de_rango");
   });
 
-  it("T4f: un solo fix de alejamiento NO veta (R3 — asimetría aprobar/vetar)", async () => {
-    // Un fix de red a 300 m no debe tumbar una visita que sí tiene evidencia
-    // dentro del rango: vetar exige dos fixes de acuerdo.
+  it("T4f: un solo fix de alejamiento SÍ veta (R3 — Veto = 1, caso 400517)", async () => {
+    // Caso 400517 (2026-11-05): el vendedor estuvo a ~50 m del cliente 27677 a
+    // las 11:28:08 (fix persistido ±24.2 m), se movió 550 m al este y el fix de
+    // las 11:29:14 (477 m, ±8 m) ya lo ubica fuera. A las 11:29:22 intenta
+    // validar: la evidencia positiva existe pero el veto manda — una visita
+    // cerrada después de irse no se aprueba.
     liveLocation = {
-      latitude: desplazarLat(134),
+      latitude: desplazarLat(551),
       longitude: CLIENTE.lng,
-      accuracy: 6,
+      accuracy: 4.7,
       timestamp: Date.now(),
     };
     fixes = [
-      { latitud: desplazarLat(15), longitud: CLIENTE.lng, accuracy: 10, timestamp: Date.now() - 150_000 },
-      { latitud: desplazarLat(300), longitud: CLIENTE.lng, accuracy: 12, timestamp: Date.now() - 20_000 },
+      { latitud: desplazarLat(51), longitud: CLIENTE.lng, accuracy: 24.2, timestamp: Date.now() - 74_000 },
+      { latitud: desplazarLat(477), longitud: CLIENTE.lng, accuracy: 8, timestamp: Date.now() - 8_000 },
+    ];
+
+    const r = await validar();
+
+    expect(r.valido).toBe(false);
+    expect(r.motivo).toBe("fuera_de_rango");
+    expect(r.distancia).toBeCloseTo(550.4, 0);
+  });
+
+  it("T12: evidencia fused de 24.7 m dentro del rango aprueba (caso 399679)", async () => {
+    // Caso 399679 (2026-11-05): falso negativo real — el vendedor seguía a
+    // 13.2 m del cliente con evidencia persistida de ±24.7 m; la regla vieja
+    // (fused <= 20 m) la había descartado. Sin fixes lejanos, aprueba.
+    liveLocation = {
+      latitude: desplazarLat(200),
+      longitude: CLIENTE.lng,
+      accuracy: 2066.0390625,
+      timestamp: Date.now(),
+    };
+    fixes = [
+      { latitud: desplazarLat(13), longitud: CLIENTE.lng, accuracy: 24.7, timestamp: Date.now() - 60_000 },
     ];
 
     const r = await validar();
 
     expect(r.valido).toBe(true);
     expect(r.motivo).toBe("ok_tracking");
+    expect(r.distancia).toBeCloseTo(13, 0);
   });
 
   it("T4d: evidencia de más de 5 min no aprueba un fuera_de_rango", async () => {

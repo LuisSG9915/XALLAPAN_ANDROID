@@ -103,6 +103,16 @@ export default function LoginScreen({ navigation }: any) {
         console.log("Error al iniciar sincronización automática:", err);
       });
 
+      // La descarga full de fotografías (~150 MB) solo se ejecuta en el login,
+      // en segundo plano y sin bloquear el acceso. Si falla, el inicio muestra
+      // un aviso con botón de descarga manual.
+      void FullSyncService.descargarFotosClientesFull(
+        sucursal,
+        user?.id || 0,
+      ).catch((fotosError) =>
+        console.warn("[Login] Error al iniciar descarga de fotos:", fotosError),
+      );
+
       navigation.reset({ index: 0, routes: [{ name: "Home" }] });
       setTimeout(() => {
         PedidoNotificacionService.procesarNavegacionPendiente().catch((error) =>

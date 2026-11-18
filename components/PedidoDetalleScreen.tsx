@@ -19,6 +19,7 @@ import PedidosService, {
   PRODUCTO_AGREGADO_OBSERVACION,
   esProductoAgregado,
 } from "../services/PedidosService";
+import { normalizarObservaciones } from "../services/pedidoObservaciones";
 import FullSyncService from "../services/FullSyncService";
 import AuthService from "../services/AuthService";
 import LocationService, { LocationCoordinates } from "../services/LocationService";
@@ -405,8 +406,11 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         setClienteNombre(nombreCliente);
         setClienteDireccion(domicilioCliente);
         setObservaciones(
-          pedidoData.observaciones ||
-            (productosData as any[]).find((p: any) => p.observaciones)?.observaciones ||
+          normalizarObservaciones(pedidoData.observaciones) ??
+            normalizarObservaciones(
+              (productosData as any[]).find((p: any) => normalizarObservaciones(p.observaciones))
+                ?.observaciones,
+            ) ??
             "",
         );
         setPreciosPromo(FullSyncService.getPreciosPromoByCliente(pedidoData.cliente));
@@ -838,7 +842,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
           ...productosEntregados.map((producto) => producto.observaciones),
           ...observacionesEnvase,
         ]
-          .map((observacion) => String(observacion ?? "").trim())
+          .map((observacion) => normalizarObservaciones(observacion) ?? "")
           .filter(Boolean),
       ),
     ).join(" | ");

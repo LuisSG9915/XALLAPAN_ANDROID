@@ -164,7 +164,15 @@ export class SyncOrchestrator {
     results: Map<string, SyncTaskResult>;
     errors: string[];
   }> {
-    const tasks = this.createAllTasks();
+    const allTasks = this.createAllTasks();
+    const loginOnlyTasks = allTasks.filter((t) => t.isLoginOnly());
+    if (loginOnlyTasks.length > 0) {
+      console.log(
+        `[SyncOrchestrator] Tareas solo-login omitidas en syncAll:`,
+        loginOnlyTasks.map((t) => t.getTableName()),
+      );
+    }
+    const tasks = allTasks.filter((t) => !t.isLoginOnly());
     const sortedTasks = this.sortTasksByDependencies(tasks);
     const results = new Map<string, SyncTaskResult>();
     const errors: string[] = [];

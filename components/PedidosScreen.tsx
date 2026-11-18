@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Icon } from "react-native-elements";
 import PedidosService, { Pedido, ESTATUS_PEDIDO, esEstatusFinalPedido } from "../services/PedidosService";
+import { normalizarObservaciones } from "../services/pedidoObservaciones";
 
 type ProductoResumen = {
   nombre: string;
@@ -176,7 +177,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
             folioKey: folio,
             clienteNombre: pedido.clienteNombre || `Cliente #${pedido.cliente}`,
             clienteDomicilio: pedido.clienteDomicilio || "",
-            observaciones: pedido.observaciones || "",
+            observaciones: normalizarObservaciones(pedido.observaciones) ?? "",
             total,
             productosResumen: obtenerProductosResumen(pedidosService.getProductosByFolio(folio)),
           });
@@ -226,7 +227,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
               folioKey: folio,
               clienteNombre: pedido.clienteNombre || `Cliente #${pedido.cliente}`,
               clienteDomicilio: pedido.clienteDomicilio || "",
-              observaciones: pedido.observaciones || "",
+              observaciones: normalizarObservaciones(pedido.observaciones) ?? "",
               total,
               productosResumen: obtenerProductosResumen(pedidosService.getProductosByFolio(folio)),
             });

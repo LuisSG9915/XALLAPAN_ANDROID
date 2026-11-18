@@ -17,6 +17,12 @@ export class ClienteFotosSyncTask extends SyncTask {
     return ["Clientes"];
   }
 
+  // El catálogo full de fotografías pesa ~150 MB: solo se descarga en el
+  // login o mediante la descarga manual, nunca dentro de la sync completa.
+  isLoginOnly(): boolean {
+    return true;
+  }
+
   async execute(): Promise<SyncTaskResult> {
     try {
       ClienteFotosService.setRealm(this.realm);
