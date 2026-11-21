@@ -64,6 +64,8 @@ import "react-native-devsettings";
 // OR if you are using AsyncStorage
 import "react-native-devsettings/withAsyncStorage";
 import SyncStatusPanel from "./components/SyncStatusPanel";
+import DeviceInfo from "react-native-device-info";
+import { obtenerIdentidadMovil } from "./services/IdentidadMovil";
 import NetworkUsagePanel from "./components/NetworkUsagePanel";
 import NetworkUsageService from "./services/NetworkUsageService";
 import SucursalBadge from "./components/SucursalBadge";
@@ -1021,6 +1023,19 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
     lastTapRef.current = now;
   }, [navigation]);
 
+  const handleMostrarIdentidadMovil = useCallback(async () => {
+    const identidad = await obtenerIdentidadMovil();
+    const version = `${DeviceInfo.getVersion()} (build ${DeviceInfo.getBuildNumber()})`;
+    Alert.alert(
+      "Identificación del móvil",
+      `Marca: ${identidad.marcaMovil ?? "No disponible"}\n` +
+        `Modelo: ${identidad.modeloMovil ?? "No disponible"}\n` +
+        `ID dispositivo: ${identidad.idDispositivoMovil ?? "No disponible"}\n` +
+        `Versión app: ${version}`,
+      [{ text: "Cerrar" }],
+    );
+  }, []);
+
   // Orden de prioridad: Punto de Venta, Agenda, Pedidos, Mapa, Cargas, Inventario, Corte, Impresora
   const priorityOrder = ["cumplimiento", "pedidos", "sales", "mapa", "traspaso", "reporte", "precorte", "cortes", "printersettings"];
 
@@ -1319,6 +1334,16 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           </TouchableOpacity>
         </View>
         <SyncStatusPanel />
+        <TouchableOpacity
+          style={styles.deviceIdButton}
+          onPress={handleMostrarIdentidadMovil}
+          activeOpacity={0.8}
+          accessibilityLabel="Identificación del móvil"
+          accessibilityHint="Muestra la marca, modelo e identificador de este dispositivo"
+        >
+          <Icon name="smartphone" type="material" size={16} color={COLORS.textSecondary} />
+          <Text style={styles.deviceIdButtonText}>Identificación del móvil</Text>
+        </TouchableOpacity>
         {isAdmin && (
           <View style={styles.networkUsageToggleContainer}>
             <View style={styles.networkUsageToggleTextContainer}>
@@ -1343,7 +1368,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
 
         {/* Footer Info */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>{APP_NAME} v1.6.2</Text>
+          <Text style={styles.footerText}>{APP_NAME} v1.6.3</Text>
         </View>
       </ScrollView>
 
@@ -1453,6 +1478,23 @@ const styles = StyleSheet.create({
   syncContainer: {
     padding: SPACING.m,
     marginTop: SPACING.m,
+  },
+  deviceIdButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.xs,
+    marginHorizontal: SPACING.m,
+    marginBottom: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.m,
+    backgroundColor: COLORS.surface,
+    ...SHADOWS.small,
+  },
+  deviceIdButtonText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
   },
   networkUsageToggleContainer: {
     flexDirection: "row",

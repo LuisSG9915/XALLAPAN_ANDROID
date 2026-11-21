@@ -127,6 +127,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
 
   const salidaControlada = useRef(false);
   const cierreEnCursoRef = useRef(false);
+  const [procesandoEntrega, setProcesandoEntrega] = useState(false);
 
   const construirProductosDisponibles = (
     pedidoData: Pedido,
@@ -1129,7 +1130,7 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
     const productosConDiferencia = productos.filter((p) => {
       const cantAtencion = Number(p.cantAtencion ?? 0);
       const cantPedido = Number(p.cantPedido ?? 0);
-      return cantAtencion < cantPedido && !p.causaDiferencia && !esProductoAgregado(p);
+      return cantAtencion !== cantPedido && !p.causaDiferencia && !esProductoAgregado(p);
     });
 
     if (productosConDiferencia.length > 0) {
@@ -1140,13 +1141,13 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
       return;
     }
 
-    const todosEntregados = productos.every(
-      (p) => Number(p.cantAtencion ?? 0) >= Number(p.cantPedido ?? 0),
-    );
+    const todosEntregados = productos
+      .filter((p) => !esProductoAgregado(p))
+      .every((p) => Number(p.cantAtencion ?? 0) === Number(p.cantPedido ?? 0));
     const hayDiferenciasConCausa = productos.some((p) => {
       const cantAtencion = Number(p.cantAtencion ?? 0);
       const cantPedido = Number(p.cantPedido ?? 0);
-      return cantAtencion < cantPedido && p.causaDiferencia;
+      return cantAtencion !== cantPedido && p.causaDiferencia;
     });
 
     let nuevoEstatus: number;
@@ -1170,78 +1171,83 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         onPress: async () => {
           if (cierreEnCursoRef.current) return;
           cierreEnCursoRef.current = true;
-          const pedidosService = PedidosService.getInstance();
-          pedidosService.setRealm((FullSyncService as any).realm);
+          setProcesandoEntrega(true);
+          try {
+            const pedidosService = PedidosService.getInstance();
+            pedidosService.setRealm((FullSyncService as any).realm);
 
-          const pedidoCerrado = pedido;
-          const productosEntregados = [...productos];
-          if (!pedidoCerrado) {
-            Alert.alert("Error", "No se encontró el pedido para confirmar la entrega");
-            cierreEnCursoRef.current = false;
-            return;
-          }
-
-          const user = await AuthService.restoreSession();
-          const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoCerrado.ruta || 1);
-          const validacionInventario = validarInventarioPedido(productosEntregados, sucursal);
-          if (!validacionInventario.permitido) {
-            Alert.alert(
-              "Inventario insuficiente",
-              `Los siguientes productos no tienen suficiente inventario:\n${validacionInventario.faltantes
-                .map((item) => `- ${item.nombre} (disponible: ${item.disponible}, solicitado: ${item.solicitado})`)
-                .join("\n")}`,
-            );
-            cierreEnCursoRef.current = false;
-            return;
-          }
-
-          for (const producto of productosEntregados) {
-            const precioAtencion = Number(
-              producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto),
-            );
-            if (!Number.isFinite(precioAtencion)) {
-              Alert.alert("Error", `Precio inválido para el producto ${producto.idProducto}`);
+            const pedidoCerrado = pedido;
+            const productosEntregados = [...productos];
+            if (!pedidoCerrado) {
+              Alert.alert("Error", "No se encontró el pedido para confirmar la entrega");
               cierreEnCursoRef.current = false;
               return;
             }
 
-            const precioGuardado = pedidosService.actualizarPrecioAtencion(
-              folio,
-              producto.idProducto,
-              precioAtencion,
-            );
-            if (!precioGuardado) {
-              Alert.alert("Error", `No se pudo guardar el precio del producto ${producto.idProducto}`);
+            const user = await AuthService.restoreSession();
+            const sucursal = Number(user?.sucursal_origen || user?.sucursal || pedidoCerrado.ruta || 1);
+            const validacionInventario = validarInventarioPedido(productosEntregados, sucursal);
+            if (!validacionInventario.permitido) {
+              Alert.alert(
+                "Inventario insuficiente",
+                `Los siguientes productos no tienen suficiente inventario:\n${validacionInventario.faltantes
+                  .map((item) => `- ${item.nombre} (disponible: ${item.disponible}, solicitado: ${item.solicitado})`)
+                  .join("\n")}`,
+              );
               cierreEnCursoRef.current = false;
               return;
             }
-          }
 
-          const productosParaVenta = pedidosService.getProductosByFolio(folio);
-          const result = pedidosService.finalizarPedido(folio, nuevoEstatus);
+            for (const producto of productosEntregados) {
+              const precioAtencion = Number(
+                producto.precioAtencion ?? producto.precio ?? obtenerPrecioProducto(producto.idProducto),
+              );
+              if (!Number.isFinite(precioAtencion)) {
+                Alert.alert("Error", `Precio inválido para el producto ${producto.idProducto}`);
+                cierreEnCursoRef.current = false;
+                return;
+              }
 
-          if (result.success && result.idMovil) {
-            try {
-              await procesarCierreComoVenta(pedidoCerrado, productosParaVenta, result.idMovil);
-              Alert.alert(
-                "Éxito",
-                nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada",
-                [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
+              const precioGuardado = pedidosService.actualizarPrecioAtencion(
+                folio,
+                producto.idProducto,
+                precioAtencion,
               );
-            } catch (error) {
-              console.error(`[PedidoDetalle] Error al completar cierre como venta para folio ${folio}:`, error);
-              Alert.alert(
-                "Entrega confirmada",
-                "El pedido se cerró, pero no se pudo completar la venta o el descuento de inventario. Verifica el registro antes de reintentar.",
-                [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
-              );
+              if (!precioGuardado) {
+                Alert.alert("Error", `No se pudo guardar el precio del producto ${producto.idProducto}`);
+                cierreEnCursoRef.current = false;
+                return;
+              }
             }
-          } else if (result.success) {
-            cierreEnCursoRef.current = false;
-            Alert.alert("Error", "El pedido se cerró sin un id_movil válido; no se pudo registrar la venta");
-          } else {
-            cierreEnCursoRef.current = false;
-            Alert.alert("Error", "No se pudo confirmar la entrega");
+
+            const productosParaVenta = pedidosService.getProductosByFolio(folio);
+            const result = pedidosService.finalizarPedido(folio, nuevoEstatus);
+
+            if (result.success && result.idMovil) {
+              try {
+                await procesarCierreComoVenta(pedidoCerrado, productosParaVenta, result.idMovil);
+                Alert.alert(
+                  "Éxito",
+                  nuevoEstatus === ESTATUS_PEDIDO.ENTREGADO ? "Entrega confirmada" : "Entrega parcial confirmada",
+                  [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
+                );
+              } catch (error) {
+                console.error(`[PedidoDetalle] Error al completar cierre como venta para folio ${folio}:`, error);
+                Alert.alert(
+                  "Entrega confirmada",
+                  "El pedido se cerró, pero no se pudo completar la venta o el descuento de inventario. Verifica el registro antes de reintentar.",
+                  [{ text: "OK", onPress: () => { salidaControlada.current = true; navigation.goBack(); } }],
+                );
+              }
+            } else if (result.success) {
+              cierreEnCursoRef.current = false;
+              Alert.alert("Error", "El pedido se cerró sin un id_movil válido; no se pudo registrar la venta");
+            } else {
+              cierreEnCursoRef.current = false;
+              Alert.alert("Error", "No se pudo confirmar la entrega");
+            }
+          } finally {
+            setProcesandoEntrega(false);
           }
         },
       },
@@ -1261,7 +1267,9 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const calcularResumen = () => {
     const totalSolicitado = productos.reduce((sum, p) => sum + p.cantPedido, 0);
     const totalEntregado = productos.reduce((sum, p) => sum + (p.cantAtencion || 0), 0);
-    const conDiferencia = productos.filter((p) => (p.cantAtencion ?? 0) !== p.cantPedido).length;
+    const conDiferencia = productos.filter(
+      (p) => !esProductoAgregado(p) && Number(p.cantAtencion ?? 0) !== Number(p.cantPedido ?? 0),
+    ).length;
     const importeSolicitado = productos.reduce(
       (sum, p) => sum + Number(p.precioAtencion ?? p.precio ?? obtenerPrecioProducto(p.idProducto)) * Number(p.cantPedido ?? 0),
       0,
@@ -1330,8 +1338,8 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
   const renderProducto = ({ item }: { item: Pedido }) => {
     const cantAtencion = Number(item.cantAtencion ?? 0);
     const cantPedido = Number(item.cantPedido ?? 0);
-    const tieneDiferencia = cantAtencion < cantPedido;
-    const puedeRegistrarCausa = cantAtencion < cantPedido;
+    const tieneDiferencia = cantAtencion !== cantPedido && !esProductoAgregado(item);
+    const puedeRegistrarCausa = tieneDiferencia;
     const precioUnitario = Number(item.precioAtencion ?? item.precio ?? obtenerPrecioProducto(item.idProducto));
     const subtotal = precioUnitario * cantAtencion;
 
@@ -1912,6 +1920,16 @@ export default function PedidoDetalleScreen({ navigation, route }: Props) {
         data={diagnosticoGps}
         onClose={() => setDiagnosticoGps(null)}
       />
+
+      <Modal visible={procesandoEntrega} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.loadingModalOverlay}>
+          <View style={styles.loadingModalContent}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingModalTitle}>Confirmando entrega</Text>
+            <Text style={styles.loadingModalText}>Procesando pedido, venta e inventario...</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1952,6 +1970,33 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.body,
     marginTop: SPACING.m,
     color: COLORS.muted,
+  },
+  loadingModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingModalContent: {
+    backgroundColor: "white",
+    borderRadius: BORDER_RADIUS.l,
+    padding: 32,
+    alignItems: "center",
+    minWidth: 280,
+    ...SHADOWS.large,
+  },
+  loadingModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: COLORS.textPrimary,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loadingModalText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
   },
   errorContainer: {
     flex: 1,

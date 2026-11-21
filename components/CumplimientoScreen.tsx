@@ -66,6 +66,7 @@ const esPedidoFinalizado = (estatus: number): boolean =>
 // aunque su fechaEntrega sea de otro día. PROGRAMADO se mantiene filtrando por
 // fecha (aún no es un compromiso de entrega).
 const ESTATUS_PEDIDOS_PENDIENTES = [
+  ESTATUS_PEDIDO.CONFIRMADO,
   ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA,
   ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA,
 ];

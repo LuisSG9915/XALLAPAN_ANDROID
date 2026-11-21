@@ -108,8 +108,8 @@ android {
         applicationId "com.awesomeproject"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "1.6.2"
+        versionCode 8
+        versionName "1.6.3"
     }
     signingConfigs {
         debug {

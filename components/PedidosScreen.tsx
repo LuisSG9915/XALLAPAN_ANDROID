@@ -46,6 +46,7 @@ const esFechaDeHoy = (fechaEntrega?: Date | string | null): boolean => {
 };
 
 const debeMostrarEnRuta = (pedido: Pedido): boolean =>
+  Number(pedido.estatus) === ESTATUS_PEDIDO.CONFIRMADO ||
   Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_CON_CAUSA ||
   Number(pedido.estatus) === ESTATUS_PEDIDO.PENDIENTE_SIN_CAUSA ||
   esFechaDeHoy(pedido.fechaEntrega);
@@ -211,9 +212,10 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const folios = pedidosService.getFoliosByRuta(currentRuta, undefined, true).filter((folio) =>
-          pedidosService.getProductosByFolio(folio).some((producto) => esFechaDeHoy(producto.fechaEntrega)),
-        );
+        const folios = pedidosService.getFoliosByRuta(currentRuta, undefined, true).filter((folio) => {
+          const pedido = pedidosService.getPedidoByFolio(folio);
+          return pedido ? debeMostrarEnRuta(pedido) : false;
+        });
         const pedidosAgrupados: PedidoAgrupado[] = [];
         folios.forEach((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);

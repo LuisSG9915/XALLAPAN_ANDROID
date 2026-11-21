@@ -132,9 +132,9 @@ describe("reglas de pedidos", () => {
     expect(esProductoAgregado({ observaciones: "Nota normal" })).toBe(false);
   });
 
-  it("trata el punto de central como observación vacía", () => {
-    expect(normalizarObservaciones(".")).toBeNull();
-    expect(normalizarObservaciones(" . ")).toBeNull();
+  it("normaliza observaciones recortando espacios", () => {
+    expect(normalizarObservaciones(".")).toBe(".");
+    expect(normalizarObservaciones(" . ")).toBe(".");
     expect(normalizarObservaciones("")).toBeNull();
     expect(normalizarObservaciones("   ")).toBeNull();
     expect(normalizarObservaciones(null)).toBeNull();

@@ -2,6 +2,7 @@ import Realm from "realm";
 import AuthService from "./AuthService";
 import DeviceInfo from "react-native-device-info";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { obtenerIdentidadMovil } from "./IdentidadMovil";
 
 // Definición de tipos para los resultados de sync
 export interface SyncResult {
@@ -138,6 +139,10 @@ class BitacoraService {
     console.log(`[BitacoraService] Enviando ${pendientes.length} registros de bitácora...`);
     console.log(`[BitacoraService] URL:`, url);
 
+    // Metadatos del dispositivo que realiza el arrastre: una sola lectura por
+    // envío. Nunca debe abortar el arrastre (obtenerIdentidadMovil no lanza).
+    const identidadMovil = await obtenerIdentidadMovil();
+
     const payload = pendientes.map((p: any) => ({
       idBitacoraMovil: p.idBitacoraMovil,
       tabla: p.tabla,
@@ -152,6 +157,7 @@ class BitacoraService {
       descripcionError: p.descripcionError || null,
       stackTrace: p.stackTrace || null,
       fechaArrastre: this.formatDate(new Date()),
+      ...identidadMovil,
     }));
 
     // console.log(`[BitacoraService] 📤 Primer registro del payload:`, payload[0]);
