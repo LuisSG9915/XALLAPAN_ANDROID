@@ -206,6 +206,17 @@ describe("PedidoBitacoraUploadSyncTask", () => {
     await expect(task.execute()).resolves.toMatchObject({ success: false, registrosGuardados: 0 });
     expect(bitacora.enviado).toBe(false);
   });
+
+  it("no filtra por vendedor para enviar cierres hechos por un vendedor distinto al asignado", async () => {
+    const filtered = jest.fn(() => []);
+    const realm = { objects: jest.fn(() => ({ filtered })), write: jest.fn() };
+    const task = new PedidoBitacoraUploadSyncTask(realm as any, "test");
+
+    await task.execute();
+
+    expect(filtered).toHaveBeenCalledTimes(1);
+    expect((filtered.mock.calls[0] as any[])[0]).not.toContain("idVendedor");
+  });
 });
 
 describe("PedidosService.getPedidoByFolio", () => {

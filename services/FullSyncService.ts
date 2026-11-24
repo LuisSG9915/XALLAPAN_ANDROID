@@ -6052,9 +6052,9 @@ class FullSyncService {
       const bitacorasPendientes = Array.from(
         this.realm
           .objects("PedidoBitacora")
+          // Sin filtro por idVendedor: el pedido puede cerrarlo un vendedor distinto al asignado.
           .filtered(
-            "enviado == false AND idVendedor == $0 AND (estatus == $1 OR estatus == $2 OR estatus == $3)",
-            idUsuario,
+            "enviado == false AND (estatus == $0 OR estatus == $1 OR estatus == $2)",
             2,
             6,
             7

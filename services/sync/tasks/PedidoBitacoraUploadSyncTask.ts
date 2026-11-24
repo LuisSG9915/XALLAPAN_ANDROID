@@ -36,10 +36,11 @@ export class PedidoBitacoraUploadSyncTask extends SyncTask {
     try {
       const user = await AuthService.restoreSession();
       const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
+      // No se filtra por idVendedor: la bitácora guarda el vendedor asignado al pedido,
+      // que puede ser distinto del usuario que lo cierra en este dispositivo.
       const bitacoras = Array.from(
         this.realm.objects("PedidoBitacora").filtered(
-          "enviado = false AND idVendedor == $0 AND (estatus == $1 OR estatus == $2 OR estatus == $3)",
-          idUsuario,
+          "enviado = false AND (estatus == $0 OR estatus == $1 OR estatus == $2)",
           ...ESTADOS_CIERRE,
         ),
       ) as any[];
