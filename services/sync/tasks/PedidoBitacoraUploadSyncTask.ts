@@ -134,7 +134,7 @@ export class PedidoEstadoUploadSyncTask extends SyncTask {
       const user = await AuthService.restoreSession();
       const idUsuario = Number(user?.id ?? user?.idUsuario ?? 0);
       const estados = Array.from(
-        this.realm.objects("PedidoEstado").filtered("enviado = false AND idVendedor == $0", idUsuario),
+        this.realm.objects("PedidoEstado").filtered("enviado = false"),
       ) as any[];
       if (estados.length === 0) {
         return {

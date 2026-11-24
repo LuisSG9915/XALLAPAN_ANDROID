@@ -878,7 +878,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
       return;
     }
 
-    const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta, vendedor);
+    const validacionPedidos = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
 
     if (validacionPedidos.error) {
       Alert.alert(
@@ -924,7 +924,7 @@ function AppContent({ navigation, servicesReady }: { navigation: any; servicesRe
           text: "Sí, cerrar",
           style: "destructive",
           onPress: async () => {
-            const validacionFinal = CierreRutaService.validarPedidosPendientesSinCausa(ruta, vendedor);
+            const validacionFinal = CierreRutaService.validarPedidosPendientesSinCausa(ruta);
 
             if (validacionFinal.error) {
               Alert.alert(

@@ -5968,7 +5968,7 @@ class FullSyncService {
       const estadosPendientes = Array.from(
         this.realm
           .objects("PedidoEstado")
-          .filtered("enviado == false AND idVendedor == $0", idUsuario)
+          .filtered("enviado == false")
       ) as any[];
       if (estadosPendientes.length === 0) {
         return { success: true, sent: 0 };

@@ -38,7 +38,7 @@ class CierreRutaService {
     return cierreRuta?.rutaCerrada ?? false;
   }
 
-  validarPedidosPendientesSinCausa(ruta: number, vendedor?: number): ResultadoValidacionPedidos {
+  validarPedidosPendientesSinCausa(ruta: number): ResultadoValidacionPedidos {
     try {
       const realm = this.getRealm();
       const inicioDelDia = new Date();
@@ -48,10 +48,7 @@ class CierreRutaService {
 
       // Solo se validan los pedidos de hoy. Cualquier estado distinto de
       // ENTREGADO (2) o ENTREGADO PARCIAL (6) bloquea el cierre.
-      const tieneVendedor = Number.isFinite(vendedor) && Number(vendedor) > 0;
-      const pedidosDeLaRuta = tieneVendedor
-        ? realm.objects("Pedido").filtered("ruta == $0 AND idVendedor == $1", ruta, Number(vendedor))
-        : realm.objects("Pedido").filtered("ruta == $0", ruta);
+      const pedidosDeLaRuta = realm.objects("Pedido").filtered("ruta == $0", ruta);
       const pedidosPorFolio = new Map<number, any>();
       Array.from(pedidosDeLaRuta)
         .filter((p: any) => {
@@ -83,7 +80,7 @@ class CierreRutaService {
       const pedidosArray = Array.from(pedidosPorFolio.values());
 
       console.log(
-        `[CierreRutaService] Validación ruta ${ruta}${tieneVendedor ? `, vendedor ${Number(vendedor)}` : ""}: ${pedidosArray.length} pedido(s) bloqueante(s) de hoy`,
+        `[CierreRutaService] Validación ruta ${ruta}:${pedidosArray.length} pedido(s) bloqueante(s) de hoy`,
       );
 
       return {

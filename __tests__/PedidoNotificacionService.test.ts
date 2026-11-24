@@ -134,6 +134,19 @@ describe("PedidoNotificacionService polling", () => {
       knownFolios: [110],
     });
   });
+
+  it("notifica pedidos de la ruta asignados a otro vendedor", async () => {
+    await expect(
+      servicio.mostrarNotificacionPedido({
+        folio: 124,
+        cliente: 456,
+        ruta: 38,
+        idVendedor: 2142,
+        numeroProductos: 1,
+        estatus: 3,
+      }),
+    ).resolves.toBe(true);
+  });
 });
 
 describe("PedidoNotificacionService navegación pendiente", () => {
@@ -162,18 +175,5 @@ describe("PedidoNotificacionService navegación pendiente", () => {
       soloLectura: false,
     });
     expect(AsyncStorage.removeItem).toHaveBeenCalledWith(PENDING_NAVIGATION_KEY);
-  });
-
-  it("omite notificaciones de pedidos asignados a otro vendedor", async () => {
-    await expect(
-      servicio.mostrarNotificacionPedido({
-        folio: 124,
-        cliente: 456,
-        ruta: 3,
-        idVendedor: 2142,
-        numeroProductos: 1,
-        estatus: 3,
-      }),
-    ).resolves.toBe(false);
   });
 });

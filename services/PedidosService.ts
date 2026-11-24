@@ -409,11 +409,9 @@ class PedidosService {
   /**
    * Devuelve los folios unicos de una ruta (para listado de pedidos).
    */
-  getFoliosByRuta(ruta: number, idVendedor?: number, incluirCancelados = false): number[] {
+  getFoliosByRuta(ruta: number, incluirCancelados = false): number[] {
     const realm = this.getRealm();
-    const pedidos = idVendedor
-      ? realm.objects("Pedido").filtered("ruta = $0 AND idVendedor = $1", ruta, idVendedor)
-      : realm.objects("Pedido").filtered("ruta = $0", ruta);
+    const pedidos = realm.objects("Pedido").filtered("ruta = $0", ruta);
     const foliosCancelados = new Set<number>();
     const folios = new Set<number>();
 

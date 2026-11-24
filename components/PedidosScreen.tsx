@@ -161,7 +161,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       const pedidosService = PedidosService.getInstance();
       pedidosService.setRealm((FullSyncService as any).realm);
 
-      const folios = pedidosService.getFoliosByRuta(ruta, undefined, true).filter((folio) => {
+      const folios = pedidosService.getFoliosByRuta(ruta, true).filter((folio) => {
         const pedido = pedidosService.getPedidoByFolio(folio);
         return pedido ? debeMostrarEnRuta(pedido) : false;
       });
@@ -212,7 +212,7 @@ export default function PedidosScreen({ navigation }: { navigation: any }) {
       await pedidosService.syncCatalogos();
       const result = await pedidosService.syncPedidos(currentRuta);
       if (result.success) {
-        const folios = pedidosService.getFoliosByRuta(currentRuta, undefined, true).filter((folio) => {
+        const folios = pedidosService.getFoliosByRuta(currentRuta, true).filter((folio) => {
           const pedido = pedidosService.getPedidoByFolio(folio);
           return pedido ? debeMostrarEnRuta(pedido) : false;
         });

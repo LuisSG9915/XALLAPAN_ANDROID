@@ -72,7 +72,7 @@ describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
     expect(filtered).toHaveBeenCalledWith("ruta == $0", 7);
   });
 
-  it("filtra el cierre por vendedor cuando se recibe el vendedor actual", () => {
+  it("valida todos los pedidos de la ruta sin importar el vendedor asignado", () => {
     const pedidos: PedidoMock[] = [
       { folio: 500, ruta: 7, idVendedor: 4, fechaEntrega: fechaRelativa(0), estatus: 3 },
       { folio: 501, ruta: 7, idVendedor: 2142, fechaEntrega: fechaRelativa(0), estatus: 3 },
@@ -80,10 +80,10 @@ describe("CierreRutaService.validarPedidosPendientesSinCausa", () => {
     const { realm, filtered } = crearRealmMock(pedidos);
     CierreRutaService.setRealm(realm as any);
 
-    const resultado = CierreRutaService.validarPedidosPendientesSinCausa(7, 4);
+    const resultado = CierreRutaService.validarPedidosPendientesSinCausa(7);
 
-    expect(resultado.pedidosBloqueantes.map((pedido) => pedido.folio)).toEqual([500]);
-    expect(filtered).toHaveBeenCalledWith("ruta == $0 AND idVendedor == $1", 7, 4);
+    expect(resultado.pedidosBloqueantes.map((pedido) => pedido.folio)).toEqual([500, 501]);
+    expect(filtered).toHaveBeenCalledWith("ruta == $0", 7);
   });
 
   it("permite cerrar cuando los pedidos de hoy solo están entregados o entregados parcialmente", () => {

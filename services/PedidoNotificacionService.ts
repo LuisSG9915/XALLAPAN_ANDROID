@@ -37,20 +37,6 @@ class PedidoNotificacionService {
     this.realm = realm;
   }
 
-  private async obtenerVendedorActual(): Promise<number | null> {
-    const user = await AuthService.restoreSession();
-    const vendedor = Number(user?.id ?? user?.idUsuario ?? 0);
-    return Number.isFinite(vendedor) && vendedor > 0 ? vendedor : null;
-  }
-
-  private obtenerVendedorPedido(pedido: any): number {
-    return Number(pedido?.idVendedor ?? pedido?.id_vendedor ?? pedido?.vendedor ?? 0);
-  }
-
-  private perteneceAlVendedor(pedido: any, vendedor: number | null): boolean {
-    return vendedor !== null && this.obtenerVendedorPedido(pedido) === vendedor;
-  }
-
   private async asegurarCanalNotificacion(): Promise<void> {
     await notifee.createChannel({
       id: CHANNEL_ID,
@@ -106,12 +92,6 @@ class PedidoNotificacionService {
 
   async verificarPedidosNuevos(ruta: number) {
     if (!Number.isFinite(ruta) || ruta <= 0) return 0;
-
-    const vendedorActual = await this.obtenerVendedorActual();
-    if (vendedorActual === null) {
-      console.warn("[PedidoNotificacionService] Polling omitido: no se pudo determinar el vendedor actual");
-      return 0;
-    }
 
     const stateKey = `${PEDIDOS_POLL_STATE_PREFIX}${ruta}`;
     let state: { initialized: boolean; knownFolios: number[]; lastPollAt?: number } = {
@@ -233,12 +213,8 @@ class PedidoNotificacionService {
         pedidosService.actualizarPedidosDesdeRespuesta(rows);
       }
 
-      const rowsDelVendedor = rows.filter((row: any) => this.perteneceAlVendedor(row, vendedorActual));
-      console.log(
-        `[PedidoNotificacionService] Filas del vendedor ${vendedorActual}: ${rowsDelVendedor.length}/${rows.length}`,
-      );
       const pedidos = new Map<number, any>();
-      rowsDelVendedor.forEach((row: any) => {
+      rows.forEach((row: any) => {
         const folio = Number(row?.folio ?? row?.folioPedido ?? row?.idPedido);
         if (Number.isFinite(folio) && folio > 0 && !pedidos.has(folio)) {
           pedidos.set(folio, row);
@@ -417,12 +393,9 @@ class PedidoNotificacionService {
    */
   async notificarConfirmadosPendientes(): Promise<number> {
     if (!this.realm || this.realm.isClosed) return 0;
-    const vendedorActual = await this.obtenerVendedorActual();
-    if (vendedorActual === null) return 0;
     const pedidosConfirmados = this.realm.objects("Pedido").filtered(
-      "estatus == $0 AND idVendedor == $1",
+      "estatus == $0",
       ESTATUS_PEDIDO.CONFIRMADO,
-      vendedorActual,
     ) as any[];
     const folios = Array.from(pedidosConfirmados).reduce<number[]>((result, pedido: any) => {
       const folio = Number(pedido.folio);
@@ -437,11 +410,6 @@ class PedidoNotificacionService {
     if (!folios || folios.length === 0) return;
 
     try {
-      const vendedorActual = await this.obtenerVendedorActual();
-      if (vendedorActual === null) {
-        console.warn("[PedidoNotificacionService] Notificaciones omitidas: no se pudo determinar el vendedor actual");
-        return;
-      }
       await this.inicializar();
       const pedidosService = PedidosService.getInstance();
       if (this.realm) {
@@ -451,12 +419,6 @@ class PedidoNotificacionService {
       for (const folio of folios) {
         const pedido = pedidosService.getPedidoByFolio(folio);
         if (!pedido) continue;
-        if (!this.perteneceAlVendedor(pedido, vendedorActual)) {
-          console.log(
-            `[PedidoNotificacionService] Folio ${folio} pertenece al vendedor ${this.obtenerVendedorPedido(pedido)}, no al vendedor ${vendedorActual}; se omite`,
-          );
-          continue;
-        }
 
         // Restaurar la visita fuera de agenda para cualquier pedido abierto:
         // tras borrar datos de la app, el full sync regresa los renglones del
@@ -509,14 +471,6 @@ class PedidoNotificacionService {
     if (Number(pedido.estatus) !== ESTATUS_PEDIDO.CONFIRMADO) {
       console.log(
         `[PedidoNotificacionService] Folio ${pedido.folio} tiene estatus ${pedido.estatus}, no se mostrará notificación`,
-      );
-      return false;
-    }
-
-    const vendedorActual = await this.obtenerVendedorActual();
-    if (!this.perteneceAlVendedor(pedido, vendedorActual)) {
-      console.log(
-        `[PedidoNotificacionService] Folio ${pedido.folio} pertenece al vendedor ${this.obtenerVendedorPedido(pedido)}, no al vendedor ${vendedorActual}; no se notificará`,
       );
       return false;
     }
@@ -656,15 +610,6 @@ class PedidoNotificacionService {
 
       if (!pedido) {
         console.warn(`[PedidoNotificacionService] Pedido ${folio} no disponible en Realm`);
-        return false;
-      }
-
-      const vendedorActual = Number(user.id ?? user.idUsuario ?? 0);
-      if (!this.perteneceAlVendedor(pedido, vendedorActual)) {
-        console.warn(
-          `[PedidoNotificacionService] Navegación omitida: folio ${folio} pertenece al vendedor ${this.obtenerVendedorPedido(pedido)}, no al vendedor ${vendedorActual}`,
-        );
-        await AsyncStorage.removeItem(PENDING_NAVIGATION_KEY);
         return false;
       }
 
